@@ -30,16 +30,21 @@ fn format_engram(e: &Engram) -> String {
 }
 
 // =============================================================================
-// engram_create - Create a new memory
+// engram_create - Create new memories (batch)
 // =============================================================================
 
 pub struct EngramCreateTool;
 
-#[derive(Deserialize)]
-struct EngramCreateArgs {
+#[derive(Deserialize, Clone)]
+struct MemoryInput {
     content: String,
     #[serde(default)]
     tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct EngramCreateArgs {
+    memories: Vec<MemoryInput>,
 }
 
 impl McpTool<Context> for EngramCreateTool {
@@ -48,24 +53,28 @@ impl McpTool<Context> for EngramCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a new memory. Memories start with full energy and decay over time without use."
+        "Create new memories. Accepts an array of memories to create in one call. \
+         Memories start with full energy and decay over time without use."
     }
 
     fn schema(&self) -> JsonValue {
         json!({
             "type": "object",
             "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The memory content."
-                },
-                "tags": {
+                "memories": {
                     "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional tags for categorization."
+                    "description": "Array of memories to create. Each item has 'content' and optional 'tags'.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string" },
+                            "tags": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["content"]
+                    }
                 }
             },
-            "required": ["content"]
+            "required": ["memories"]
         })
     }
 
@@ -79,29 +88,37 @@ impl McpTool<Context> for EngramCreateTool {
             .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
+        let mut output = String::new();
+        let mut created_count = 0;
 
-        let id = if args.tags.is_empty() {
-            brain.create(&args.content)
-        } else {
-            brain.create_with_tags(&args.content, args.tags.clone())
-        }.map_err(|e| McpError::Other(e.to_string()))?;
+        for memory in &args.memories {
+            let id = if memory.tags.is_empty() {
+                brain.create(&memory.content)
+            } else {
+                brain.create_with_tags(&memory.content, memory.tags.clone())
+            }.map_err(|e| McpError::Other(e.to_string()))?;
 
-        Ok(text_response(format!(
-            "Memory created.\nID: {}\nContent: {}\nTags: {:?}",
-            id, args.content, args.tags
-        )))
+            created_count += 1;
+            output.push_str(&format!(
+                "ID: {}\nContent: {}\nTags: {:?}\n\n",
+                id, memory.content, memory.tags
+            ));
+        }
+
+        let header = format!("{} memories created.\n\n", created_count);
+        Ok(text_response(format!("{}{}", header, output.trim())))
     }
 }
 
 // =============================================================================
-// engram_recall - Actively recall a memory (stimulates it)
+// engram_recall - Actively recall memories (batch)
 // =============================================================================
 
 pub struct EngramRecallTool;
 
 #[derive(Deserialize)]
 struct EngramRecallArgs {
-    id: String,
+    ids: Vec<String>,
     #[serde(default)]
     strength: Option<f64>,
 }
@@ -112,25 +129,27 @@ impl McpTool<Context> for EngramRecallTool {
     }
 
     fn description(&self) -> &str {
-        "Actively recall a memory. This stimulates the memory (increases energy), \
-         triggers Hebbian learning with other recent recalls, and can resurrect \
-         archived memories. Use this when referencing a memory in conversation."
+        "Actively recall memories. Accepts an array of IDs to recall in one call. \
+         Stimulates memories (increases energy), triggers Hebbian learning between \
+         all recalled memories, and can resurrect archived memories. Memories \
+         recalled together form associations automatically."
     }
 
     fn schema(&self) -> JsonValue {
         json!({
             "type": "object",
             "properties": {
-                "id": {
-                    "type": "string",
-                    "description": "The UUID of the memory to recall."
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Array of UUIDs to recall. All memories will be linked via Hebbian learning."
                 },
                 "strength": {
                     "type": "number",
                     "description": "Stimulation strength (0.0-1.0). Default uses config value."
                 }
             },
-            "required": ["id"]
+            "required": ["ids"]
         })
     }
 
@@ -143,37 +162,49 @@ impl McpTool<Context> for EngramRecallTool {
         let args: EngramRecallArgs = serde_json::from_value(args)
             .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
 
-        let id: EngramId = args.id.parse()
-            .map_err(|e| McpError::InvalidArguments(format!("Invalid UUID: {}", e)))?;
-
         let mut brain = context.brain.lock().unwrap();
+        let mut output = String::new();
+        let mut recalled_count = 0;
+        let mut not_found_count = 0;
+        let mut total_affected = 0;
 
-        let result = if let Some(strength) = args.strength {
-            brain.recall_with_strength(id, strength)
-        } else {
-            brain.recall(id)
-        }.map_err(|e| McpError::Other(e.to_string()))?;
+        for id_str in &args.ids {
+            let id: EngramId = id_str.parse()
+                .map_err(|e| McpError::InvalidArguments(format!("Invalid UUID '{}': {}", id_str, e)))?;
 
-        if !result.found() {
-            return Ok(text_response(format!("Memory {} not found.", id)));
+            let result = if let Some(s) = args.strength {
+                brain.recall_with_strength(id, s)
+            } else {
+                brain.recall(id)
+            }.map_err(|e| McpError::Other(e.to_string()))?;
+
+            if !result.found() {
+                not_found_count += 1;
+                output.push_str(&format!("Memory {} not found.\n\n", id));
+                continue;
+            }
+
+            recalled_count += 1;
+            total_affected += result.affected_count();
+
+            let engram = result.engram.as_ref().unwrap();
+            output.push_str(&format_engram(engram));
+
+            if result.resurrected {
+                output.push_str(&format!(
+                    "\n🔄 RESURRECTED from {:?}!",
+                    result.previous_state.unwrap()
+                ));
+            }
+            output.push_str("\n\n");
         }
 
-        let engram = result.engram.as_ref().unwrap();
-        let mut output = format_engram(engram);
+        let header = format!(
+            "Recalled {} memories ({} not found). Affected {} total via Hebbian learning.\n\n",
+            recalled_count, not_found_count, total_affected
+        );
 
-        if result.resurrected {
-            output.push_str(&format!(
-                "\n\n🔄 RESURRECTED from {:?}!",
-                result.previous_state.unwrap()
-            ));
-        }
-
-        output.push_str(&format!(
-            "\n\nAffected {} memories (propagation + Hebbian learning)",
-            result.affected_count()
-        ));
-
-        Ok(text_response(output))
+        Ok(text_response(format!("{}{}", header, output.trim())))
     }
 }
 
@@ -345,6 +376,81 @@ impl McpTool<Context> for EngramGetTool {
             Some(engram) => Ok(text_response(format_engram(engram))),
             None => Ok(text_response(format!("Memory {} not found.", id))),
         }
+    }
+}
+
+// =============================================================================
+// engram_delete - Delete memories permanently
+// =============================================================================
+
+pub struct EngramDeleteTool;
+
+#[derive(Deserialize)]
+struct EngramDeleteArgs {
+    ids: Vec<String>,
+}
+
+impl McpTool<Context> for EngramDeleteTool {
+    fn name(&self) -> &str {
+        "engram_delete"
+    }
+
+    fn description(&self) -> &str {
+        "Delete memories permanently. Accepts an array of IDs to delete. \
+         Also removes all associations from/to deleted memories. Use for \
+         housekeeping: removing duplicates, correcting mistakes, cleaning up."
+    }
+
+    fn schema(&self) -> JsonValue {
+        json!({
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Array of UUIDs to delete permanently."
+                }
+            },
+            "required": ["ids"]
+        })
+    }
+
+    fn execute(
+        &self,
+        args: JsonValue,
+        context: &mut Context,
+        _env: &McpToolEnvironment,
+    ) -> Result<CallToolResponse, McpError> {
+        let args: EngramDeleteArgs = serde_json::from_value(args)
+            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+
+        let mut brain = context.brain.lock().unwrap();
+        let mut output = String::new();
+        let mut deleted_count = 0;
+        let mut not_found_count = 0;
+
+        for id_str in &args.ids {
+            let id: EngramId = id_str.parse()
+                .map_err(|e| McpError::InvalidArguments(format!("Invalid UUID '{}': {}", id_str, e)))?;
+
+            let existed = brain.delete(id)
+                .map_err(|e| McpError::Other(e.to_string()))?;
+
+            if existed {
+                deleted_count += 1;
+                output.push_str(&format!("Deleted: {}\n", id));
+            } else {
+                not_found_count += 1;
+                output.push_str(&format!("Not found: {}\n", id));
+            }
+        }
+
+        let header = format!(
+            "Deleted {} memories ({} not found).\n\n",
+            deleted_count, not_found_count
+        );
+
+        Ok(text_response(format!("{}{}", header, output.trim())))
     }
 }
 

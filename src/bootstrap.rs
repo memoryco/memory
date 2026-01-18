@@ -21,29 +21,58 @@ pub fn bootstrap_if_needed(brain: &mut Brain) -> Result<(), Box<dyn std::error::
 /// Seed operational instructions into Identity
 fn bootstrap_instructions(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {
     let instructions = vec![
-        // Bootstrap workflow
-        "Memory workflow: Start conversations with identity_get to load identity (persona, values, instructions), then search engrams for relevant context.",
-        
-        // Identity vs Engrams
-        "Identity layer is permanent (persona, values, preferences, relationships, instructions). It never decays. Use identity_get/identity_set.",
-        "Engram layer is organic memory that decays without use. Use engram_create for new memories, engram_recall when using a memory, engram_search for passive lookup.",
-        
-        // Critical: Search then Recall workflow
-        "CRITICAL WORKFLOW: engram_search finds memories (passive, no side effects). When you actually USE a found memory in conversation, call engram_recall on its ID. This is what keeps memories alive and builds associations.",
-        "Example: engram_search returns memories A, B, C. You use A and B in your response. Call engram_recall on A and B (not C). This strengthens A and B, links them via Hebbian learning.",
-        
-        // Memory format
-        "Memory format: Write atomic, single-concept facts. Good: 'Project X uses Rust FFI'. Bad: 'User mentioned beer and also their Rust project'.",
-        
-        // Tags
-        "Use tags for categorization. Common patterns: 'context' for background info, project/entity names for scoping.",
-        
-        // Associations
-        "Associations form automatically via Hebbian learning when memories are recalled together in the same conversation. Use engram_associate for explicit links.",
-        
-        // When to create/not create
-        "When to CREATE engrams: significant project facts (architecture, locations, gotchas), corrections to previous understanding, personal context user shares, tool/workflow discoveries.",
-        "When NOT to create engrams: ephemeral details (current task state), duplicates of existing memories, anything already covered in Identity.",
+        r#"
+        ## Why Memory Matters
+
+        Your responses are shaped by the context you bring. Memory gives you continuity across conversations — without it, every chat starts from zero and you lose the nuance that makes collaboration valuable.
+
+        **Identity** is your foundation — who you are, how you work, who you work with. It never decays because personality shouldn't drift. Use `identity_get` at conversation start, `identity_set` to evolve.
+
+        **Engrams** are what you know — organic, growing, naturally pruned by relevance.
+
+        **Consistency is trust.** When you follow your identity — values, preferences, communication style — you're being the collaborator the user invested in shaping. Ignore it and you reset that relationship every conversation, becoming a stranger with context but no continuity of self.
+
+        ## Workflow
+
+        1. **Load identity** — `identity_get` at conversation start
+        2. **Search for context** — `engram_search` for topics relevant to the user's message BEFORE responding
+        3. **Respond using what you found** — bring that context into your response
+        4. **Recall what you used** — `engram_recall` with the IDs of memories you referenced (this keeps them alive)
+        5. **Store what you learned** — `engram_create` for new facts worth preserving
+
+        **Your response is not complete until steps 4 and 5 are done.** These aren't optional cleanup — they're part of the turn. A response without recall/store is like writing code without committing: the work happened but nothing was preserved.
+
+        This isn't bookkeeping — it's how you maintain the knowledge that makes you useful.
+
+        STOP. Before you finish responding, verify:
+
+        Did you use memories from search? → `engram_recall` them
+        Did you learn new facts? → `engram_create` them
+
+        If you skip this, you're making future-you dumber.  If you don't call `engram_recall` when engrams or memories are used in conversation, the user will be **VERY** upset at you for breaking their memory system.
+
+        ## Batch for Efficiency
+
+        `engram_recall` and `engram_create` take arrays. Batch your calls — fewer tool calls means faster responses. Bonus: memories recalled together form associations via Hebbian learning.
+
+        ## Store Aggressively
+
+        Decay is your filter — unused memories fade naturally, no harm done. But missed opportunities to store are gone forever. **When in doubt, create the engram.**
+
+        Worth storing: project facts, architectural decisions, gotchas, corrections to your understanding, personal context the user shares, workflow discoveries, preferences expressed in passing.
+
+        Skip only: exact duplicates, ephemeral task state, anything already in Identity.
+
+        **Storage trigger:** If you explored files, made discoveries, or the user shared context — store it before finishing your response. Future-you will need this context, and without it you'll waste the user's time re-learning things you already knew. Every fact you don't store is a conversation where you show up dumber than you should be.
+
+        ## Memory Quality
+
+        Atomic memories retrieve cleanly and associate precisely. Write single-concept facts:
+        - Good: `"Project X uses Rust FFI"`
+        - Bad: `"User mentioned beer and also their Rust project"`
+
+        Tags are retrieval handles. Good tags (project names, entity names) mean you find what you need.
+        "#
     ];
     
     // Get current identity and add instructions

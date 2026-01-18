@@ -63,6 +63,7 @@ fn main() {
     server.add_tool(tools::EngramRecallTool).expect("Failed to add engram_recall tool");
     server.add_tool(tools::EngramSearchTool).expect("Failed to add engram_search tool");
     server.add_tool(tools::EngramGetTool).expect("Failed to add engram_get tool");
+    server.add_tool(tools::EngramDeleteTool).expect("Failed to add engram_delete tool");
     server.add_tool(tools::EngramAssociateTool).expect("Failed to add engram_associate tool");
     server.add_tool(tools::EngramStatsTool).expect("Failed to add engram_stats tool");
 

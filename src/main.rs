@@ -1,0 +1,82 @@
+//! Memory MCP Server - Cognitive AI memory powered by engram
+//!
+//! This server provides MCP tools for a neural memory system with:
+//! - Organic decay (memories fade without use)
+//! - Associative learning (Hebbian "neurons that fire together wire together")
+//! - Identity layer (persona, values, preferences - never decays)
+//! - Substrate layer (episodic/semantic memories with energy states)
+
+mod tools;
+mod bootstrap;
+
+use engram::{Brain, SqliteStorage};
+use sovran_mcp::server::McpServer;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+/// Server context containing the Brain.
+/// Wrapped in Mutex because Brain is not Sync.
+pub struct Context {
+    pub brain: Mutex<Brain>,
+}
+
+fn get_default_db_path() -> PathBuf {
+    // Use platform-appropriate data directory
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."));
+    
+    let memory_dir = data_dir.join("memory");
+    std::fs::create_dir_all(&memory_dir).ok();
+    
+    memory_dir.join("brain.db")
+}
+
+fn main() {
+    // Get database path from env or use default
+    let db_path = std::env::var("MEMORY_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| get_default_db_path());
+
+    eprintln!("Memory database: {}", db_path.display());
+
+    // Open or create the brain
+    let storage = SqliteStorage::new(&db_path)
+        .expect("Failed to open database");
+    
+    let mut brain = Brain::open(storage)
+        .expect("Failed to open brain");
+
+    // Bootstrap identity and memories if this is a fresh database
+    if let Err(e) = bootstrap::bootstrap_if_needed(&mut brain) {
+        eprintln!("Warning: Bootstrap failed: {}", e);
+    }
+
+    let context = Context {
+        brain: Mutex::new(brain),
+    };
+
+    // Create MCP server
+    let mut server = McpServer::new("memory", env!("CARGO_PKG_VERSION"));
+
+    // Register engram tools
+    server.add_tool(tools::EngramCreateTool).expect("Failed to add engram_create tool");
+    server.add_tool(tools::EngramRecallTool).expect("Failed to add engram_recall tool");
+    server.add_tool(tools::EngramSearchTool).expect("Failed to add engram_search tool");
+    server.add_tool(tools::EngramGetTool).expect("Failed to add engram_get tool");
+    server.add_tool(tools::EngramAssociateTool).expect("Failed to add engram_associate tool");
+    server.add_tool(tools::EngramStatsTool).expect("Failed to add engram_stats tool");
+
+    // Register identity tools
+    server.add_tool(tools::IdentityGetTool).expect("Failed to add identity_get tool");
+    server.add_tool(tools::IdentitySetTool).expect("Failed to add identity_set tool");
+    server.add_tool(tools::IdentitySearchTool).expect("Failed to add identity_search tool");
+
+    // Register config tools
+    server.add_tool(tools::ConfigGetTool).expect("Failed to add config_get tool");
+    server.add_tool(tools::ConfigSetTool).expect("Failed to add config_set tool");
+
+    eprintln!("Memory server starting...");
+
+    // Start the server (blocks forever)
+    server.start(context);
+}

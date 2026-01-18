@@ -1,0 +1,14 @@
+[package]
+name = "memory"
+version = "0.1.0"
+edition = "2024"
+description = "MCP server for cognitive AI memory (engram)"
+license = "MIT"
+
+[dependencies]
+engram = { path = "../../rust/engram" }
+sovran-mcp = { path = "../../rust/sovran-mcp", features = ["server"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["serde"] }
+dirs = "6.0"

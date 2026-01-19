@@ -1,0 +1,125 @@
+//! identity_set - Set the identity from JSON
+
+use engram::Identity;
+use serde::Deserialize;
+use serde_json::{json, Value as JsonValue};
+use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
+use sovran_mcp::types::{CallToolResponse, McpError};
+
+use crate::Context;
+use crate::tools::text_response;
+
+pub struct IdentitySetTool;
+
+#[derive(Deserialize)]
+struct Args {
+    identity: Identity,
+}
+
+impl McpTool<Context> for IdentitySetTool {
+    fn name(&self) -> &str {
+        "identity_set"
+    }
+
+    fn description(&self) -> &str {
+        "Set the identity from a JSON object. This replaces the entire identity."
+    }
+
+    fn schema(&self) -> JsonValue {
+        json!({
+            "type": "object",
+            "properties": {
+                "identity": {
+                    "type": "object",
+                    "description": "The identity object with persona, values, preferences, etc.",
+                    "properties": {
+                        "persona": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "description": { "type": "string" },
+                                "traits": { "type": "array", "items": { "type": "string" } }
+                            }
+                        },
+                        "values": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "principle": { "type": "string" },
+                                    "why": { "type": "string" },
+                                    "category": { "type": "string" }
+                                }
+                            }
+                        },
+                        "preferences": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "prefer": { "type": "string" },
+                                    "over": { "type": "string" },
+                                    "category": { "type": "string" }
+                                }
+                            }
+                        },
+                        "relationships": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "entity": { "type": "string" },
+                                    "relation": { "type": "string" },
+                                    "context": { "type": "string" }
+                                }
+                            }
+                        },
+                        "antipatterns": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "avoid": { "type": "string" },
+                                    "why": { "type": "string" },
+                                    "instead": { "type": "string" }
+                                }
+                            }
+                        },
+                        "communication": {
+                            "type": "object",
+                            "properties": {
+                                "tone": { "type": "array", "items": { "type": "string" } },
+                                "directives": { "type": "array", "items": { "type": "string" } }
+                            }
+                        },
+                        "expertise": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    }
+                }
+            },
+            "required": ["identity"]
+        })
+    }
+
+    fn execute(
+        &self,
+        args: JsonValue,
+        context: &mut Context,
+        _env: &McpToolEnvironment,
+    ) -> Result<CallToolResponse, McpError> {
+        let args: Args = serde_json::from_value(args)
+            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+
+        let mut brain = context.brain.lock().unwrap();
+
+        brain.set_identity(args.identity.clone())
+            .map_err(|e| McpError::Other(e.to_string()))?;
+
+        Ok(text_response(format!(
+            "Identity set.\n\n{}",
+            args.identity.render()
+        )))
+    }
+}

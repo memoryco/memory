@@ -9,7 +9,7 @@
 mod tools;
 mod bootstrap;
 
-use engram::{Brain, SqliteStorage};
+use engram::{Brain, SqliteStorage, Storage};
 use sovran_mcp::server::McpServer;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -40,8 +40,20 @@ fn main() {
     eprintln!("Memory database: {}", db_path.display());
 
     // Open or create the brain
-    let storage = SqliteStorage::new(&db_path)
+    let mut storage = SqliteStorage::new(&db_path)
         .expect("Failed to open database");
+    
+    // Initialize schema (creates FTS table if needed)
+    storage.initialize().expect("Failed to initialize database");
+    
+    // Check if FTS index needs rebuilding (for databases migrating to FTS)
+    if storage.fts_needs_rebuild().unwrap_or(false) {
+        eprintln!("Rebuilding FTS search index...");
+        match storage.rebuild_fts_index() {
+            Ok(count) => eprintln!("Rebuilt FTS index with {} memories", count),
+            Err(e) => eprintln!("Warning: Failed to rebuild FTS index: {}", e),
+        }
+    }
     
     let mut brain = Brain::open(storage)
         .expect("Failed to open brain");

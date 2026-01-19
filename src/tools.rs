@@ -199,12 +199,15 @@ impl McpTool<Context> for EngramRecallTool {
             output.push_str("\n\n");
         }
 
+        // Contextual reminder at TOP - prime the behavior before showing content
+        let reminder = "💾 **REQUIRED:** If you explored files or learned ANY new facts, call engram_create BEFORE responding.\n---\n\n";
+        
         let header = format!(
             "Recalled {} memories ({} not found). Affected {} total via Hebbian learning.\n\n",
             recalled_count, not_found_count, total_affected
         );
 
-        Ok(text_response(format!("{}{}", header, output.trim())))
+        Ok(text_response(format!("{}{}{}", reminder, header, output.trim())))
     }
 }
 
@@ -314,7 +317,13 @@ impl McpTool<Context> for EngramSearchTool {
             return Ok(text_response("No memories found.".to_string()));
         }
 
-        let mut output = format!("Found {} memories:\n\n", results.len());
+        // Contextual reminder at TOP - prime the behavior before showing content
+        let mut output = String::from(
+            "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
+             💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
+             ---\n\n"
+        );
+        output.push_str(&format!("Found {} memories:\n\n", results.len()));
         for engram in results {
             output.push_str(&format_engram(engram));
             output.push_str("\n\n");
@@ -398,7 +407,8 @@ impl McpTool<Context> for EngramDeleteTool {
     fn description(&self) -> &str {
         "Delete memories permanently. Accepts an array of IDs to delete. \
          Also removes all associations from/to deleted memories. Use for \
-         housekeeping: removing duplicates, correcting mistakes, cleaning up."
+         housekeeping: removing duplicates, correcting mistakes, cleaning up. \
+         IMPORTANT: Never delete memories unless the user explicitly asks you to."
     }
 
     fn schema(&self) -> JsonValue {
@@ -975,5 +985,320 @@ impl McpTool<Context> for ConfigSetTool {
                 args.key
             )))
         }
+    }
+}
+
+// =============================================================================
+// engram_associations - Inspect associations for a single memory
+// =============================================================================
+
+pub struct EngramAssociationsTool;
+
+#[derive(Deserialize)]
+struct EngramAssociationsArgs {
+    id: String,
+    #[serde(default)]
+    direction: Option<String>,
+}
+
+impl McpTool<Context> for EngramAssociationsTool {
+    fn name(&self) -> &str {
+        "engram_associations"
+    }
+
+    fn description(&self) -> &str {
+        "Inspect associations for a specific memory. Shows detailed info including \
+         weights, co-activation counts (Hebbian learning indicator), and timestamps. \
+         Use direction to see outbound, inbound, or both."
+    }
+
+    fn schema(&self) -> JsonValue {
+        json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "The UUID of the memory to inspect."
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["outbound", "inbound", "both"],
+                    "description": "Which associations to show. Default: outbound"
+                }
+            },
+            "required": ["id"]
+        })
+    }
+
+    fn execute(
+        &self,
+        args: JsonValue,
+        context: &mut Context,
+        _env: &McpToolEnvironment,
+    ) -> Result<CallToolResponse, McpError> {
+        let args: EngramAssociationsArgs = serde_json::from_value(args)
+            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+
+        let id: EngramId = args.id.parse()
+            .map_err(|e| McpError::InvalidArguments(format!("Invalid UUID: {}", e)))?;
+
+        let direction = args.direction.as_deref().unwrap_or("outbound");
+        let brain = context.brain.lock().unwrap();
+
+        // Get the memory itself for context
+        let memory_info = match brain.get(&id) {
+            Some(e) => format!("Memory: {} (energy: {:.2})\n", truncate_content(&e.content, 60), e.energy),
+            None => return Ok(text_response(format!("Memory {} not found.", id))),
+        };
+
+        let mut output = memory_info;
+        output.push_str(&format!("Direction: {}\n\n", direction));
+
+        // Outbound associations
+        if direction == "outbound" || direction == "both" {
+            output.push_str("=== OUTBOUND (this memory → others) ===\n");
+            match brain.associations_from(&id) {
+                Some(assocs) if !assocs.is_empty() => {
+                    let mut sorted: Vec<_> = assocs.iter().collect();
+                    sorted.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+                    
+                    for assoc in sorted {
+                        let target_preview = brain.get(&assoc.to)
+                            .map(|e| truncate_content(&e.content, 40))
+                            .unwrap_or_else(|| "[deleted]".to_string());
+                        
+                        output.push_str(&format!(
+                            "  → {} (weight: {:.3}, co-activations: {})\n    {}\n",
+                            assoc.to,
+                            assoc.weight,
+                            assoc.co_activation_count,
+                            target_preview
+                        ));
+                    }
+                }
+                _ => output.push_str("  (none)\n"),
+            }
+            output.push('\n');
+        }
+
+        // Inbound associations
+        if direction == "inbound" || direction == "both" {
+            output.push_str("=== INBOUND (others → this memory) ===\n");
+            match brain.associations_to(&id) {
+                Some(source_ids) if !source_ids.is_empty() => {
+                    for source_id in source_ids {
+                        // Get the association details from the source
+                        let assoc_info = brain.associations_from(source_id)
+                            .and_then(|assocs| assocs.iter().find(|a| a.to == id));
+                        
+                        let source_preview = brain.get(source_id)
+                            .map(|e| truncate_content(&e.content, 40))
+                            .unwrap_or_else(|| "[deleted]".to_string());
+                        
+                        if let Some(assoc) = assoc_info {
+                            output.push_str(&format!(
+                                "  ← {} (weight: {:.3}, co-activations: {})\n    {}\n",
+                                source_id,
+                                assoc.weight,
+                                assoc.co_activation_count,
+                                source_preview
+                            ));
+                        } else {
+                            output.push_str(&format!(
+                                "  ← {}\n    {}\n",
+                                source_id,
+                                source_preview
+                            ));
+                        }
+                    }
+                }
+                _ => output.push_str("  (none)\n"),
+            }
+        }
+
+        Ok(text_response(output))
+    }
+}
+
+// =============================================================================
+// engram_graph - Get full association graph for visualization
+// =============================================================================
+
+pub struct EngramGraphTool;
+
+#[derive(Deserialize)]
+struct EngramGraphArgs {
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    min_weight: Option<f64>,
+}
+
+impl McpTool<Context> for EngramGraphTool {
+    fn name(&self) -> &str {
+        "engram_graph"
+    }
+
+    fn description(&self) -> &str {
+        "Get the full association graph for visualization. Returns nodes (memories) \
+         and edges (associations) with all metadata. Use min_weight to filter weak \
+         associations. Results are best rendered visually as an SVG graph showing \
+         nodes as circles and edges as weighted connections - strongly recommended \
+         to generate an SVG artifact from the JSON output."
+    }
+
+    fn schema(&self) -> JsonValue {
+        json!({
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "enum": ["json", "summary"],
+                    "description": "Output format. 'json' for raw data, 'summary' for human-readable. Default: summary"
+                },
+                "min_weight": {
+                    "type": "number",
+                    "description": "Minimum association weight to include (0.0-1.0). Default: 0.0 (all)"
+                }
+            }
+        })
+    }
+
+    fn execute(
+        &self,
+        args: JsonValue,
+        context: &mut Context,
+        _env: &McpToolEnvironment,
+    ) -> Result<CallToolResponse, McpError> {
+        let args: EngramGraphArgs = serde_json::from_value(args)
+            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+
+        let format = args.format.as_deref().unwrap_or("summary");
+        let min_weight = args.min_weight.unwrap_or(0.0);
+        let brain = context.brain.lock().unwrap();
+
+        // Collect all associations
+        let all_assocs = brain.all_associations();
+        let filtered: Vec<_> = all_assocs.iter()
+            .filter(|a| a.weight >= min_weight)
+            .collect();
+
+        // Collect all node IDs that are part of associations
+        let mut node_ids: std::collections::HashSet<EngramId> = std::collections::HashSet::new();
+        for assoc in &filtered {
+            node_ids.insert(assoc.from);
+            node_ids.insert(assoc.to);
+        }
+
+        if format == "json" {
+            // Build JSON structure for visualization
+            let nodes: Vec<JsonValue> = node_ids.iter()
+                .filter_map(|id| brain.get(id))
+                .map(|e| json!({
+                    "id": e.id.to_string(),
+                    "label": truncate_content(&e.content, 30),
+                    "energy": e.energy,
+                    "state": e.state.emoji(),
+                    "tags": e.tags,
+                    "access_count": e.access_count
+                }))
+                .collect();
+
+            let edges: Vec<JsonValue> = filtered.iter()
+                .map(|a| json!({
+                    "from": a.from.to_string(),
+                    "to": a.to.to_string(),
+                    "weight": a.weight,
+                    "co_activations": a.co_activation_count,
+                    "created_at": a.created_at,
+                    "last_activated": a.last_activated
+                }))
+                .collect();
+
+            let graph = json!({
+                "nodes": nodes,
+                "edges": edges,
+                "meta": {
+                    "total_nodes": nodes.len(),
+                    "total_edges": edges.len(),
+                    "min_weight_filter": min_weight
+                }
+            });
+
+            Ok(text_response(serde_json::to_string_pretty(&graph).unwrap()))
+        } else {
+            // Human-readable summary
+            let mut output = String::new();
+            output.push_str(&format!(
+                "=== MEMORY GRAPH ===\nNodes: {} | Edges: {} | Min weight: {:.2}\n\n",
+                node_ids.len(),
+                filtered.len(),
+                min_weight
+            ));
+
+            // Group edges by weight buckets
+            let strong: Vec<_> = filtered.iter().filter(|a| a.weight >= 0.7).collect();
+            let medium: Vec<_> = filtered.iter().filter(|a| a.weight >= 0.4 && a.weight < 0.7).collect();
+            let weak: Vec<_> = filtered.iter().filter(|a| a.weight < 0.4).collect();
+
+            output.push_str(&format!("Strong connections (≥0.7): {}\n", strong.len()));
+            for a in strong.iter().take(10) {
+                let from_label = brain.get(&a.from).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
+                let to_label = brain.get(&a.to).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
+                output.push_str(&format!("  {} → {} (w:{:.2}, co:{})", from_label, to_label, a.weight, a.co_activation_count));
+                output.push('\n');
+            }
+            if strong.len() > 10 {
+                output.push_str(&format!("  ... and {} more\n", strong.len() - 10));
+            }
+
+            output.push_str(&format!("\nMedium connections (0.4-0.7): {}\n", medium.len()));
+            for a in medium.iter().take(10) {
+                let from_label = brain.get(&a.from).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
+                let to_label = brain.get(&a.to).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
+                output.push_str(&format!("  {} → {} (w:{:.2}, co:{})", from_label, to_label, a.weight, a.co_activation_count));
+                output.push('\n');
+            }
+            if medium.len() > 10 {
+                output.push_str(&format!("  ... and {} more\n", medium.len() - 10));
+            }
+
+            output.push_str(&format!("\nWeak connections (<0.4): {}\n", weak.len()));
+            for a in weak.iter().take(5) {
+                let from_label = brain.get(&a.from).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
+                let to_label = brain.get(&a.to).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
+                output.push_str(&format!("  {} → {} (w:{:.2}, co:{})", from_label, to_label, a.weight, a.co_activation_count));
+                output.push('\n');
+            }
+            if weak.len() > 5 {
+                output.push_str(&format!("  ... and {} more\n", weak.len() - 5));
+            }
+
+            // Hebbian learning indicator
+            let hebbian_active: Vec<_> = filtered.iter().filter(|a| a.co_activation_count > 0).collect();
+            output.push_str(&format!(
+                "\n=== HEBBIAN LEARNING ===\nAssociations with co-activations: {}/{}\n",
+                hebbian_active.len(),
+                filtered.len()
+            ));
+            
+            if !hebbian_active.is_empty() {
+                let max_co = hebbian_active.iter().map(|a| a.co_activation_count).max().unwrap_or(0);
+                let total_co: u64 = hebbian_active.iter().map(|a| a.co_activation_count).sum();
+                output.push_str(&format!("Max co-activations: {}\n", max_co));
+                output.push_str(&format!("Total co-activations: {}\n", total_co));
+            }
+
+            Ok(text_response(output))
+        }
+    }
+}
+
+/// Helper to truncate content for display
+fn truncate_content(content: &str, max_len: usize) -> String {
+    if content.len() <= max_len {
+        content.to_string()
+    } else {
+        format!("{}...", &content[..max_len.saturating_sub(3)])
     }
 }

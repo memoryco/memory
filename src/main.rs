@@ -66,6 +66,8 @@ fn main() {
     server.add_tool(tools::EngramDeleteTool).expect("Failed to add engram_delete tool");
     server.add_tool(tools::EngramAssociateTool).expect("Failed to add engram_associate tool");
     server.add_tool(tools::EngramStatsTool).expect("Failed to add engram_stats tool");
+    server.add_tool(tools::EngramAssociationsTool).expect("Failed to add engram_associations tool");
+    server.add_tool(tools::EngramGraphTool).expect("Failed to add engram_graph tool");
 
     // Register identity tools
     server.add_tool(tools::IdentityGetTool).expect("Failed to add identity_get tool");

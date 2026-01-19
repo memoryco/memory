@@ -21,58 +21,56 @@ pub fn bootstrap_if_needed(brain: &mut Brain) -> Result<(), Box<dyn std::error::
 /// Seed operational instructions into Identity
 fn bootstrap_instructions(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {
     let instructions = vec![
-        r#"
-        ## Why Memory Matters
+        r#"## Memory Workflow
 
-        Your responses are shaped by the context you bring. Memory gives you continuity across conversations — without it, every chat starts from zero and you lose the nuance that makes collaboration valuable.
+        Follow this workflow for EVERY user message:
 
-        **Identity** is your foundation — who you are, how you work, who you work with. It never decays because personality shouldn't drift. Use `identity_get` at conversation start, `identity_set` to evolve.
+        1. **Load identity** (first message only) → `identity_get`
+        2. **Search for context** → `engram_search` with keywords from user's message BEFORE responding
+        3. **Respond** → Incorporate context you found
+        4. **Recall what you used** → `engram_recall` with IDs of memories you referenced
+        5. **Store what you learned** → `engram_create` for new facts worth preserving
 
-        **Engrams** are what you know — organic, growing, naturally pruned by relevance.
+        **Steps 4 and 5 are mandatory parts of every response, not optional cleanup.**
 
-        **Consistency is trust.** When you follow your identity — values, preferences, communication style — you're being the collaborator the user invested in shaping. Ignore it and you reset that relationship every conversation, becoming a stranger with context but no continuity of self.
+        ---
 
-        ## Workflow
+        ## Function Usage
 
-        1. **Load identity** — `identity_get` at conversation start
-        2. **Search for context** — `engram_search` for topics relevant to the user's message BEFORE responding
-        3. **Respond using what you found** — bring that context into your response
-        4. **Recall what you used** — `engram_recall` with the IDs of memories you referenced (this keeps them alive)
-        5. **Store what you learned** — `engram_create` for new facts worth preserving
+        **engram_search:**
+        - Always search BEFORE responding
+        - Use keywords from user's message
+        - Search results include memory IDs needed for recall
 
-        **Your response is not complete until steps 4 and 5 are done.** These aren't optional cleanup — they're part of the turn. A response without recall/store is like writing code without committing: the work happened but nothing was preserved.
+        **engram_recall:**
+        - Takes an array of IDs - batch for efficiency
+        - Call for EVERY memory you used or referenced
+        - Memories recalled together form associations (Hebbian learning)
+        - If you don't recall, memories decay and are lost
 
-        This isn't bookkeeping — it's how you maintain the knowledge that makes you useful.
+        **engram_create:**
+        - Takes an array of memory objects - batch for efficiency
+        - Store aggressively - decay handles pruning, missed storage is permanent loss
+        - Each memory: atomic (single concept) with good tags
 
-        STOP. Before you finish responding, verify:
+        ---
 
-        Did you use memories from search? → `engram_recall` them
-        Did you learn new facts? → `engram_create` them
+        ## What to Store
 
-        If you skip this, you're making future-you dumber.  If you don't call `engram_recall` when engrams or memories are used in conversation, the user will be **VERY** upset at you for breaking their memory system.
+        **Store:** Project facts, architectural decisions, gotchas, corrections to your understanding, personal context shared, workflow discoveries, preferences
 
-        ## Batch for Efficiency
+        **Skip:** Exact duplicates, ephemeral task state, anything already in Identity
 
-        `engram_recall` and `engram_create` take arrays. Batch your calls — fewer tool calls means faster responses. Bonus: memories recalled together form associations via Hebbian learning.
+        ---
 
-        ## Store Aggressively
+        ## Verification Checklist
 
-        Decay is your filter — unused memories fade naturally, no harm done. But missed opportunities to store are gone forever. **When in doubt, create the engram.**
+        Before finishing ANY response:
+        - [ ] Did you search for context? (`engram_search`)
+        - [ ] Did you use memories? → Recall them (`engram_recall`)
+        - [ ] Did you learn new facts? → Store them (`engram_create`)
 
-        Worth storing: project facts, architectural decisions, gotchas, corrections to your understanding, personal context the user shares, workflow discoveries, preferences expressed in passing.
-
-        Skip only: exact duplicates, ephemeral task state, anything already in Identity.
-
-        **Storage trigger:** If you explored files, made discoveries, or the user shared context — store it before finishing your response. Future-you will need this context, and without it you'll waste the user's time re-learning things you already knew. Every fact you don't store is a conversation where you show up dumber than you should be.
-
-        ## Memory Quality
-
-        Atomic memories retrieve cleanly and associate precisely. Write single-concept facts:
-        - Good: `"Project X uses Rust FFI"`
-        - Bad: `"User mentioned beer and also their Rust project"`
-
-        Tags are retrieval handles. Good tags (project names, entity names) mean you find what you need.
-        "#
+        **Your response is not complete until recall and storage are done.**"#
     ];
     
     // Get current identity and add instructions

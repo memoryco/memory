@@ -2,8 +2,7 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -16,7 +15,7 @@ struct Args {
     value: f64,
 }
 
-impl McpTool<Context> for ConfigSetTool {
+impl Tool<Context> for ConfigSetTool {
     fn name(&self) -> &str {
         "config_set"
     }
@@ -54,15 +53,15 @@ impl McpTool<Context> for ConfigSetTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
 
         let updated = brain.configure(&args.key, args.value)
-            .map_err(|e| McpError::Other(e.to_string()))?;
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         if updated {
             Ok(text_response(format!(

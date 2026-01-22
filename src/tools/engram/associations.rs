@@ -3,8 +3,7 @@
 use engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::{text_response, truncate_content};
@@ -18,7 +17,7 @@ struct Args {
     direction: Option<String>,
 }
 
-impl McpTool<Context> for EngramAssociationsTool {
+impl Tool<Context> for EngramAssociationsTool {
     fn name(&self) -> &str {
         "engram_associations"
     }
@@ -51,13 +50,13 @@ impl McpTool<Context> for EngramAssociationsTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let id: EngramId = args.id.parse()
-            .map_err(|e| McpError::InvalidArguments(format!("Invalid UUID: {}", e)))?;
+            .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;
 
         let direction = args.direction.as_deref().unwrap_or("outbound");
         let brain = context.brain.lock().unwrap();

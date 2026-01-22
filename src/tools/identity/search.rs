@@ -2,8 +2,7 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -15,7 +14,7 @@ struct Args {
     query: String,
 }
 
-impl McpTool<Context> for IdentitySearchTool {
+impl Tool<Context> for IdentitySearchTool {
     fn name(&self) -> &str {
         "identity_search"
     }
@@ -41,10 +40,10 @@ impl McpTool<Context> for IdentitySearchTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let brain = context.brain.lock().unwrap();
         let results = brain.identity().search(&args.query);

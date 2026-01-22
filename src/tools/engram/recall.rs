@@ -3,8 +3,7 @@
 use engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::{text_response, format_engram};
@@ -18,7 +17,7 @@ struct Args {
     strength: Option<f64>,
 }
 
-impl McpTool<Context> for EngramRecallTool {
+impl Tool<Context> for EngramRecallTool {
     fn name(&self) -> &str {
         "engram_recall"
     }
@@ -52,10 +51,10 @@ impl McpTool<Context> for EngramRecallTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
         let mut output = String::new();
@@ -65,13 +64,13 @@ impl McpTool<Context> for EngramRecallTool {
 
         for id_str in &args.ids {
             let id: EngramId = id_str.parse()
-                .map_err(|e| McpError::InvalidArguments(format!("Invalid UUID '{}': {}", id_str, e)))?;
+                .map_err(|e| McpError::InvalidParams(format!("Invalid UUID '{}': {}", id_str, e)))?;
 
             let result = if let Some(s) = args.strength {
                 brain.recall_with_strength(id, s)
             } else {
                 brain.recall(id)
-            }.map_err(|e| McpError::Other(e.to_string()))?;
+            }.map_err(|e| McpError::ToolError(e.to_string()))?;
 
             if !result.found() {
                 not_found_count += 1;

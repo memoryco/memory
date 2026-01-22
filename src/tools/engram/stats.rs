@@ -1,15 +1,14 @@
 //! engram_stats - Get substrate statistics
 
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult};
 
 use crate::Context;
 use crate::tools::text_response;
 
 pub struct EngramStatsTool;
 
-impl McpTool<Context> for EngramStatsTool {
+impl Tool<Context> for EngramStatsTool {
     fn name(&self) -> &str {
         "engram_stats"
     }
@@ -29,8 +28,8 @@ impl McpTool<Context> for EngramStatsTool {
         &self,
         _args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let brain = context.brain.lock().unwrap();
         let stats = brain.stats();
 

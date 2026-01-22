@@ -10,7 +10,7 @@ pub mod identity;
 pub mod config;
 
 use ::engram::Engram;
-use sovran_mcp::types::{CallToolResponse, ToolResponseContent};
+use sml_mcps::CallToolResult;
 use std::path::PathBuf;
 
 // Re-export all tools for easy registration
@@ -52,12 +52,8 @@ pub fn get_graph_output_path() -> PathBuf {
 }
 
 /// Create a simple text response
-pub fn text_response(text: String) -> CallToolResponse {
-    CallToolResponse {
-        content: vec![ToolResponseContent::Text { text }],
-        is_error: None,
-        meta: None,
-    }
+pub fn text_response(text: String) -> CallToolResult {
+    CallToolResult::text(text)
 }
 
 /// Format an engram for display

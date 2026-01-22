@@ -3,8 +3,7 @@
 use engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -19,7 +18,7 @@ struct Args {
     weight: Option<f64>,
 }
 
-impl McpTool<Context> for EngramAssociateTool {
+impl Tool<Context> for EngramAssociateTool {
     fn name(&self) -> &str {
         "engram_associate"
     }
@@ -54,22 +53,22 @@ impl McpTool<Context> for EngramAssociateTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let from: EngramId = args.from.parse()
-            .map_err(|e| McpError::InvalidArguments(format!("Invalid 'from' UUID: {}", e)))?;
+            .map_err(|e| McpError::InvalidParams(format!("Invalid 'from' UUID: {}", e)))?;
         let to: EngramId = args.to.parse()
-            .map_err(|e| McpError::InvalidArguments(format!("Invalid 'to' UUID: {}", e)))?;
+            .map_err(|e| McpError::InvalidParams(format!("Invalid 'to' UUID: {}", e)))?;
 
         let weight = args.weight.unwrap_or(0.5);
 
         let mut brain = context.brain.lock().unwrap();
 
         brain.associate(from, to, weight)
-            .map_err(|e| McpError::Other(e.to_string()))?;
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         Ok(text_response(format!(
             "Association created: {} → {} (weight: {:.2})",

@@ -3,8 +3,7 @@
 use engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 use std::collections::HashSet;
 
 use crate::Context;
@@ -20,7 +19,7 @@ struct Args {
     min_weight: Option<f64>,
 }
 
-impl McpTool<Context> for EngramGraphTool {
+impl Tool<Context> for EngramGraphTool {
     fn name(&self) -> &str {
         "engram_graph"
     }
@@ -53,10 +52,10 @@ impl McpTool<Context> for EngramGraphTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let format = args.format.as_deref().unwrap_or("summary");
         let min_weight = args.min_weight.unwrap_or(0.0);
@@ -141,13 +140,13 @@ impl McpTool<Context> for EngramGraphTool {
 
             // Inject data into template
             let graph_json = serde_json::to_string(&graph)
-                .map_err(|e| McpError::Other(format!("Failed to serialize graph: {}", e)))?;
+                .map_err(|e| McpError::ToolError(format!("Failed to serialize graph: {}", e)))?;
             let html = GRAPH_TEMPLATE.replace("{{GRAPH_DATA}}", &graph_json);
 
             // Write to file
             let output_path = get_graph_output_path();
             std::fs::write(&output_path, &html)
-                .map_err(|e| McpError::Other(format!("Failed to write graph.html: {}", e)))?;
+                .map_err(|e| McpError::ToolError(format!("Failed to write graph.html: {}", e)))?;
 
             Ok(text_response(format!(
                 "Graph visualization generated!\n\n\

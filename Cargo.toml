@@ -7,7 +7,7 @@ license = "MIT"
 
 [dependencies]
 engram = { path = "../../rust/engram" }
-sovran-mcp = { path = "../../rust/sovran-mcp", features = ["server"] }
+sml_mcps = { path = "../sml_mcps" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.0", features = ["serde"] }

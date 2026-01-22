@@ -3,8 +3,7 @@
 use engram::Identity;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -16,7 +15,7 @@ struct Args {
     identity: Identity,
 }
 
-impl McpTool<Context> for IdentitySetTool {
+impl Tool<Context> for IdentitySetTool {
     fn name(&self) -> &str {
         "identity_set"
     }
@@ -107,15 +106,15 @@ impl McpTool<Context> for IdentitySetTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
 
         brain.set_identity(args.identity.clone())
-            .map_err(|e| McpError::Other(e.to_string()))?;
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         Ok(text_response(format!(
             "Identity set.\n\n{}",

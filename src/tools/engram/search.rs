@@ -3,8 +3,7 @@
 use engram::{Engram, SearchOptions, TagMatchMode};
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::{text_response, format_engram};
@@ -27,7 +26,7 @@ struct Args {
     limit: Option<usize>,
 }
 
-impl McpTool<Context> for EngramSearchTool {
+impl Tool<Context> for EngramSearchTool {
     fn name(&self) -> &str {
         "engram_search"
     }
@@ -76,10 +75,10 @@ impl McpTool<Context> for EngramSearchTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let brain = context.brain.lock().unwrap();
 

@@ -1,15 +1,14 @@
 //! config_get - Get current configuration
 
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult};
 
 use crate::Context;
 use crate::tools::text_response;
 
 pub struct ConfigGetTool;
 
-impl McpTool<Context> for ConfigGetTool {
+impl Tool<Context> for ConfigGetTool {
     fn name(&self) -> &str {
         "config_get"
     }
@@ -29,8 +28,8 @@ impl McpTool<Context> for ConfigGetTool {
         &self,
         _args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let brain = context.brain.lock().unwrap();
         let config = brain.config();
 

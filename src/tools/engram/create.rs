@@ -3,8 +3,7 @@
 use engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use sovran_mcp::server::server::{McpTool, McpToolEnvironment};
-use sovran_mcp::types::{CallToolResponse, McpError};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -33,7 +32,7 @@ struct FilteredTags {
     high_cardinality: Vec<(String, usize)>,
 }
 
-impl McpTool<Context> for EngramCreateTool {
+impl Tool<Context> for EngramCreateTool {
     fn name(&self) -> &str {
         "engram_create"
     }
@@ -68,10 +67,10 @@ impl McpTool<Context> for EngramCreateTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        _env: &McpToolEnvironment,
-    ) -> Result<CallToolResponse, McpError> {
+        _env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidArguments(e.to_string()))?;
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
         
@@ -115,7 +114,7 @@ impl McpTool<Context> for EngramCreateTool {
                 brain.create(&memory.content)
             } else {
                 brain.create_with_tags(&memory.content, filtered.tags.clone())
-            }.map_err(|e| McpError::Other(e.to_string()))?;
+            }.map_err(|e| McpError::ToolError(e.to_string()))?;
 
             created_count += 1;
             output.push_str(&format!(

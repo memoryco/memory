@@ -8,9 +8,12 @@
 
 mod tools;
 mod bootstrap;
+mod plugin;
+
+pub use plugin::{MemoryPlugin, combine_instructions};
 
 use engram::{Brain, SqliteStorage, Storage};
-use sovran_mcp::server::McpServer;
+use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -83,7 +86,11 @@ fn main() {
     };
 
     // Create MCP server
-    let mut server = McpServer::new("memory", env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(ServerConfig {
+        name: "memory".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        ..Default::default()
+    });
 
     // Register engram tools
     server.add_tool(tools::EngramCreateTool).expect("Failed to add engram_create tool");
@@ -108,5 +115,8 @@ fn main() {
     eprintln!("Memory server starting...");
 
     // Start the server (blocks forever)
-    server.start(context);
+    if let Err(e) = server.start(StdioTransport::new(), context) {
+        eprintln!("Server error: {}", e);
+        std::process::exit(1);
+    }
 }

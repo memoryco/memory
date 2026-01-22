@@ -58,6 +58,21 @@ fn main() {
     let mut brain = Brain::open(storage)
         .expect("Failed to open brain");
 
+    // Apply any decay that accumulated while server was offline
+    match brain.apply_time_decay() {
+        Ok(true) => eprintln!("Applied time-based decay"),
+        Ok(false) => eprintln!("No decay needed (interval not elapsed)"),
+        Err(e) => eprintln!("Warning: Failed to apply decay: {}", e),
+    }
+
+    // Prune weak associations (cleanup from decay)
+    match brain.prune_weak_associations() {
+        Ok(0) => {} // Nothing pruned, stay quiet
+        Ok(count) => eprintln!("Pruned {} weak associations (below {} threshold)", 
+            count, brain.config().min_association_weight),
+        Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
+    }
+
     // Bootstrap identity and memories if this is a fresh database
     if let Err(e) = bootstrap::bootstrap_if_needed(&mut brain) {
         eprintln!("Warning: Bootstrap failed: {}", e);

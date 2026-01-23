@@ -8,14 +8,12 @@
 
 mod tools;
 mod bootstrap;
-mod plugin;
 mod engram;
 mod reference;
 mod lenses;
 
-pub use plugin::{MemoryPlugin, combine_instructions};
-
 use crate::engram::{Brain, SqliteStorage, Storage};
+use crate::reference::ReferenceManager;
 use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -37,13 +35,35 @@ fn get_default_db_path() -> PathBuf {
     memory_dir.join("brain.db")
 }
 
+fn get_default_lenses_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lenses")
+}
+
+fn get_default_references_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".references")
+}
+
 fn main() {
-    // Get database path from env or use default
+    // Get paths from env or use defaults
     let db_path = std::env::var("MEMORY_DB")
         .map(PathBuf::from)
         .unwrap_or_else(|_| get_default_db_path());
+    
+    let lenses_dir = std::env::var("LENSES_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| get_default_lenses_dir());
+    
+    let references_dir = std::env::var("REFERENCES_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| get_default_references_dir());
 
     eprintln!("Memory database: {}", db_path.display());
+    eprintln!("Lenses directory: {}", lenses_dir.display());
+    eprintln!("References directory: {}", references_dir.display());
 
     // Open or create the brain
     let mut storage = SqliteStorage::new(&db_path)
@@ -79,8 +99,18 @@ fn main() {
         Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
     }
 
-    // Bootstrap identity and memories if this is a fresh database
-    if let Err(e) = bootstrap::bootstrap_if_needed(&mut brain) {
+    // Load reference sources
+    let mut references = ReferenceManager::new();
+    match references.load_directory(&references_dir) {
+        Ok(loaded) if !loaded.is_empty() => {
+            eprintln!("Loaded {} reference source(s): {}", loaded.len(), loaded.join(", "));
+        }
+        Ok(_) => {} // No references, that's fine
+        Err(e) => eprintln!("Warning: Failed to load references: {}", e),
+    }
+
+    // Bootstrap all modules (adds instructions to identity if not present)
+    if let Err(e) = bootstrap::bootstrap_all(&mut brain, &lenses_dir, &references) {
         eprintln!("Warning: Bootstrap failed: {}", e);
     }
 
@@ -114,6 +144,15 @@ fn main() {
     // Register config tools
     server.add_tool(tools::ConfigGetTool).expect("Failed to add config_get tool");
     server.add_tool(tools::ConfigSetTool).expect("Failed to add config_set tool");
+
+    // Load and register lenses as prompts
+    let lenses_list = lenses::load_lenses(&lenses_dir);
+    eprintln!("Loaded {} lens(es)", lenses_list.len());
+    for lens in lenses_list {
+        if let Err(e) = server.add_prompt(lens) {
+            eprintln!("Warning: Failed to add lens prompt: {}", e);
+        }
+    }
 
     eprintln!("Memory server starting...");
 

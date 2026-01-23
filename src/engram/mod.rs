@@ -16,6 +16,7 @@ pub mod association;
 pub mod identity;
 pub mod storage;
 pub mod brain;
+pub mod bootstrap;
 
 pub use engram::{Engram, MemoryState};
 pub use substrate::{Substrate, SubstrateStats, StimulationResult, RecallResult, SearchOptions, StateFilter, TagMatchMode};

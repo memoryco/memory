@@ -1,10 +1,9 @@
-//! Bootstrap - create lenses directory and sample lens on first run
+//! Lenses bootstrap - create directory and add instructions to identity
 
+use crate::engram::Brain;
 use std::path::Path;
 
-/// Identity instructions for lens usage.
-/// Add this to the memory server's identity when integrating lenses.
-pub const IDENTITY_INSTRUCTIONS: &str = r#"## Lenses
+const INSTRUCTIONS: &str = r#"## Lenses
 
 Lenses are task-specific context guides loaded whole into working memory.
 Unlike engrams (searched/recalled) or references (queried), lenses are
@@ -60,15 +59,30 @@ are meant to be held in working memory during an entire task.
 Delete this file once you've created your own lenses!
 "#;
 
-/// Check if lenses directory needs bootstrapping and do it if so
-pub fn bootstrap_if_needed(lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+/// Marker to detect if lenses instructions already exist
+const MARKER: &str = "## Lenses";
+
+/// Bootstrap lenses: add instructions to identity and create directory
+pub fn bootstrap(brain: &mut Brain, lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Add instructions to identity if not present
+    let already_present = brain.identity().instructions.iter()
+        .any(|i| i.contains(MARKER));
+    
+    if !already_present {
+        eprintln!("  Bootstrapping lenses instructions...");
+        let mut identity = brain.identity().clone();
+        identity = identity.with_instruction(INSTRUCTIONS);
+        brain.set_identity(identity)?;
+        eprintln!("  Lenses instructions added to identity");
+    }
+    
     // Create directory if it doesn't exist
     if !lenses_dir.exists() {
         eprintln!("  Creating lenses directory: {}", lenses_dir.display());
         std::fs::create_dir_all(lenses_dir)?;
     }
 
-    // Check if directory is empty
+    // Check if directory is empty (no .md files)
     let is_empty = std::fs::read_dir(lenses_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| {
@@ -81,7 +95,7 @@ pub fn bootstrap_if_needed(lenses_dir: &Path) -> Result<(), Box<dyn std::error::
         == 0;
 
     if is_empty {
-        eprintln!("  Bootstrapping sample lens...");
+        eprintln!("  Creating sample lens...");
         let sample_path = lenses_dir.join("sample.md");
         std::fs::write(&sample_path, SAMPLE_LENS)?;
         eprintln!("  Created sample lens at: {}", sample_path.display());

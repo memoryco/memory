@@ -19,7 +19,7 @@
 
 mod bootstrap;
 
-pub use bootstrap::{bootstrap_if_needed, IDENTITY_INSTRUCTIONS};
+pub use bootstrap::bootstrap;
 
 use sml_mcps::server::PromptDef;
 use sml_mcps::types::{Content, PromptArgument, PromptMessage, Result, Role};

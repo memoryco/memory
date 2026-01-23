@@ -27,6 +27,7 @@ pub mod indexer;
 pub mod profiles;
 pub mod searcher;
 pub mod source;
+pub mod bootstrap;
 
 pub use citation::{Citation, SourceMeta};
 pub use error::{ReferenceError, Result};

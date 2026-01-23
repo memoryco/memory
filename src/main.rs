@@ -10,6 +10,7 @@ mod tools;
 mod bootstrap;
 mod plugin;
 mod engram;
+mod reference;
 
 pub use plugin::{MemoryPlugin, combine_instructions};
 

@@ -1,9 +1,9 @@
 //! SQLite storage implementation
 
-use super::{
+use super::{Storage, StorageResult, StorageError};
+use crate::engram::{
     EngramId, Engram, MemoryState, Config, Association,
     Identity,
-    storage::{Storage, StorageResult, StorageError},
 };
 use rusqlite::{Connection, params};
 use std::path::Path;
@@ -707,7 +707,7 @@ fn row_to_association(data: AssocRowData) -> StorageResult<Association> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{Value, Preference};
+    use crate::engram::{Value, Preference};
     
     #[test]
     fn save_and_load_engram() {
@@ -843,7 +843,7 @@ mod tests {
     
     #[test]
     fn brain_with_sqlite() {
-        use super::super::Brain;
+        use crate::engram::Brain;
         
         // Create a brain with SQLite backend
         let storage = SqliteStorage::in_memory().unwrap();

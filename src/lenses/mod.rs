@@ -87,13 +87,6 @@ impl PromptDef for Lens {
     }
 }
 
-/// Get the default lenses directory (~/.lenses)
-pub fn get_default_lenses_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lenses")
-}
-
 /// Load all lenses from a directory
 pub fn load_lenses(dir: &PathBuf) -> Vec<Lens> {
     let mut lenses = Vec::new();

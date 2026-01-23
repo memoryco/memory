@@ -15,10 +15,15 @@ meant to be held in context during an entire task.
 - Before documentation work → check for doc standards
 - Any task where consistent application of rules matters
 
-**How to use:**
-1. `prompts/list` - see available lenses
-2. `prompts/get` with `name: "lens-name"` - load into context
+**How to use (AI-initiated via tools):**
+1. `lenses_list` - see available lenses
+2. `lenses_get` with `name: "lens-name"` - load into context
 3. Apply the lens guidance throughout the task
+
+**How to use (user-initiated via UI):**
+1. Click "Add from memory" in Claude Desktop
+2. Select the desired lens
+3. Lens content is injected into conversation
 
 **Key distinction:**
 - Engrams: "What do I know about X?" → search, recall
@@ -45,16 +50,22 @@ are meant to be held in working memory during an entire task.
 
 ## Creating Your Own Lens
 
-1. Create a `.md` file in `~/.lenses/`
+1. Create a `.md` file in `$MEMORY_HOME/lenses`
 2. The filename becomes the lens name (e.g., `humanizer.md` → `humanizer`)
 3. If the first line starts with `#`, it becomes the description
 4. The rest of the file is the lens content
 
 ## Using Lenses
 
-1. `prompts/list` - see available lenses
-2. `prompts/get` with `name: "lens-name"` - load a lens into context
+**AI-initiated (via tools):**
+1. `lenses_list` - see available lenses
+2. `lenses_get` with `name: "lens-name"` - load a lens into context
 3. Apply the lens guidance to your task
+
+**User-initiated (via UI):**
+1. Click "Add from memory" in Claude Desktop
+2. Select the desired lens from the submenu
+3. Lens content is injected into conversation
 
 Delete this file once you've created your own lenses!
 "#;

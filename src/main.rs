@@ -22,48 +22,36 @@ use std::sync::Mutex;
 /// Wrapped in Mutex because Brain is not Sync.
 pub struct Context {
     pub brain: Mutex<Brain>,
+    pub lenses_dir: PathBuf,
 }
 
-fn get_default_db_path() -> PathBuf {
-    // Use platform-appropriate data directory
-    let data_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
-    
-    let memory_dir = data_dir.join("memory");
-    std::fs::create_dir_all(&memory_dir).ok();
-    
-    memory_dir.join("brain.db")
-}
-
-fn get_default_lenses_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lenses")
-}
-
-fn get_default_references_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".references")
+/// Get the memory home directory from MEMORY_HOME env var or default
+fn get_memory_home() -> PathBuf {
+    std::env::var("MEMORY_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("memory")
+        })
 }
 
 fn main() {
-    // Get paths from env or use defaults
-    let db_path = std::env::var("MEMORY_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| get_default_db_path());
-    
-    let lenses_dir = std::env::var("LENSES_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| get_default_lenses_dir());
-    
-    let references_dir = std::env::var("REFERENCES_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| get_default_references_dir());
+    // All paths derived from MEMORY_HOME
+    let memory_home = get_memory_home();
+    let db_path = memory_home.join("brain.db");
+    let lenses_dir = memory_home.join("lenses");
+    let references_dir = memory_home.join("references");
 
-    eprintln!("Memory database: {}", db_path.display());
-    eprintln!("Lenses directory: {}", lenses_dir.display());
-    eprintln!("References directory: {}", references_dir.display());
+    // Ensure directories exist
+    std::fs::create_dir_all(&memory_home).ok();
+    std::fs::create_dir_all(&lenses_dir).ok();
+    std::fs::create_dir_all(&references_dir).ok();
+
+    eprintln!("Memory home: {}", memory_home.display());
+    eprintln!("  Database: {}", db_path.display());
+    eprintln!("  Lenses: {}", lenses_dir.display());
+    eprintln!("  References: {}", references_dir.display());
 
     // Open or create the brain
     let mut storage = SqliteStorage::new(&db_path)
@@ -116,6 +104,7 @@ fn main() {
 
     let context = Context {
         brain: Mutex::new(brain),
+        lenses_dir: lenses_dir.clone(),
     };
 
     // Create MCP server
@@ -144,6 +133,10 @@ fn main() {
     // Register config tools
     server.add_tool(tools::ConfigGetTool).expect("Failed to add config_get tool");
     server.add_tool(tools::ConfigSetTool).expect("Failed to add config_set tool");
+
+    // Register lens tools
+    server.add_tool(tools::LensesListTool).expect("Failed to add lenses_list tool");
+    server.add_tool(tools::LensesGetTool).expect("Failed to add lenses_get tool");
 
     // Load and register lenses as prompts
     let lenses_list = lenses::load_lenses(&lenses_dir);

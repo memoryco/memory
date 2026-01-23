@@ -8,6 +8,7 @@
 pub mod engram;
 pub mod identity;
 pub mod config;
+pub mod lenses;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
@@ -35,6 +36,11 @@ pub use identity::{
 pub use config::{
     ConfigGetTool,
     ConfigSetTool,
+};
+
+pub use lenses::{
+    LensesListTool,
+    LensesGetTool,
 };
 
 // =============================================================================

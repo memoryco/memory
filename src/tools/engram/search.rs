@@ -1,6 +1,6 @@
 //! engram_search - Passively search memories (no side effects)
 
-use engram::{Engram, SearchOptions, TagMatchMode};
+use crate::engram::{Engram, SearchOptions, TagMatchMode};
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};

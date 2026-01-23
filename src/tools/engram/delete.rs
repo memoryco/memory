@@ -1,6 +1,6 @@
 //! engram_delete - Delete memories permanently
 
-use engram::EngramId;
+use crate::engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};

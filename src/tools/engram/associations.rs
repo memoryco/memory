@@ -1,6 +1,6 @@
 //! engram_associations - Inspect associations for a single memory
 
-use engram::EngramId;
+use crate::engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};

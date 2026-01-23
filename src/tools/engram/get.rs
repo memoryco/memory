@@ -1,6 +1,6 @@
 //! engram_get - Get a specific memory by ID (no side effects)
 
-use engram::EngramId;
+use crate::engram::EngramId;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};

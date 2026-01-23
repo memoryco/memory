@@ -9,10 +9,11 @@
 mod tools;
 mod bootstrap;
 mod plugin;
+mod engram;
 
 pub use plugin::{MemoryPlugin, combine_instructions};
 
-use engram::{Brain, SqliteStorage, Storage};
+use crate::engram::{Brain, SqliteStorage, Storage};
 use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::path::PathBuf;
 use std::sync::Mutex;

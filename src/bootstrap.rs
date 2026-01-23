@@ -4,7 +4,7 @@
 //! Personal context should be added through normal use
 //! or migrated from existing systems.
 
-use engram::Brain;
+use crate::engram::Brain;
 
 /// Check if brain needs bootstrapping and do it if so
 pub fn bootstrap_if_needed(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {

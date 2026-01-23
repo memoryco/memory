@@ -9,12 +9,12 @@ pub mod engram;
 pub mod identity;
 pub mod config;
 
-use ::engram::Engram;
+use crate::engram::Engram;
 use sml_mcps::CallToolResult;
 use std::path::PathBuf;
 
 // Re-export all tools for easy registration
-pub use engram::{
+pub use engram::{  // tools::engram (tool implementations)
     EngramCreateTool,
     EngramRecallTool,
     EngramSearchTool,

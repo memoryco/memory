@@ -11,6 +11,7 @@ mod bootstrap;
 mod plugin;
 mod engram;
 mod reference;
+mod lenses;
 
 pub use plugin::{MemoryPlugin, combine_instructions};
 

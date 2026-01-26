@@ -12,7 +12,6 @@ pub mod lenses;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
-use std::path::PathBuf;
 
 // Re-export all tools for easy registration
 pub use engram::{  // tools::engram (tool implementations)
@@ -49,13 +48,6 @@ pub use lenses::{
 
 /// HTML template for graph visualization (embedded at compile time)
 pub const GRAPH_TEMPLATE: &str = include_str!("../../templates/graph.html");
-
-/// Get the output path for the graph HTML file
-pub fn get_graph_output_path() -> PathBuf {
-    let data_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
-    data_dir.join("memory").join("graph.html")
-}
 
 /// Create a simple text response
 pub fn text_response(text: String) -> CallToolResult {

@@ -23,6 +23,7 @@ use std::sync::Mutex;
 pub struct Context {
     pub brain: Mutex<Brain>,
     pub lenses_dir: PathBuf,
+    pub memory_home: PathBuf,
 }
 
 /// Get the memory home directory from MEMORY_HOME env var or default
@@ -105,6 +106,7 @@ fn main() {
     let context = Context {
         brain: Mutex::new(brain),
         lenses_dir: lenses_dir.clone(),
+        memory_home: memory_home.clone(),
     };
 
     // Create MCP server

@@ -7,7 +7,7 @@ use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 use std::collections::HashSet;
 
 use crate::Context;
-use crate::tools::{text_response, truncate_content, GRAPH_TEMPLATE, get_graph_output_path};
+use crate::tools::{text_response, truncate_content, GRAPH_TEMPLATE};
 
 pub struct EngramGraphTool;
 
@@ -144,7 +144,7 @@ impl Tool<Context> for EngramGraphTool {
             let html = GRAPH_TEMPLATE.replace("{{GRAPH_DATA}}", &graph_json);
 
             // Write to file
-            let output_path = get_graph_output_path();
+            let output_path = context.memory_home.join("graph.html");
             std::fs::write(&output_path, &html)
                 .map_err(|e| McpError::ToolError(format!("Failed to write graph.html: {}", e)))?;
 

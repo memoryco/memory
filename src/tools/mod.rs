@@ -4,11 +4,14 @@
 //! - `engram` - Memory CRUD and graph operations
 //! - `identity` - Persona, values, preferences management
 //! - `config` - System configuration
+//! - `lenses` - Task-specific context guides
+//! - `reference` - Authoritative document search and citation
 
 pub mod engram;
 pub mod identity;
 pub mod config;
 pub mod lenses;
+pub mod reference;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
@@ -30,6 +33,8 @@ pub use identity::{
     IdentityGetTool,
     IdentitySetTool,
     IdentitySearchTool,
+    IdentityAddInstructionTool,
+    IdentityRemoveInstructionTool,
 };
 
 pub use config::{
@@ -40,6 +45,14 @@ pub use config::{
 pub use lenses::{
     LensesListTool,
     LensesGetTool,
+};
+
+pub use reference::{
+    ReferenceListTool,
+    ReferenceSearchTool,
+    ReferenceGetTool,
+    ReferenceSectionsTool,
+    ReferenceCitationTool,
 };
 
 // =============================================================================

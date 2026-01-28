@@ -18,10 +18,11 @@ use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-/// Server context containing the Brain.
-/// Wrapped in Mutex because Brain is not Sync.
+/// Server context containing the Brain and ReferenceManager.
+/// Wrapped in Mutex because neither is Sync.
 pub struct Context {
     pub brain: Mutex<Brain>,
+    pub references: Mutex<ReferenceManager>,
     pub lenses_dir: PathBuf,
     pub memory_home: PathBuf,
 }
@@ -105,6 +106,7 @@ fn main() {
 
     let context = Context {
         brain: Mutex::new(brain),
+        references: Mutex::new(references),
         lenses_dir: lenses_dir.clone(),
         memory_home: memory_home.clone(),
     };
@@ -131,6 +133,8 @@ fn main() {
     server.add_tool(tools::IdentityGetTool).expect("Failed to add identity_get tool");
     server.add_tool(tools::IdentitySetTool).expect("Failed to add identity_set tool");
     server.add_tool(tools::IdentitySearchTool).expect("Failed to add identity_search tool");
+    server.add_tool(tools::IdentityAddInstructionTool).expect("Failed to add identity_add_instruction tool");
+    server.add_tool(tools::IdentityRemoveInstructionTool).expect("Failed to add identity_remove_instruction tool");
 
     // Register config tools
     server.add_tool(tools::ConfigGetTool).expect("Failed to add config_get tool");
@@ -139,6 +143,13 @@ fn main() {
     // Register lens tools
     server.add_tool(tools::LensesListTool).expect("Failed to add lenses_list tool");
     server.add_tool(tools::LensesGetTool).expect("Failed to add lenses_get tool");
+
+    // Register reference tools
+    server.add_tool(tools::ReferenceListTool).expect("Failed to add reference_list tool");
+    server.add_tool(tools::ReferenceSearchTool).expect("Failed to add reference_search tool");
+    server.add_tool(tools::ReferenceGetTool).expect("Failed to add reference_get tool");
+    server.add_tool(tools::ReferenceSectionsTool).expect("Failed to add reference_sections tool");
+    server.add_tool(tools::ReferenceCitationTool).expect("Failed to add reference_citation tool");
 
     // Load and register lenses as prompts
     let lenses_list = lenses::load_lenses(&lenses_dir);

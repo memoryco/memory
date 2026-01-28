@@ -707,6 +707,8 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "sml_mcps"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b941a4f734e5bb2961eb2be7ff970ba318ef60d92ccf0eac95683e1d63958043"
 dependencies = [
  "base64",
  "schemars",

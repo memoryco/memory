@@ -6,7 +6,7 @@ description = "MCP server for cognitive AI memory (engram)"
 license = "MIT"
 
 [dependencies]
-sml_mcps = { path = "../sml_mcps" }
+sml_mcps = "0.4.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }

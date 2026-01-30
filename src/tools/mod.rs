@@ -30,6 +30,7 @@ pub use engram::{  // tools::engram (tool implementations)
 };
 
 pub use identity::{
+    IdentityAddTool,
     IdentityGetTool,
     IdentitySetTool,
     IdentitySearchTool,

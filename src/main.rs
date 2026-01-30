@@ -10,6 +10,7 @@ mod tools;
 mod bootstrap;
 mod embedding;
 mod engram;
+mod identity;
 mod reference;
 mod lenses;
 
@@ -183,6 +184,7 @@ fn main() {
     // Register identity tools
     server.add_tool(tools::IdentityGetTool).expect("Failed to add identity_get tool");
     server.add_tool(tools::IdentitySetTool).expect("Failed to add identity_set tool");
+    server.add_tool(tools::IdentityAddTool).expect("Failed to add identity_add tool");
     server.add_tool(tools::IdentitySearchTool).expect("Failed to add identity_search tool");
     server.add_tool(tools::IdentityAddInstructionTool).expect("Failed to add identity_add_instruction tool");
     server.add_tool(tools::IdentityRemoveInstructionTool).expect("Failed to add identity_remove_instruction tool");

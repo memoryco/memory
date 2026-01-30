@@ -59,7 +59,10 @@ impl Tool<Context> for EngramGraphTool {
 
         let format = args.format.as_deref().unwrap_or("summary");
         let min_weight = args.min_weight.unwrap_or(0.0);
-        let brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.lock().unwrap();
+        
+        // Lazy decay - check if interval elapsed, apply if so
+        let _ = brain.apply_time_decay();
 
         // Collect all associations
         let all_assocs = brain.all_associations();
@@ -83,7 +86,6 @@ impl Tool<Context> for EngramGraphTool {
                     "label": truncate_content(&e.content, 30),
                     "energy": e.energy,
                     "state": e.state.emoji(),
-                    "tags": e.tags,
                     "access_count": e.access_count
                 }))
                 .collect();
@@ -119,7 +121,6 @@ impl Tool<Context> for EngramGraphTool {
                     "label": truncate_content(&e.content, 30),
                     "energy": e.energy,
                     "state": e.state.emoji(),
-                    "tags": e.tags,
                     "access_count": e.access_count
                 }))
                 .collect();

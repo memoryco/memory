@@ -1,6 +1,6 @@
 //! SQLite storage implementation
 
-use super::{Storage, StorageResult, StorageError};
+use super::{Storage, StorageResult, StorageError, SimilarityResult, VectorSearch};
 use crate::engram::{
     EngramId, Engram, MemoryState, Config, Association,
     Identity,
@@ -28,6 +28,11 @@ impl SqliteStorage {
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         Ok(Self { conn })
+    }
+    
+    /// Get a reference to the underlying connection (for VectorSearch)
+    pub fn connection(&self) -> &Connection {
+        &self.conn
     }
     
     /// Create the database schema
@@ -61,7 +66,8 @@ impl SqliteStorage {
                 created_at INTEGER NOT NULL,
                 last_accessed INTEGER NOT NULL,
                 access_count INTEGER NOT NULL,
-                tags TEXT NOT NULL  -- JSON array
+                tags TEXT NOT NULL,  -- JSON array
+                embedding BLOB       -- 384-dim f32 vector (1536 bytes)
             );
             
             -- Indices for common queries
@@ -97,7 +103,9 @@ impl SqliteStorage {
 
 impl Storage for SqliteStorage {
     fn initialize(&mut self) -> StorageResult<()> {
-        self.create_schema()
+        self.create_schema()?;
+        self.migrate_embeddings()?;
+        Ok(())
     }
     
     // ==================
@@ -153,8 +161,8 @@ impl Storage for SqliteStorage {
         
         self.conn.execute(
             r#"INSERT OR REPLACE INTO engrams 
-               (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+               (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
             params![
                 &id_str,
                 engram.content,
@@ -165,6 +173,7 @@ impl Storage for SqliteStorage {
                 engram.last_accessed,
                 engram.access_count as i64,
                 &tags_json,
+                engram.embedding.as_ref().map(|e| embedding_to_bytes(e)),
             ]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -189,8 +198,8 @@ impl Storage for SqliteStorage {
         {
             let mut engram_stmt = tx.prepare(
                 r#"INSERT OR REPLACE INTO engrams 
-                   (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags)
-                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#
+                   (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
+                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#
             ).map_err(|e| StorageError::Database(e.to_string()))?;
             
             let mut fts_delete_stmt = tx.prepare(
@@ -224,6 +233,7 @@ impl Storage for SqliteStorage {
                     engram.last_accessed,
                     engram.access_count as i64,
                     &tags_json,
+                    engram.embedding.as_ref().map(|e| embedding_to_bytes(e)),
                 ]).map_err(|e| StorageError::Database(e.to_string()))?;
                 
                 // Update FTS index
@@ -240,7 +250,7 @@ impl Storage for SqliteStorage {
     
     fn load_engram(&self, id: &EngramId) -> StorageResult<Option<Engram>> {
         let result = self.conn.query_row(
-            "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags FROM engrams WHERE id = ?1",
+            "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding FROM engrams WHERE id = ?1",
             params![id.to_string()],
             |row| {
                 Ok(RowData {
@@ -253,6 +263,7 @@ impl Storage for SqliteStorage {
                     last_accessed: row.get(6)?,
                     access_count: row.get::<_, i64>(7)?,
                     tags: row.get::<_, String>(8)?,
+                    embedding: row.get::<_, Option<Vec<u8>>>(9)?,
                 })
             }
         );
@@ -280,6 +291,7 @@ impl Storage for SqliteStorage {
                 last_accessed: row.get(6)?,
                 access_count: row.get::<_, i64>(7)?,
                 tags: row.get::<_, String>(8)?,
+                    embedding: None,
             })
         }).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -315,6 +327,7 @@ impl Storage for SqliteStorage {
                 last_accessed: row.get(6)?,
                 access_count: row.get::<_, i64>(7)?,
                 tags: row.get::<_, String>(8)?,
+                embedding: None,
             })
         }).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -347,6 +360,7 @@ impl Storage for SqliteStorage {
                 last_accessed: row.get(6)?,
                 access_count: row.get::<_, i64>(7)?,
                 tags: row.get::<_, String>(8)?,
+                embedding: None,
             })
         }).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -563,6 +577,45 @@ impl Storage for SqliteStorage {
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(())
     }
+    
+    // ==================
+    // VECTOR SEARCH
+    // ==================
+    
+    fn find_similar_by_embedding(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        let vs = VectorSearch::new(&self.conn);
+        vs.find_similar(query_embedding, limit, min_score)
+    }
+    
+    fn count_with_embeddings(&self) -> StorageResult<usize> {
+        let vs = VectorSearch::new(&self.conn);
+        vs.count_with_embeddings()
+    }
+    
+    fn count_without_embeddings(&self) -> StorageResult<usize> {
+        let vs = VectorSearch::new(&self.conn);
+        vs.count_without_embeddings()
+    }
+    
+    fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
+        let vs = VectorSearch::new(&self.conn);
+        vs.get_ids_without_embeddings(limit)
+    }
+    
+    fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+        let vs = VectorSearch::new(&self.conn);
+        vs.set_embedding(id, embedding)
+    }
+    
+    fn get_embedding(&self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+        let vs = VectorSearch::new(&self.conn);
+        vs.get_embedding(id)
+    }
 }
 
 // Additional methods specific to SqliteStorage (not part of Storage trait)
@@ -636,6 +689,26 @@ impl SqliteStorage {
         
         Ok(engram_count > 0 && fts_count == 0)
     }
+    
+    /// Migrate existing database to add embedding column if missing
+    fn migrate_embeddings(&self) -> StorageResult<()> {
+        // Check if embedding column exists
+        let has_embedding: bool = self.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('engrams') WHERE name = 'embedding'",
+            [],
+            |row| row.get::<_, i64>(0).map(|c| c > 0)
+        ).map_err(|e| StorageError::Database(e.to_string()))?;
+        
+        if !has_embedding {
+            // Add the embedding column
+            self.conn.execute(
+                "ALTER TABLE engrams ADD COLUMN embedding BLOB",
+                []
+            ).map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+        
+        Ok(())
+    }
 }
 
 // Helper structs for row data
@@ -649,6 +722,7 @@ struct RowData {
     last_accessed: i64,
     access_count: i64,
     tags: String,
+    embedding: Option<Vec<u8>>,
 }
 
 struct AssocRowData {
@@ -685,6 +759,7 @@ fn row_to_engram(data: RowData) -> StorageResult<Engram> {
         last_accessed: data.last_accessed,
         access_count: data.access_count as u64,
         tags,
+        embedding: None,  // Loaded separately when needed
     })
 }
 
@@ -704,6 +779,18 @@ fn row_to_association(data: AssocRowData) -> StorageResult<Association> {
     })
 }
 
+
+// Embedding serialization helpers
+fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
+    embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+fn bytes_to_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
+    if bytes.len() % 4 != 0 { return None; }
+    Some(bytes.chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -925,13 +1012,13 @@ mod tests {
         
         // Manually insert engrams without FTS (simulating legacy data)
         storage.conn.execute(
-            r#"INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags)
-               VALUES (?1, 'Test content one', 1.0, 'active', 1.0, 0, 0, 0, '["test"]')"#,
+            r#"INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
+               VALUES (?1, 'Test content one', 1.0, 'active', 1.0, 0, 0, 0, '["test"]', NULL)"#,
             params![&id1]
         ).unwrap();
         storage.conn.execute(
-            r#"INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags)
-               VALUES (?1, 'Test content two', 1.0, 'active', 1.0, 0, 0, 0, '["test"]')"#,
+            r#"INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
+               VALUES (?1, 'Test content two', 1.0, 'active', 1.0, 0, 0, 0, '["test"]', NULL)"#,
             params![&id2]
         ).unwrap();
         

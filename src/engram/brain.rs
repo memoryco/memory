@@ -10,7 +10,7 @@ use super::{
     EngramId, Engram, Config, Association,
     Identity,
     Substrate, RecallResult, SearchOptions, TagMatchMode, SubstrateStats,
-    Storage, StorageResult,
+    Storage, StorageResult, SimilarityResult,
 };
 
 /// The Brain - coordinates Identity, Substrate, and Storage
@@ -420,6 +420,118 @@ impl Brain {
     pub fn close(&mut self) -> StorageResult<()> {
         self.flush()?;
         self.storage.close()
+    }
+    
+    // ==================
+    // VECTOR SEARCH
+    // ==================
+    
+    /// Find engrams semantically similar to the given embedding
+    /// Returns (id, score, content) tuples sorted by descending similarity
+    pub fn find_similar_by_embedding(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        self.storage.find_similar_by_embedding(query_embedding, limit, min_score)
+    }
+    
+    /// Count engrams that have embeddings
+    pub fn count_with_embeddings(&self) -> StorageResult<usize> {
+        self.storage.count_with_embeddings()
+    }
+    
+    /// Count engrams that need embeddings (for backfill progress)
+    pub fn count_without_embeddings(&self) -> StorageResult<usize> {
+        self.storage.count_without_embeddings()
+    }
+    
+    /// Get IDs of engrams that need embeddings (for backfill)
+    pub fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
+        self.storage.get_ids_without_embeddings(limit)
+    }
+    
+    /// Set embedding for an engram (used during backfill)
+    pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+        self.storage.set_embedding(id, embedding)
+    }
+    
+    /// Bootstrap associations based on semantic similarity
+    /// Creates associations between memories with similarity above threshold
+    /// Uses similarity score as initial weight
+    /// Returns (associations_created, pairs_checked)
+    pub fn bootstrap_semantic_associations(
+        &mut self,
+        min_similarity: f32,
+        max_associations_per_memory: usize,
+    ) -> StorageResult<(usize, usize)> {
+        let mut created = 0;
+        let mut checked = 0;
+        
+        // Get all memory IDs
+        let all_ids: Vec<EngramId> = self.substrate.all_engrams()
+            .map(|e| e.id)
+            .collect();
+        
+        for id in &all_ids {
+            // Get this memory's embedding
+            let embedding = match self.storage.get_embedding(id)? {
+                Some(emb) => emb,
+                None => continue, // Skip memories without embeddings
+            };
+            
+            // Find similar memories
+            let similar = self.storage.find_similar_by_embedding(
+                &embedding,
+                max_associations_per_memory + 1, // +1 because it might include self
+                min_similarity,
+            )?;
+            
+            for result in similar {
+                // Skip self-associations
+                if result.id == *id {
+                    continue;
+                }
+                
+                checked += 1;
+                
+                // Check if association already exists
+                let exists = self.substrate.associations_from(id)
+                    .map(|assocs| assocs.iter().any(|a| a.to == result.id))
+                    .unwrap_or(false);
+                
+                if !exists {
+                    // Create association with similarity as weight
+                    self.associate(*id, result.id, result.score as f64)?;
+                    created += 1;
+                }
+            }
+        }
+        
+        Ok((created, checked))
+    }
+    
+    /// Find similar memories to a given memory ID
+    /// Convenience wrapper around find_similar_by_embedding
+    pub fn find_similar_to(
+        &self,
+        id: &EngramId,
+        limit: usize,
+        min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        let embedding = match self.storage.get_embedding(id)? {
+            Some(emb) => emb,
+            None => return Ok(vec![]),
+        };
+        
+        let mut results = self.storage.find_similar_by_embedding(&embedding, limit + 1, min_score)?;
+        
+        // Filter out self
+        results.retain(|r| r.id != *id);
+        results.truncate(limit);
+        
+        Ok(results)
     }
     
     // ==================

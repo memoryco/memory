@@ -1,29 +1,31 @@
-//! engram_search - Passively search memories (no side effects)
+//! engram_search - Semantic memory search with energy weighting
 
-use crate::engram::{Engram, SearchOptions, TagMatchMode};
+use crate::embedding::EmbeddingGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
-use crate::tools::{text_response, format_engram};
+use crate::tools::text_response;
 
 pub struct EngramSearchTool;
 
 #[derive(Deserialize)]
 struct Args {
-    #[serde(default)]
-    query: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    tag_mode: Option<String>,
-    #[serde(default)]
-    include_deep: Option<bool>,
-    #[serde(default)]
-    include_archived: Option<bool>,
+    /// Text query to search for
+    query: String,
+    /// Maximum results to return (default: 10)
     #[serde(default)]
     limit: Option<usize>,
+    /// Minimum similarity score (0.0-1.0, default: 0.4)
+    #[serde(default)]
+    min_score: Option<f32>,
+    /// Include deep storage memories (default: false)
+    #[serde(default)]
+    include_deep: Option<bool>,
+    /// Include archived memories (default: false)
+    #[serde(default)]
+    include_archived: Option<bool>,
 }
 
 impl Tool<Context> for EngramSearchTool {
@@ -32,28 +34,26 @@ impl Tool<Context> for EngramSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search memories by content or tags. This is a passive operation - \
-         it does NOT stimulate memories or trigger learning. Use engram_recall \
-         when you actually want to use a memory."
+        "Search memories by semantic similarity using vector embeddings. \
+         Finds memories with similar meaning even if they don't share exact keywords."
     }
 
     fn schema(&self) -> JsonValue {
         json!({
             "type": "object",
+            "required": ["query"],
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Text to search for in memory content."
+                    "description": "Text to search for semantically. Finds memories with similar meaning."
                 },
-                "tags": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Filter by tags."
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return. Default: 10"
                 },
-                "tag_mode": {
-                    "type": "string",
-                    "enum": ["all", "any"],
-                    "description": "Match all tags or any tag. Default: any"
+                "min_score": {
+                    "type": "number",
+                    "description": "Minimum similarity score (0.0-1.0). Default: 0.4"
                 },
                 "include_deep": {
                     "type": "boolean",
@@ -62,10 +62,6 @@ impl Tool<Context> for EngramSearchTool {
                 "include_archived": {
                     "type": "boolean",
                     "description": "Include archived memories. Default: false"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum results to return."
                 }
             }
         })
@@ -80,60 +76,76 @@ impl Tool<Context> for EngramSearchTool {
         let args: Args = serde_json::from_value(args)
             .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let brain = context.brain.lock().unwrap();
+        let limit = args.limit.unwrap_or(10);
+        let min_score = args.min_score.unwrap_or(0.4);
+        let include_deep = args.include_deep.unwrap_or(false);
+        let include_archived = args.include_archived.unwrap_or(false);
 
-        let mut options = SearchOptions::default();
-        if args.include_archived.unwrap_or(false) {
-            options = options.include_all();
-        } else if args.include_deep.unwrap_or(false) {
-            options = options.include_deep();
-        }
-        if let Some(limit) = args.limit {
-            options = options.with_limit(limit);
+        let mut brain = context.brain.lock().unwrap();
+
+        // Lazy decay - check if interval elapsed, apply if so
+        let _ = brain.apply_time_decay();
+
+        // Generate query embedding
+        let generator = EmbeddingGenerator::new();
+        let query_embedding = generator.generate(&args.query)
+            .map_err(|e| McpError::ToolError(format!("Failed to generate embedding: {}", e)))?;
+
+        // Find similar memories (fetch extra to allow for filtering)
+        let vector_results = brain.find_similar_by_embedding(&query_embedding, limit * 3, min_score)
+            .map_err(|e| McpError::ToolError(format!("Vector search failed: {}", e)))?;
+
+        // Score blending: 70% semantic similarity, 30% energy (recency/relevance)
+        // This boosts recently-used memories even if semantic match is slightly lower
+        struct ScoredResult {
+            id: uuid::Uuid,
+            content: String,
+            similarity: f32,
+            energy: f64,
+            blended: f32,
+            state_emoji: &'static str,
         }
 
-        let results: Vec<&Engram> = if !args.tags.is_empty() {
-            let tag_refs: Vec<&str> = args.tags.iter().map(|s| s.as_str()).collect();
-            let mode = match args.tag_mode.as_deref() {
-                Some("all") => TagMatchMode::All,
-                _ => TagMatchMode::Any,
+        let mut scored: Vec<ScoredResult> = vector_results.iter().filter_map(|r| {
+            let engram = brain.get(&r.id)?;
+            
+            // State filter
+            let state_ok = if include_archived {
+                true
+            } else if include_deep {
+                !engram.is_archived()
+            } else {
+                engram.is_searchable()
             };
-            brain.search_by_tags(&tag_refs, mode)
-        } else if let Some(query) = &args.query {
-            // Use FTS search for tokenized matching
-            match brain.search_fts(query) {
-                Ok(mut fts_results) => {
-                    // Apply state filtering based on options
-                    let include_archived = args.include_archived.unwrap_or(false);
-                    let include_deep = args.include_deep.unwrap_or(false);
-                    
-                    fts_results.retain(|e| {
-                        if include_archived {
-                            true // Include all states
-                        } else if include_deep {
-                            !e.is_archived() // Include Active, Dormant, Deep
-                        } else {
-                            e.is_searchable() // Only Active and Dormant
-                        }
-                    });
-                    
-                    // Apply limit
-                    if let Some(limit) = args.limit {
-                        fts_results.truncate(limit);
-                    }
-                    fts_results
-                }
-                Err(_) => {
-                    // Fallback to substring search if FTS fails
-                    brain.search_with_options(query, options)
-                }
-            }
-        } else {
-            brain.searchable_engrams().take(args.limit.unwrap_or(10)).collect()
-        };
+            if !state_ok { return None; }
+            
+            let blended = r.score * 0.7 + (engram.energy as f32) * 0.3;
+            
+            Some(ScoredResult {
+                id: r.id,
+                content: r.content.clone(),
+                similarity: r.score,
+                energy: engram.energy,
+                blended,
+                state_emoji: engram.state.emoji(),
+            })
+        }).collect();
 
-        if results.is_empty() {
-            return Ok(text_response("No memories found.".to_string()));
+        // Sort by blended score descending
+        scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Limit results
+        scored.truncate(limit);
+
+        if scored.is_empty() {
+            let mut output = String::from(
+                "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
+                 💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
+                 ---\n\n"
+            );
+            output.push_str("No memories found.\n");
+            output.push_str("\n💡 Tip: Try a different query or lower min_score.");
+            return Ok(text_response(output));
         }
 
         let mut output = String::from(
@@ -141,10 +153,18 @@ impl Tool<Context> for EngramSearchTool {
              💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
              ---\n\n"
         );
-        output.push_str(&format!("Found {} memories:\n\n", results.len()));
-        for engram in results {
-            output.push_str(&format_engram(engram));
-            output.push_str("\n\n");
+        output.push_str(&format!("Found {} memories:\n\n", scored.len()));
+        
+        for r in &scored {
+            output.push_str(&format!(
+                "ID: {}\nContent: {}\nScore: {:.2} (sim: {:.2}, energy: {:.2}) | State: {}\n\n",
+                r.id,
+                r.content,
+                r.blended,
+                r.similarity,
+                r.energy,
+                r.state_emoji,
+            ));
         }
 
         Ok(text_response(output))

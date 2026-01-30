@@ -8,10 +8,12 @@
 
 mod tools;
 mod bootstrap;
+mod embedding;
 mod engram;
 mod reference;
 mod lenses;
 
+use crate::embedding::EmbeddingGenerator;
 use crate::engram::{Brain, SqliteStorage, Storage};
 use crate::reference::ReferenceManager;
 use sml_mcps::{Server, ServerConfig, StdioTransport};
@@ -87,6 +89,55 @@ fn main() {
         Ok(count) => eprintln!("Pruned {} weak associations (below {} threshold)", 
             count, brain.config().min_association_weight),
         Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
+    }
+
+    // Backfill embeddings for memories that don't have them
+    match brain.count_without_embeddings() {
+        Ok(0) => {} // All memories have embeddings
+        Ok(count) => {
+            eprintln!("Generating embeddings for {} memories...", count);
+            let generator = EmbeddingGenerator::new();
+            let mut processed = 0;
+            let mut errors = 0;
+            
+            // Process in batches of 50
+            loop {
+                match brain.get_ids_without_embeddings(50) {
+                    Ok(ids) if ids.is_empty() => break,
+                    Ok(ids) => {
+                        for id in &ids {
+                            if let Some(engram) = brain.get(id) {
+                                match generator.generate(&engram.content) {
+                                    Ok(embedding) => {
+                                        if brain.set_embedding(id, &embedding).is_ok() {
+                                            processed += 1;
+                                        } else {
+                                            errors += 1;
+                                        }
+                                    }
+                                    Err(_) => errors += 1,
+                                }
+                            }
+                        }
+                        eprint!("\r  Processed {}/{} memories...", processed, count);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to get memories for embedding: {}", e);
+                        break;
+                    }
+                }
+            }
+            eprintln!("\r  Generated {} embeddings ({} errors)        ", processed, errors);
+        }
+        Err(e) => eprintln!("Warning: Failed to check embedding status: {}", e),
+    }
+
+    // Bootstrap semantic associations for memories that have embeddings
+    // This creates associations between semantically similar memories
+    match brain.bootstrap_semantic_associations(0.5, 5) {
+        Ok((0, _)) => {} // No new associations needed
+        Ok((created, _)) => eprintln!("Created {} semantic associations", created),
+        Err(e) => eprintln!("Warning: Failed to bootstrap semantic associations: {}", e),
     }
 
     // Load reference sources

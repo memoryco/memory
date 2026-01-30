@@ -57,6 +57,10 @@ impl Tool<Context> for EngramRecallTool {
             .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
+        
+        // Lazy decay - check if interval elapsed, apply if so
+        let _ = brain.apply_time_decay();
+        
         let mut output = String::new();
         let mut recalled_count = 0;
         let mut not_found_count = 0;

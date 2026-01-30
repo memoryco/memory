@@ -30,7 +30,11 @@ impl Tool<Context> for EngramStatsTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.lock().unwrap();
+        
+        // Lazy decay - check if interval elapsed, apply if so
+        let _ = brain.apply_time_decay();
+        
         let stats = brain.stats();
 
         let output = format!(

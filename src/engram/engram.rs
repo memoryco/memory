@@ -99,6 +99,11 @@ pub struct Engram {
     
     /// Optional tags/entities for categorization
     pub tags: Vec<String>,
+    
+    /// Semantic embedding vector (384-dim) for similarity search
+    /// None if not yet computed or embeddings disabled
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub embedding: Option<Vec<f32>>,
 }
 
 impl Engram {
@@ -115,6 +120,7 @@ impl Engram {
             last_accessed: now,
             access_count: 0,
             tags: Vec::new(),
+            embedding: None,
         }
     }
     

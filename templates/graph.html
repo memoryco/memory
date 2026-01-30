@@ -292,7 +292,6 @@
     <div id="tooltip">
         <div class="content"></div>
         <div class="meta"></div>
-        <div class="tags"></div>
     </div>
 
     <svg id="graph"></svg>
@@ -426,9 +425,6 @@
                 <span>${d.state} Energy: ${d.energy.toFixed(2)}</span>
                 <span>Accessed: ${d.access_count}x</span>
             `;
-            
-            const tagsHtml = d.tags.map(t => `<span class="tag">${t}</span>`).join('');
-            tooltip.querySelector('.tags').innerHTML = tagsHtml;
             
             tooltip.classList.add('visible');
         });

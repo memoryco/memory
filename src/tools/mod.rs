@@ -70,12 +70,11 @@ pub fn text_response(text: String) -> CallToolResult {
 /// Format an engram for display
 pub fn format_engram(e: &Engram) -> String {
     format!(
-        "ID: {}\nContent: {}\nState: {} (energy: {:.2})\nTags: {:?}\nAccess count: {}\nCreated: {}",
+        "ID: {}\nContent: {}\nState: {} (energy: {:.2})\nAccess count: {}\nCreated: {}",
         e.id,
         e.content,
         e.state.emoji(),
         e.energy,
-        e.tags,
         e.access_count,
         e.created_at
     )

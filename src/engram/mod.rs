@@ -22,7 +22,7 @@ pub use engram::{Engram, MemoryState};
 pub use substrate::{Substrate, SubstrateStats, StimulationResult, RecallResult, SearchOptions, StateFilter, TagMatchMode};
 pub use association::Association;
 pub use identity::{Identity, Persona, Value, Preference, Relationship, Antipattern, CommunicationStyle, IdentitySearchResults};
-pub use storage::{Storage, StorageError, StorageResult, MemoryStorage, SqliteStorage};
+pub use storage::{Storage, StorageError, StorageResult, MemoryStorage, SqliteStorage, SimilarityResult};
 pub use brain::Brain;
 
 /// Unique identifier for an engram

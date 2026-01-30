@@ -6,9 +6,11 @@
 
 mod memory;
 mod sqlite;
+mod vector;
 
 pub use memory::MemoryStorage;
 pub use sqlite::SqliteStorage;
+pub use vector::{VectorSearch, SimilarityResult};
 
 use super::{EngramId, Engram, Association, Config, MemoryState};
 use super::identity::Identity;
@@ -178,5 +180,50 @@ pub trait Storage: Send {
     /// Close the storage cleanly
     fn close(&mut self) -> StorageResult<()> {
         self.flush()
+    }
+    
+    // ==================
+    // VECTOR SEARCH
+    // ==================
+    
+    /// Find engrams similar to the given embedding
+    /// Returns (id, score, content) tuples sorted by descending similarity
+    fn find_similar_by_embedding(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        // Default: no vector search support
+        let _ = (query_embedding, limit, min_score);
+        Ok(Vec::new())
+    }
+    
+    /// Count engrams that have embeddings
+    fn count_with_embeddings(&self) -> StorageResult<usize> {
+        Ok(0)
+    }
+    
+    /// Count engrams that need embeddings
+    fn count_without_embeddings(&self) -> StorageResult<usize> {
+        Ok(0)
+    }
+    
+    /// Get IDs of engrams that need embeddings (for backfill)
+    fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
+        let _ = limit;
+        Ok(Vec::new())
+    }
+    
+    /// Update embedding for a single engram
+    fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+        let _ = (id, embedding);
+        Ok(())
+    }
+    
+    /// Get embedding for a single engram
+    fn get_embedding(&self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+        let _ = id;
+        Ok(None)
     }
 }

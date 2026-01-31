@@ -60,31 +60,43 @@ impl Tool<Context> for EngramCreateTool {
         let args: Args = serde_json::from_value(args)
             .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let mut brain = context.brain.lock().unwrap();
-        
-        // Create embedding generator once for the batch
-        let generator = EmbeddingGenerator::new();
-        
+        let mut created: Vec<(EngramId, String)> = Vec::new();
         let mut output = String::new();
-        let mut created_count = 0;
 
-        for memory in &args.memories {
-            let id: EngramId = brain.create(&memory.content)
-                .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-            // Generate and save embedding
-            if let Ok(embedding) = generator.generate(&memory.content) {
-                let _ = brain.set_embedding(&id, &embedding);
+        // Phase 1: Create memories (holding lock)
+        {
+            let mut brain = context.brain.lock().unwrap();
+            for memory in &args.memories {
+                let id: EngramId = brain.create(&memory.content)
+                    .map_err(|e| McpError::ToolError(e.to_string()))?;
+                
+                output.push_str(&format!(
+                    "ID: {}\nContent: {}\n\n",
+                    id, memory.content
+                ));
+                
+                created.push((id, memory.content.clone()));
             }
+        } // Lock released here
 
-            created_count += 1;
-            output.push_str(&format!(
-                "ID: {}\nContent: {}\n\n",
-                id, memory.content
-            ));
+        // Phase 2: Spawn background embedding tasks (no lock held)
+        for (id, content) in created.iter() {
+            let brain_clone = context.brain.clone();
+            let id_clone = id.clone();
+            let content_clone = content.clone();
+
+            std::thread::spawn(move || {
+                let generator = EmbeddingGenerator::new();
+                if let Ok(embedding) = generator.generate(&content_clone) {
+                    if let Ok(mut brain) = brain_clone.lock() {
+                        let _ = brain.set_embedding(&id_clone, &embedding);
+                    }
+                }
+            });
         }
 
-        let header = format!("{} memories created.\n\n", created_count);
+        // Phase 3: Return immediately
+        let header = format!("{} memories created (embeddings generating in background).\n\n", created.len());
         Ok(text_response(format!("{}{}", header, output.trim())))
     }
 }

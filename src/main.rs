@@ -19,12 +19,13 @@ use crate::engram::{Brain, SqliteStorage, Storage};
 use crate::reference::ReferenceManager;
 use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Server context containing the Brain and ReferenceManager.
-/// Wrapped in Mutex because neither is Sync.
+/// Brain is Arc<Mutex<>> to allow background tasks (like embedding generation).
+/// References is plain Mutex since it's only used synchronously.
 pub struct Context {
-    pub brain: Mutex<Brain>,
+    pub brain: Arc<Mutex<Brain>>,
     pub references: Mutex<ReferenceManager>,
     pub lenses_dir: PathBuf,
     pub memory_home: PathBuf,
@@ -157,7 +158,7 @@ fn main() {
     }
 
     let context = Context {
-        brain: Mutex::new(brain),
+        brain: Arc::new(Mutex::new(brain)),
         references: Mutex::new(references),
         lenses_dir: lenses_dir.clone(),
         memory_home: memory_home.clone(),

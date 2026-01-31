@@ -401,6 +401,36 @@ impl Storage for SqliteStorage {
         Ok(deleted > 0)
     }
     
+    fn save_engram_energies(&mut self, updates: &[(&EngramId, f64, MemoryState)]) -> StorageResult<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        
+        let tx = self.conn.transaction()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE engrams SET energy = ?1, state = ?2 WHERE id = ?3"
+            ).map_err(|e| StorageError::Database(e.to_string()))?;
+            
+            for (id, energy, state) in updates {
+                let state_str = match state {
+                    MemoryState::Active => "active",
+                    MemoryState::Dormant => "dormant",
+                    MemoryState::Deep => "deep",
+                    MemoryState::Archived => "archived",
+                };
+                
+                stmt.execute(params![energy, state_str, id.to_string()])
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+            }
+        }
+        
+        tx.commit().map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(())
+    }
+    
     // ==================
     // ASSOCIATIONS
     // ==================

@@ -195,12 +195,13 @@ impl Brain {
     
     /// Persist the side effects of a recall operation
     fn persist_recall_effects(&mut self, result: &RecallResult) -> StorageResult<()> {
-        // Save all affected engrams
-        let engrams: Vec<&Engram> = result.affected_ids.iter()
+        // Save only energy/state for affected engrams (skips FTS rebuild)
+        let updates: Vec<_> = result.affected_ids.iter()
             .filter_map(|id| self.substrate.get(id))
+            .map(|e| (&e.id, e.energy, e.state.clone()))
             .collect();
         
-        self.storage.save_engrams(&engrams)?;
+        self.storage.save_engram_energies(&updates)?;
         
         // Save any associations modified by Hebbian learning
         if !result.modified_associations.is_empty() {
@@ -327,10 +328,11 @@ impl Brain {
         let applied = self.substrate.apply_time_decay();
         
         if applied {
-            // Save all engrams (their energy/state may have changed)
-            let engrams: Vec<Engram> = self.substrate.all_engrams().cloned().collect();
-            let engram_refs: Vec<&Engram> = engrams.iter().collect();
-            self.storage.save_engrams(&engram_refs)?;
+            // Save only energy/state for all engrams (skips FTS rebuild)
+            let updates: Vec<_> = self.substrate.all_engrams()
+                .map(|e| (&e.id, e.energy, e.state.clone()))
+                .collect();
+            self.storage.save_engram_energies(&updates)?;
             
             // Save the last decay timestamp
             self.storage.save_last_decay_at(self.substrate.last_decay_at())?;
@@ -362,10 +364,11 @@ impl Brain {
     pub fn tick_decay(&mut self) -> StorageResult<()> {
         self.substrate.tick_decay();
         
-        // Save all engrams (their energy/state may have changed)
-        let engrams: Vec<Engram> = self.substrate.all_engrams().cloned().collect();
-        let engram_refs: Vec<&Engram> = engrams.iter().collect();
-        self.storage.save_engrams(&engram_refs)?;
+        // Save only energy/state for all engrams (skips FTS rebuild)
+        let updates: Vec<_> = self.substrate.all_engrams()
+            .map(|e| (&e.id, e.energy, e.state.clone()))
+            .collect();
+        self.storage.save_engram_energies(&updates)?;
         
         Ok(())
     }

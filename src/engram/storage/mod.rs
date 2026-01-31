@@ -121,6 +121,15 @@ pub trait Storage: Send {
     /// Returns true if the engram existed and was deleted
     fn delete_engram(&mut self, id: &EngramId) -> StorageResult<bool>;
     
+    /// Update only energy and state for engrams (skips FTS rebuild)
+    /// Used by decay and recall effects where content hasn't changed
+    /// Default implementation falls back to full save
+    fn save_engram_energies(&mut self, updates: &[(&EngramId, f64, MemoryState)]) -> StorageResult<()> {
+        // Default: no optimized implementation, caller should use save_engrams
+        let _ = updates;
+        Ok(())
+    }
+    
     // ==================
     // ASSOCIATIONS
     // ==================

@@ -13,6 +13,7 @@ mod engram;
 mod identity;
 mod reference;
 mod lenses;
+mod storage;
 
 use crate::embedding::EmbeddingGenerator;
 use crate::engram::{Brain, SqliteStorage, Storage};

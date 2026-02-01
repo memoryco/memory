@@ -12,51 +12,11 @@ pub use memory::MemoryStorage;
 pub use sqlite::SqliteStorage;
 pub use vector::{VectorSearch, SimilarityResult};
 
+// Re-export unified storage types from the foundation
+pub use crate::storage::{StorageError, StorageResult};
+
 use super::{EngramId, Engram, Association, Config, MemoryState};
 use super::identity::Identity;
-use std::fmt;
-
-/// Result type for storage operations
-pub type StorageResult<T> = Result<T, StorageError>;
-
-/// Errors that can occur during storage operations
-#[derive(Debug)]
-pub enum StorageError {
-    /// Item not found
-    NotFound(String),
-    /// IO error (file, network, etc.)
-    Io(String),
-    /// Serialization/deserialization error
-    Serialization(String),
-    /// Database/query error
-    Database(String),
-    /// Configuration error
-    Config(String),
-    /// Generic error with context
-    Other(String),
-}
-
-impl fmt::Display for StorageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StorageError::NotFound(msg) => write!(f, "Not found: {}", msg),
-            StorageError::Io(msg) => write!(f, "IO error: {}", msg),
-            StorageError::Serialization(msg) => write!(f, "Serialization error: {}", msg),
-            StorageError::Database(msg) => write!(f, "Database error: {}", msg),
-            StorageError::Config(msg) => write!(f, "Config error: {}", msg),
-            StorageError::Other(msg) => write!(f, "Error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for StorageError {}
-
-// Convenience conversions
-impl From<std::io::Error> for StorageError {
-    fn from(err: std::io::Error) -> Self {
-        StorageError::Io(err.to_string())
-    }
-}
 
 /// The storage contract
 /// 

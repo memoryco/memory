@@ -5,39 +5,36 @@ use crate::engram::{
     EngramId, Engram, MemoryState, Config, Association,
     Identity,
 };
+use crate::storage::Database;
 use rusqlite::{Connection, params};
 use std::path::Path;
 
 /// SQLite-backed storage implementation
 pub struct SqliteStorage {
-    conn: Connection,
+    db: Database,
 }
 
 impl SqliteStorage {
     /// Create a new SQLite storage at the given path
     pub fn new<P: AsRef<Path>>(path: P) -> StorageResult<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| StorageError::Database(e.to_string()))?;
-        
-        Ok(Self { conn })
+        let db = Database::open(path)?;
+        Ok(Self { db })
     }
     
     /// Create an in-memory SQLite database (for testing)
     pub fn in_memory() -> StorageResult<Self> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| StorageError::Database(e.to_string()))?;
-        
-        Ok(Self { conn })
+        let db = Database::in_memory()?;
+        Ok(Self { db })
     }
     
     /// Get a reference to the underlying connection (for VectorSearch)
     pub fn connection(&self) -> &Connection {
-        &self.conn
+        self.db.conn()
     }
     
     /// Create the database schema
     fn create_schema(&self) -> StorageResult<()> {
-        self.conn.execute_batch(r#"
+        self.db.initialize_schema(r#"
             -- Identity table (single row, JSON blob)
             CREATE TABLE IF NOT EXISTS identity (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -95,9 +92,7 @@ impl SqliteStorage {
                 tags,
                 engram_id UNINDEXED
             );
-        "#).map_err(|e| StorageError::Database(e.to_string()))?;
-        
-        Ok(())
+        "#)
     }
 }
 
@@ -116,7 +111,7 @@ impl Storage for SqliteStorage {
         let json = serde_json::to_string(identity)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
         
-        self.conn.execute(
+        self.db.conn().execute(
             "INSERT OR REPLACE INTO identity (id, data) VALUES (1, ?1)",
             params![json]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -125,7 +120,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_identity(&self) -> StorageResult<Option<Identity>> {
-        let result: Result<String, _> = self.conn.query_row(
+        let result: Result<String, _> = self.db.conn().query_row(
             "SELECT data FROM identity WHERE id = 1",
             [],
             |row| row.get(0)
@@ -159,7 +154,7 @@ impl Storage for SqliteStorage {
         
         let id_str = engram.id.to_string();
         
-        self.conn.execute(
+        self.db.conn().execute(
             r#"INSERT OR REPLACE INTO engrams 
                (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
@@ -178,12 +173,12 @@ impl Storage for SqliteStorage {
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
         // Update FTS index: delete existing entry (if any), then insert new
-        self.conn.execute(
+        self.db.conn().execute(
             "DELETE FROM engrams_fts WHERE engram_id = ?1",
             params![&id_str]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
-        self.conn.execute(
+        self.db.conn().execute(
             "INSERT INTO engrams_fts (content, tags, engram_id) VALUES (?1, ?2, ?3)",
             params![&engram.content, &tags_json, &id_str]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -192,7 +187,7 @@ impl Storage for SqliteStorage {
     }
     
     fn save_engrams(&mut self, engrams: &[&Engram]) -> StorageResult<()> {
-        let tx = self.conn.transaction()
+        let tx = self.db.conn_mut().transaction()
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         {
@@ -249,7 +244,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_engram(&self, id: &EngramId) -> StorageResult<Option<Engram>> {
-        let result = self.conn.query_row(
+        let result = self.db.conn().query_row(
             "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding FROM engrams WHERE id = ?1",
             params![id.to_string()],
             |row| {
@@ -276,7 +271,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_all_engrams(&self) -> StorageResult<Vec<Engram>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.db.conn().prepare(
             "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags FROM engrams"
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -312,7 +307,7 @@ impl Storage for SqliteStorage {
             MemoryState::Archived => "archived",
         };
         
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.db.conn().prepare(
             "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags FROM engrams WHERE state = ?1"
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -345,7 +340,7 @@ impl Storage for SqliteStorage {
         // We search for the tag in the JSON array
         let pattern = format!("%\"{}%", tag.to_lowercase());
         
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.db.conn().prepare(
             "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags FROM engrams WHERE LOWER(tags) LIKE ?1"
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -381,19 +376,19 @@ impl Storage for SqliteStorage {
         let id_str = id.to_string();
         
         // Delete the engram
-        let deleted = self.conn.execute(
+        let deleted = self.db.conn().execute(
             "DELETE FROM engrams WHERE id = ?1",
             params![&id_str]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
         // Delete from FTS index
-        self.conn.execute(
+        self.db.conn().execute(
             "DELETE FROM engrams_fts WHERE engram_id = ?1",
             params![&id_str]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
         // Delete associations from/to this engram
-        self.conn.execute(
+        self.db.conn().execute(
             "DELETE FROM associations WHERE from_id = ?1 OR to_id = ?1",
             params![&id_str]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -406,7 +401,7 @@ impl Storage for SqliteStorage {
             return Ok(());
         }
         
-        let tx = self.conn.transaction()
+        let tx = self.db.conn_mut().transaction()
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         {
@@ -436,7 +431,7 @@ impl Storage for SqliteStorage {
     // ==================
     
     fn save_association(&mut self, assoc: &Association) -> StorageResult<()> {
-        self.conn.execute(
+        self.db.conn().execute(
             r#"INSERT OR REPLACE INTO associations 
                (from_id, to_id, weight, created_at, last_activated, co_activation_count)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
@@ -454,7 +449,7 @@ impl Storage for SqliteStorage {
     }
     
     fn save_associations(&mut self, assocs: &[&Association]) -> StorageResult<()> {
-        let tx = self.conn.transaction()
+        let tx = self.db.conn_mut().transaction()
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         {
@@ -481,7 +476,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_associations_from(&self, from: &EngramId) -> StorageResult<Vec<Association>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.db.conn().prepare(
             "SELECT from_id, to_id, weight, created_at, last_activated, co_activation_count FROM associations WHERE from_id = ?1"
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -506,7 +501,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_all_associations(&self) -> StorageResult<Vec<Association>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.db.conn().prepare(
             "SELECT from_id, to_id, weight, created_at, last_activated, co_activation_count FROM associations"
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -531,7 +526,7 @@ impl Storage for SqliteStorage {
     }
     
     fn delete_all_associations(&mut self) -> StorageResult<()> {
-        self.conn.execute("DELETE FROM associations", [])
+        self.db.conn().execute("DELETE FROM associations", [])
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(())
     }
@@ -544,7 +539,7 @@ impl Storage for SqliteStorage {
         let json = serde_json::to_string(config)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
         
-        self.conn.execute(
+        self.db.conn().execute(
             "INSERT OR REPLACE INTO config (id, data) VALUES (1, ?1)",
             params![json]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -553,7 +548,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_config(&self) -> StorageResult<Option<Config>> {
-        let result: Result<String, _> = self.conn.query_row(
+        let result: Result<String, _> = self.db.conn().query_row(
             "SELECT data FROM config WHERE id = 1",
             [],
             |row| row.get(0)
@@ -571,7 +566,7 @@ impl Storage for SqliteStorage {
     }
     
     fn save_last_decay_at(&mut self, timestamp: i64) -> StorageResult<()> {
-        self.conn.execute(
+        self.db.conn().execute(
             "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_decay_at', ?1)",
             params![timestamp.to_string()]
         ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -580,7 +575,7 @@ impl Storage for SqliteStorage {
     }
     
     fn load_last_decay_at(&self) -> StorageResult<Option<i64>> {
-        let result: Result<String, _> = self.conn.query_row(
+        let result: Result<String, _> = self.db.conn().query_row(
             "SELECT value FROM metadata WHERE key = 'last_decay_at'",
             [],
             |row| row.get(0)
@@ -603,7 +598,7 @@ impl Storage for SqliteStorage {
     
     fn flush(&mut self) -> StorageResult<()> {
         // SQLite auto-commits, but we can force a checkpoint for WAL mode
-        self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")
+        self.db.conn().execute_batch("PRAGMA wal_checkpoint(PASSIVE);")
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(())
     }
@@ -618,32 +613,32 @@ impl Storage for SqliteStorage {
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        let vs = VectorSearch::new(&self.conn);
+        let vs = VectorSearch::new(self.db.conn());
         vs.find_similar(query_embedding, limit, min_score)
     }
     
     fn count_with_embeddings(&self) -> StorageResult<usize> {
-        let vs = VectorSearch::new(&self.conn);
+        let vs = VectorSearch::new(self.db.conn());
         vs.count_with_embeddings()
     }
     
     fn count_without_embeddings(&self) -> StorageResult<usize> {
-        let vs = VectorSearch::new(&self.conn);
+        let vs = VectorSearch::new(self.db.conn());
         vs.count_without_embeddings()
     }
     
     fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
-        let vs = VectorSearch::new(&self.conn);
+        let vs = VectorSearch::new(self.db.conn());
         vs.get_ids_without_embeddings(limit)
     }
     
     fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
-        let vs = VectorSearch::new(&self.conn);
+        let vs = VectorSearch::new(self.db.conn());
         vs.set_embedding(id, embedding)
     }
     
     fn get_embedding(&self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
-        let vs = VectorSearch::new(&self.conn);
+        let vs = VectorSearch::new(self.db.conn());
         vs.get_embedding(id)
     }
 }
@@ -668,7 +663,7 @@ impl SqliteStorage {
             .collect::<Vec<_>>()
             .join(" OR ");
         
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.db.conn().prepare(
             "SELECT engram_id FROM engrams_fts WHERE engrams_fts MATCH ?1"
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
@@ -691,11 +686,11 @@ impl SqliteStorage {
     /// Call this after migrating an existing database to add FTS support
     pub fn rebuild_fts_index(&mut self) -> StorageResult<usize> {
         // Clear existing FTS data
-        self.conn.execute("DELETE FROM engrams_fts", [])
+        self.db.conn().execute("DELETE FROM engrams_fts", [])
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         // Re-insert all engrams into FTS
-        let count = self.conn.execute(
+        let count = self.db.conn().execute(
             "INSERT INTO engrams_fts (content, tags, engram_id) SELECT content, tags, id FROM engrams",
             []
         ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -705,13 +700,13 @@ impl SqliteStorage {
     
     /// Check if FTS index needs rebuilding (exists but is empty while engrams exist)
     pub fn fts_needs_rebuild(&self) -> StorageResult<bool> {
-        let engram_count: i64 = self.conn.query_row(
+        let engram_count: i64 = self.db.conn().query_row(
             "SELECT COUNT(*) FROM engrams",
             [],
             |row| row.get(0)
         ).map_err(|e| StorageError::Database(e.to_string()))?;
         
-        let fts_count: i64 = self.conn.query_row(
+        let fts_count: i64 = self.db.conn().query_row(
             "SELECT COUNT(*) FROM engrams_fts",
             [],
             |row| row.get(0)
@@ -723,7 +718,7 @@ impl SqliteStorage {
     /// Migrate existing database to add embedding column if missing
     fn migrate_embeddings(&self) -> StorageResult<()> {
         // Check if embedding column exists
-        let has_embedding: bool = self.conn.query_row(
+        let has_embedding: bool = self.db.conn().query_row(
             "SELECT COUNT(*) FROM pragma_table_info('engrams') WHERE name = 'embedding'",
             [],
             |row| row.get::<_, i64>(0).map(|c| c > 0)
@@ -731,7 +726,7 @@ impl SqliteStorage {
         
         if !has_embedding {
             // Add the embedding column
-            self.conn.execute(
+            self.db.conn().execute(
                 "ALTER TABLE engrams ADD COLUMN embedding BLOB",
                 []
             ).map_err(|e| StorageError::Database(e.to_string()))?;
@@ -1041,12 +1036,12 @@ mod tests {
         let id2 = uuid::Uuid::new_v4().to_string();
         
         // Manually insert engrams without FTS (simulating legacy data)
-        storage.conn.execute(
+        storage.connection().execute(
             r#"INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
                VALUES (?1, 'Test content one', 1.0, 'active', 1.0, 0, 0, 0, '["test"]', NULL)"#,
             params![&id1]
         ).unwrap();
-        storage.conn.execute(
+        storage.connection().execute(
             r#"INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding)
                VALUES (?1, 'Test content two', 1.0, 'active', 1.0, 0, 0, 0, '["test"]', NULL)"#,
             params![&id2]

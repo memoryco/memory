@@ -11,12 +11,17 @@ static EMBEDDING_MODEL: OnceLock<Mutex<TextEmbedding>> = OnceLock::new();
 
 /// Get the cache directory for embedding models
 fn get_cache_dir() -> PathBuf {
-    // Use MEMORY_HOME/models if set, otherwise default fastembed location
+    // Use MEMORY_HOME/models if set, otherwise use system cache dir
     if let Ok(home) = std::env::var("MEMORY_HOME") {
         PathBuf::from(home).join("models")
     } else {
+        // Try data_local_dir first (~/Library/Application Support on macOS)
+        // Fall back to cache_dir (~/Library/Caches on macOS)
+        // Last resort: home directory
         dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
+            .or_else(dirs::cache_dir)
+            .or_else(dirs::home_dir)
+            .expect("Could not determine cache directory")
             .join("memory")
             .join("models")
     }

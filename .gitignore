@@ -1,2 +1,5 @@
 /target
 .fastembed_cache/
+
+# AI semantic search index
+.ai-index/

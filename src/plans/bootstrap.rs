@@ -10,6 +10,7 @@ Plans are lightweight task tracking for multi-step work. Use them to stay organi
 - Multi-step tasks that span multiple messages
 - Complex work where you might lose track
 - Anything with clear milestones worth tracking
+- Keep steps small and atomic (~5 min each). If a step feels too big, break it down first.
 
 **Tools:**
 - `plans` - list active plans (id + description)

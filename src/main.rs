@@ -16,7 +16,7 @@ mod lenses;
 mod storage;
 
 use crate::embedding::EmbeddingGenerator;
-use crate::engram::{Brain, SqliteStorage, Storage};
+use crate::engram::{Brain, EngramStorage, Storage};
 use crate::reference::ReferenceManager;
 use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::path::PathBuf;
@@ -61,7 +61,7 @@ fn main() {
     eprintln!("  References: {}", references_dir.display());
 
     // Open or create the brain
-    let mut storage = SqliteStorage::new(&db_path)
+    let mut storage = EngramStorage::open(&db_path)
         .expect("Failed to open database");
     
     // Initialize schema

@@ -210,13 +210,13 @@ impl<'a> VectorSearch<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engram::storage::SqliteStorage;
+    use crate::engram::storage::EngramStorage;
     use crate::engram::Engram;
     use crate::engram::storage::Storage;
     
     #[test]
     fn vector_search_basics() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         // Create engrams with embeddings
@@ -244,7 +244,7 @@ mod tests {
     
     #[test]
     fn find_similar_to_engram() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let mut e1 = Engram::new("Machine learning basics");
@@ -270,7 +270,7 @@ mod tests {
     
     #[test]
     fn count_embeddings() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let mut e1 = Engram::new("With embedding");

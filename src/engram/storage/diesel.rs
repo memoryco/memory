@@ -1,6 +1,10 @@
-//! SQLite storage implementation using Diesel ORM
+//! Diesel-backed storage implementation for Engrams
+//!
+//! This module provides database storage using Diesel ORM.
+//! The actual database backend (SQLite, Postgres, MySQL) is selected
+//! via feature flags at compile time.
 
-use super::{Storage, StorageResult, StorageError, SimilarityResult, VectorSearch};
+use super::{Storage, StorageResult, StorageError, SimilarityResult};
 use crate::engram::{
     EngramId, Engram, MemoryState, Config, Association,
     Identity,
@@ -9,20 +13,37 @@ use crate::storage::schema::{engrams, associations, config, identity, metadata};
 use crate::storage::models::*;
 
 use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
 use diesel::connection::SimpleConnection;
 use std::path::Path;
 
-/// SQLite-backed storage implementation using Diesel
-pub struct SqliteStorage {
-    conn: SqliteConnection,
+// Conditional imports based on feature flags
+#[cfg(feature = "sqlite")]
+use diesel::sqlite::SqliteConnection as DbConnection;
+
+#[cfg(feature = "sqlite")]
+use super::VectorSearch;
+
+#[cfg(feature = "postgres")]
+use diesel::pg::PgConnection as DbConnection;
+
+/// Database-backed storage implementation for Engrams
+/// 
+/// The underlying database is selected at compile time via feature flags:
+/// - `sqlite` (default) - Uses SQLite, suitable for local/embedded use
+/// - `postgres` - Uses PostgreSQL, suitable for server/SaaS deployments
+pub struct EngramStorage {
+    conn: DbConnection,
 }
 
-impl SqliteStorage {
-    /// Create a new SQLite storage at the given path
-    pub fn new<P: AsRef<Path>>(path: P) -> StorageResult<Self> {
+impl EngramStorage {
+    /// Open storage at the given connection string/path
+    /// 
+    /// For SQLite: Pass a file path (e.g., "/path/to/brain.db")
+    /// For Postgres: Pass a connection URL (e.g., "postgres://user:pass@host/db")
+    #[cfg(feature = "sqlite")]
+    pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Self> {
         let path_str = path.as_ref().to_string_lossy();
-        let mut conn = SqliteConnection::establish(&path_str)
+        let mut conn = DbConnection::establish(&path_str)
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         // Apply SQLite pragmas for performance
@@ -36,9 +57,19 @@ impl SqliteStorage {
         Ok(Self { conn })
     }
     
-    /// Create an in-memory SQLite database (for testing)
+    /// Open storage at the given connection URL
+    #[cfg(feature = "postgres")]
+    pub fn open(connection_url: &str) -> StorageResult<Self> {
+        let conn = DbConnection::establish(connection_url)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        
+        Ok(Self { conn })
+    }
+    
+    /// Create an in-memory database (for testing) - SQLite only
+    #[cfg(feature = "sqlite")]
     pub fn in_memory() -> StorageResult<Self> {
-        let mut conn = SqliteConnection::establish(":memory:")
+        let mut conn = DbConnection::establish(":memory:")
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         conn.batch_execute("PRAGMA foreign_keys = ON;")
@@ -47,12 +78,13 @@ impl SqliteStorage {
         Ok(Self { conn })
     }
     
-    /// Get mutable reference to the underlying connection (for VectorSearch)
-    pub fn connection(&mut self) -> &mut SqliteConnection {
+    /// Get mutable reference to the underlying connection
+    pub fn connection(&mut self) -> &mut DbConnection {
         &mut self.conn
     }
     
-    /// Create the database schema
+    /// Create the database schema (SQLite)
+    #[cfg(feature = "sqlite")]
     fn create_schema(&mut self) -> StorageResult<()> {
         self.conn.batch_execute(r#"
             -- Identity table (single row, JSON blob)
@@ -109,7 +141,8 @@ impl SqliteStorage {
         Ok(())
     }
     
-    /// Migrate existing database to add embedding column if missing
+    /// Migrate existing database to add embedding column if missing (SQLite)
+    #[cfg(feature = "sqlite")]
     fn migrate_embeddings(&mut self) -> StorageResult<()> {
         // Check if embedding column exists using raw SQL
         #[derive(QueryableByName)]
@@ -137,10 +170,18 @@ impl SqliteStorage {
     }
 }
 
-impl Storage for SqliteStorage {
+impl Storage for EngramStorage {
+    #[cfg(feature = "sqlite")]
     fn initialize(&mut self) -> StorageResult<()> {
         self.create_schema()?;
         self.migrate_embeddings()?;
+        Ok(())
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn initialize(&mut self) -> StorageResult<()> {
+        // Postgres schema is managed via migrations (diesel_cli)
+        // TODO: Add postgres schema setup or use migrations
         Ok(())
     }
     
@@ -459,8 +500,15 @@ impl Storage for SqliteStorage {
     // LIFECYCLE
     // ==================
     
+    #[cfg(feature = "sqlite")]
     fn flush(&mut self) -> StorageResult<()> {
         self.conn.batch_execute("PRAGMA wal_checkpoint(PASSIVE);")?;
+        Ok(())
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn flush(&mut self) -> StorageResult<()> {
+        // Postgres doesn't need explicit flush
         Ok(())
     }
     
@@ -468,6 +516,7 @@ impl Storage for SqliteStorage {
     // VECTOR SEARCH
     // ==================
     
+    #[cfg(feature = "sqlite")]
     fn find_similar_by_embedding(
         &mut self,
         query_embedding: &[f32],
@@ -478,29 +527,71 @@ impl Storage for SqliteStorage {
         vs.find_similar(query_embedding, limit, min_score)
     }
     
+    #[cfg(feature = "sqlite")]
     fn count_with_embeddings(&mut self) -> StorageResult<usize> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.count_with_embeddings()
     }
     
+    #[cfg(feature = "sqlite")]
     fn count_without_embeddings(&mut self) -> StorageResult<usize> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.count_without_embeddings()
     }
     
+    #[cfg(feature = "sqlite")]
     fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.get_ids_without_embeddings(limit)
     }
     
+    #[cfg(feature = "sqlite")]
     fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.set_embedding(id, embedding)
     }
     
+    #[cfg(feature = "sqlite")]
     fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.get_embedding(id)
+    }
+    
+    // Postgres vector search - TODO: implement with pgvector
+    #[cfg(feature = "postgres")]
+    fn find_similar_by_embedding(
+        &mut self,
+        _query_embedding: &[f32],
+        _limit: usize,
+        _min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        // TODO: Implement with pgvector extension
+        Ok(Vec::new())
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn count_with_embeddings(&mut self) -> StorageResult<usize> {
+        Ok(0) // TODO
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn count_without_embeddings(&mut self) -> StorageResult<usize> {
+        Ok(0) // TODO
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn get_ids_without_embeddings(&mut self, _limit: usize) -> StorageResult<Vec<EngramId>> {
+        Ok(Vec::new()) // TODO
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn set_embedding(&mut self, _id: &EngramId, _embedding: &[f32]) -> StorageResult<()> {
+        Ok(()) // TODO
+    }
+    
+    #[cfg(feature = "postgres")]
+    fn get_embedding(&mut self, _id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+        Ok(None) // TODO
     }
 }
 
@@ -511,7 +602,7 @@ mod tests {
     
     #[test]
     fn save_and_load_engram() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let engram = Engram::with_tags("Test memory", vec!["work".into(), "rust".into()]);
@@ -528,7 +619,7 @@ mod tests {
     
     #[test]
     fn save_and_load_identity() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let identity = Identity::new()
@@ -548,7 +639,7 @@ mod tests {
     
     #[test]
     fn save_and_load_association() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let e1 = Engram::new("Memory 1");
@@ -565,7 +656,7 @@ mod tests {
     
     #[test]
     fn batch_save_engrams() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let e1 = Engram::new("Memory 1");
@@ -580,7 +671,7 @@ mod tests {
     
     #[test]
     fn load_by_state() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let mut active = Engram::new("Active memory");
@@ -604,7 +695,7 @@ mod tests {
     
     #[test]
     fn load_by_tag() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let work = Engram::with_tags("Work memory", vec!["work".into()]);
@@ -620,7 +711,7 @@ mod tests {
     
     #[test]
     fn config_persistence() {
-        let mut storage = SqliteStorage::in_memory().unwrap();
+        let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
         
         let config = Config {
@@ -642,11 +733,11 @@ mod tests {
     }
     
     #[test]
-    fn brain_with_sqlite() {
+    fn brain_with_diesel() {
         use crate::engram::Brain;
         
-        // Create a brain with SQLite backend
-        let storage = SqliteStorage::in_memory().unwrap();
+        // Create a brain with Diesel backend
+        let storage = EngramStorage::in_memory().unwrap();
         let mut brain = Brain::open(storage).unwrap();
         
         // Create some memories

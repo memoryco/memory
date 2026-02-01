@@ -5,11 +5,11 @@
 //! The key is: the rest of the system doesn't care.
 
 mod memory;
-mod sqlite;
+mod diesel;
 mod vector;
 
 pub use memory::MemoryStorage;
-pub use sqlite::SqliteStorage;
+pub use diesel::EngramStorage;
 pub use vector::{VectorSearch, SimilarityResult};
 
 // Re-export unified storage types from the foundation

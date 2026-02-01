@@ -37,7 +37,7 @@ pub trait Storage: Send {
     fn save_identity(&mut self, identity: &Identity) -> StorageResult<()>;
     
     /// Load the identity (returns None if not yet created)
-    fn load_identity(&self) -> StorageResult<Option<Identity>>;
+    fn load_identity(&mut self) -> StorageResult<Option<Identity>>;
     
     // ==================
     // ENGRAMS
@@ -57,33 +57,24 @@ pub trait Storage: Send {
     }
     
     /// Load a single engram by ID
-    fn load_engram(&self, id: &EngramId) -> StorageResult<Option<Engram>>;
+    fn load_engram(&mut self, id: &EngramId) -> StorageResult<Option<Engram>>;
     
     /// Load all engrams
-    fn load_all_engrams(&self) -> StorageResult<Vec<Engram>>;
+    fn load_all_engrams(&mut self) -> StorageResult<Vec<Engram>>;
     
     /// Load engrams by state (for partial loading)
-    fn load_engrams_by_state(&self, state: MemoryState) -> StorageResult<Vec<Engram>>;
+    fn load_engrams_by_state(&mut self, state: MemoryState) -> StorageResult<Vec<Engram>>;
     
     /// Load engrams by tag
-    fn load_engrams_by_tag(&self, tag: &str) -> StorageResult<Vec<Engram>>;
-    
-    /// Search engrams by content using full-text search
-    /// Returns IDs of matching engrams
-    /// Default implementation does simple substring matching
-    fn search_content(&self, query: &str) -> StorageResult<Vec<EngramId>> {
-        // Default: no search support, return empty
-        let _ = query;
-        Ok(Vec::new())
-    }
+    fn load_engrams_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Engram>>;
     
     /// Delete an engram by ID (also removes associated associations)
     /// Returns true if the engram existed and was deleted
     fn delete_engram(&mut self, id: &EngramId) -> StorageResult<bool>;
     
-    /// Update only energy and state for engrams (skips FTS rebuild)
+    /// Update only energy and state for engrams (efficient bulk update)
     /// Used by decay and recall effects where content hasn't changed
-    /// Default implementation falls back to full save
+    /// Default implementation is no-op; implementations should override
     fn save_engram_energies(&mut self, updates: &[(&EngramId, f64, MemoryState)]) -> StorageResult<()> {
         // Default: no optimized implementation, caller should use save_engrams
         let _ = updates;
@@ -107,10 +98,10 @@ pub trait Storage: Send {
     }
     
     /// Load all associations from a given engram
-    fn load_associations_from(&self, from: &EngramId) -> StorageResult<Vec<Association>>;
+    fn load_associations_from(&mut self, from: &EngramId) -> StorageResult<Vec<Association>>;
     
     /// Load all associations
-    fn load_all_associations(&self) -> StorageResult<Vec<Association>>;
+    fn load_all_associations(&mut self) -> StorageResult<Vec<Association>>;
     
     /// Delete all associations (for bulk operations like pruning)
     fn delete_all_associations(&mut self) -> StorageResult<()>;
@@ -123,13 +114,13 @@ pub trait Storage: Send {
     fn save_config(&mut self, config: &Config) -> StorageResult<()>;
     
     /// Load substrate configuration
-    fn load_config(&self) -> StorageResult<Option<Config>>;
+    fn load_config(&mut self) -> StorageResult<Option<Config>>;
     
     /// Save the last decay timestamp
     fn save_last_decay_at(&mut self, timestamp: i64) -> StorageResult<()>;
     
     /// Load the last decay timestamp
-    fn load_last_decay_at(&self) -> StorageResult<Option<i64>>;
+    fn load_last_decay_at(&mut self) -> StorageResult<Option<i64>>;
     
     // ==================
     // LIFECYCLE
@@ -158,7 +149,7 @@ pub trait Storage: Send {
     /// Find engrams similar to the given embedding
     /// Returns (id, score, content) tuples sorted by descending similarity
     fn find_similar_by_embedding(
-        &self,
+        &mut self,
         query_embedding: &[f32],
         limit: usize,
         min_score: f32,
@@ -169,17 +160,17 @@ pub trait Storage: Send {
     }
     
     /// Count engrams that have embeddings
-    fn count_with_embeddings(&self) -> StorageResult<usize> {
+    fn count_with_embeddings(&mut self) -> StorageResult<usize> {
         Ok(0)
     }
     
     /// Count engrams that need embeddings
-    fn count_without_embeddings(&self) -> StorageResult<usize> {
+    fn count_without_embeddings(&mut self) -> StorageResult<usize> {
         Ok(0)
     }
     
     /// Get IDs of engrams that need embeddings (for backfill)
-    fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
+    fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
         let _ = limit;
         Ok(Vec::new())
     }
@@ -191,7 +182,7 @@ pub trait Storage: Send {
     }
     
     /// Get embedding for a single engram
-    fn get_embedding(&self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+    fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
         let _ = id;
         Ok(None)
     }

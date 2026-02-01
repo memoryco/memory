@@ -226,7 +226,6 @@ impl Brain {
     // ==================
     
     /// Search memories by content (in-memory substring search)
-    /// For better tokenized search, use search_fts()
     pub fn search(&self, query: &str) -> Vec<&Engram> {
         self.substrate.search(query)
     }
@@ -234,24 +233,6 @@ impl Brain {
     /// Search with options (in-memory substring search)
     pub fn search_with_options(&self, query: &str, options: SearchOptions) -> Vec<&Engram> {
         self.substrate.search_with_options(query, options)
-    }
-    
-    /// Search using full-text search (FTS5 for SQLite storage)
-    /// This tokenizes the query and matches individual terms
-    /// Returns ALL matching engrams (caller should filter by state if needed)
-    /// Results are sorted by energy (highest first)
-    pub fn search_fts(&self, query: &str) -> StorageResult<Vec<&Engram>> {
-        // Get matching IDs from storage
-        let ids = self.storage.search_content(query)?;
-        
-        // Hydrate from substrate, sorted by energy
-        let mut engrams: Vec<&Engram> = ids.iter()
-            .filter_map(|id| self.substrate.get(id))
-            .collect();
-        
-        engrams.sort_by(|a, b| b.energy.partial_cmp(&a.energy).unwrap_or(std::cmp::Ordering::Equal));
-        
-        Ok(engrams)
     }
     
     /// Search by tag
@@ -432,7 +413,7 @@ impl Brain {
     /// Find engrams semantically similar to the given embedding
     /// Returns (id, score, content) tuples sorted by descending similarity
     pub fn find_similar_by_embedding(
-        &self,
+        &mut self,
         query_embedding: &[f32],
         limit: usize,
         min_score: f32,
@@ -441,17 +422,17 @@ impl Brain {
     }
     
     /// Count engrams that have embeddings
-    pub fn count_with_embeddings(&self) -> StorageResult<usize> {
+    pub fn count_with_embeddings(&mut self) -> StorageResult<usize> {
         self.storage.count_with_embeddings()
     }
     
     /// Count engrams that need embeddings (for backfill progress)
-    pub fn count_without_embeddings(&self) -> StorageResult<usize> {
+    pub fn count_without_embeddings(&mut self) -> StorageResult<usize> {
         self.storage.count_without_embeddings()
     }
     
     /// Get IDs of engrams that need embeddings (for backfill)
-    pub fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
+    pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
         self.storage.get_ids_without_embeddings(limit)
     }
     
@@ -518,7 +499,7 @@ impl Brain {
     /// Find similar memories to a given memory ID
     /// Convenience wrapper around find_similar_by_embedding
     pub fn find_similar_to(
-        &self,
+        &mut self,
         id: &EngramId,
         limit: usize,
         min_score: f32,

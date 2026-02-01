@@ -1,12 +1,17 @@
 //! Vector similarity search operations
 //! 
 //! Provides cosine similarity search over engram embeddings stored in SQLite.
-//! Kept separate from sqlite.rs to manage file size.
+//! Uses Diesel's sql_query for raw SQL operations.
 
-use crate::engram::{EngramId, Engram};
+use crate::engram::EngramId;
 use crate::engram::storage::{StorageResult, StorageError};
 use crate::embedding::cosine_similarity;
-use rusqlite::{Connection, params};
+use crate::storage::models::{embedding_to_bytes, bytes_to_embedding};
+
+use diesel::prelude::*;
+use diesel::sqlite::SqliteConnection;
+use diesel::sql_query;
+use diesel::sql_types::{Text, Nullable, Binary};
 
 /// Result of a vector similarity search
 #[derive(Debug, Clone)]
@@ -16,14 +21,46 @@ pub struct SimilarityResult {
     pub content: String,
 }
 
+/// Row returned from embedding queries
+#[derive(QueryableByName, Debug)]
+struct EmbeddingRow {
+    #[diesel(sql_type = Text)]
+    id: String,
+    #[diesel(sql_type = Text)]
+    content: String,
+    #[diesel(sql_type = Binary)]
+    embedding: Vec<u8>,
+}
+
+/// Row for optional embedding
+#[derive(QueryableByName, Debug)]
+struct OptionalEmbeddingRow {
+    #[diesel(sql_type = Nullable<Binary>)]
+    embedding: Option<Vec<u8>>,
+}
+
+/// Row for ID only
+#[derive(QueryableByName, Debug)]
+struct IdRow {
+    #[diesel(sql_type = Text)]
+    id: String,
+}
+
+/// Row for count
+#[derive(QueryableByName, Debug)]
+struct CountRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    cnt: i64,
+}
+
 /// Vector search operations on SQLite storage
 pub struct VectorSearch<'a> {
-    conn: &'a Connection,
+    conn: &'a mut SqliteConnection,
 }
 
 impl<'a> VectorSearch<'a> {
     /// Create a new VectorSearch instance
-    pub fn new(conn: &'a Connection) -> Self {
+    pub fn new(conn: &'a mut SqliteConnection) -> Self {
         Self { conn }
     }
     
@@ -32,39 +69,28 @@ impl<'a> VectorSearch<'a> {
     /// Returns up to `limit` results sorted by descending similarity score.
     /// Only returns results with similarity >= min_score.
     pub fn find_similar(
-        &self,
+        &mut self,
         query_embedding: &[f32],
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        // Load all engrams with embeddings
-        let mut stmt = self.conn.prepare(
+        let rows: Vec<EmbeddingRow> = sql_query(
             "SELECT id, content, embedding FROM engrams WHERE embedding IS NOT NULL"
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
-        
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Vec<u8>>(2)?,
-            ))
-        }).map_err(|e| StorageError::Database(e.to_string()))?;
+        )
+        .load(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
         
         let mut results: Vec<SimilarityResult> = Vec::new();
         
         for row in rows {
-            let (id_str, content, embedding_bytes) = row
-                .map_err(|e| StorageError::Database(e.to_string()))?;
-            
-            // Deserialize embedding
-            if let Some(embedding) = bytes_to_embedding(&embedding_bytes) {
+            if let Some(embedding) = bytes_to_embedding(&row.embedding) {
                 let score = cosine_similarity(query_embedding, &embedding);
                 
                 if score >= min_score {
-                    let id = uuid::Uuid::parse_str(&id_str)
+                    let id = uuid::Uuid::parse_str(&row.id)
                         .map_err(|e| StorageError::Serialization(e.to_string()))?;
                     
-                    results.push(SimilarityResult { id, score, content });
+                    results.push(SimilarityResult { id, score, content: row.content });
                 }
             }
         }
@@ -80,19 +106,21 @@ impl<'a> VectorSearch<'a> {
     
     /// Find engrams similar to a given engram by ID
     pub fn find_similar_to(
-        &self,
+        &mut self,
         engram_id: &EngramId,
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
         // First, get the embedding for the source engram
-        let embedding_bytes: Option<Vec<u8>> = self.conn.query_row(
-            "SELECT embedding FROM engrams WHERE id = ?1",
-            params![engram_id.to_string()],
-            |row| row.get(0)
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
+        let id_str = engram_id.to_string();
+        let row: OptionalEmbeddingRow = sql_query(
+            "SELECT embedding FROM engrams WHERE id = ?"
+        )
+        .bind::<Text, _>(&id_str)
+        .get_result(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
         
-        let embedding_bytes = embedding_bytes
+        let embedding_bytes = row.embedding
             .ok_or_else(|| StorageError::NotFound(format!("No embedding for engram {}", engram_id)))?;
         
         let query_embedding = bytes_to_embedding(&embedding_bytes)
@@ -107,41 +135,39 @@ impl<'a> VectorSearch<'a> {
     }
     
     /// Count engrams that have embeddings
-    pub fn count_with_embeddings(&self) -> StorageResult<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM engrams WHERE embedding IS NOT NULL",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
+    pub fn count_with_embeddings(&mut self) -> StorageResult<usize> {
+        let row: CountRow = sql_query(
+            "SELECT COUNT(*) as cnt FROM engrams WHERE embedding IS NOT NULL"
+        )
+        .get_result(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
         
-        Ok(count as usize)
+        Ok(row.cnt as usize)
     }
     
     /// Count engrams that need embeddings
-    pub fn count_without_embeddings(&self) -> StorageResult<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM engrams WHERE embedding IS NULL",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
+    pub fn count_without_embeddings(&mut self) -> StorageResult<usize> {
+        let row: CountRow = sql_query(
+            "SELECT COUNT(*) as cnt FROM engrams WHERE embedding IS NULL"
+        )
+        .get_result(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
         
-        Ok(count as usize)
+        Ok(row.cnt as usize)
     }
     
     /// Get IDs of engrams that need embeddings (for backfill)
-    pub fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM engrams WHERE embedding IS NULL LIMIT ?1"
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
-        
-        let rows = stmt.query_map(params![limit as i64], |row| {
-            row.get::<_, String>(0)
-        }).map_err(|e| StorageError::Database(e.to_string()))?;
+    pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
+        let rows: Vec<IdRow> = sql_query(
+            "SELECT id FROM engrams WHERE embedding IS NULL LIMIT ?"
+        )
+        .bind::<diesel::sql_types::BigInt, _>(limit as i64)
+        .load(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
         
         let mut ids = Vec::new();
         for row in rows {
-            let id_str = row.map_err(|e| StorageError::Database(e.to_string()))?;
-            let id = uuid::Uuid::parse_str(&id_str)
+            let id = uuid::Uuid::parse_str(&row.id)
                 .map_err(|e| StorageError::Serialization(e.to_string()))?;
             ids.push(id);
         }
@@ -150,42 +176,35 @@ impl<'a> VectorSearch<'a> {
     }
     
     /// Update embedding for a single engram
-    pub fn set_embedding(&self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+    pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let bytes = embedding_to_bytes(embedding);
+        let id_str = id.to_string();
         
-        self.conn.execute(
-            "UPDATE engrams SET embedding = ?1 WHERE id = ?2",
-            params![bytes, id.to_string()]
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
+        sql_query("UPDATE engrams SET embedding = ? WHERE id = ?")
+            .bind::<Nullable<Binary>, _>(Some(&bytes[..]))
+            .bind::<Text, _>(&id_str)
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
         
         Ok(())
     }
     
     /// Get embedding for a single engram
-    pub fn get_embedding(&self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
-        let embedding_bytes: Option<Vec<u8>> = self.conn.query_row(
-            "SELECT embedding FROM engrams WHERE id = ?1",
-            params![id.to_string()],
-            |row| row.get(0)
-        ).map_err(|e| StorageError::Database(e.to_string()))?;
+    pub fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+        let id_str = id.to_string();
         
-        match embedding_bytes {
+        let row: OptionalEmbeddingRow = sql_query(
+            "SELECT embedding FROM engrams WHERE id = ?"
+        )
+        .bind::<Text, _>(&id_str)
+        .get_result(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+        
+        match row.embedding {
             Some(bytes) => Ok(bytes_to_embedding(&bytes)),
             None => Ok(None),
         }
     }
-}
-
-// Embedding serialization helpers (duplicated from sqlite.rs to avoid coupling)
-fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
-    embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
-}
-
-fn bytes_to_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
-    if bytes.len() % 4 != 0 { return None; }
-    Some(bytes.chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect())
 }
 
 #[cfg(test)]
@@ -215,7 +234,7 @@ mod tests {
         storage.save_engram(&e3).unwrap();
         
         // Search for similar to e1's embedding
-        let vs = VectorSearch::new(storage.connection());
+        let mut vs = VectorSearch::new(storage.connection());
         let results = vs.find_similar(&[1.0, 0.0, 0.0], 10, 0.5).unwrap();
         
         assert_eq!(results.len(), 2); // e1 and e2, not e3 (orthogonal)
@@ -241,7 +260,7 @@ mod tests {
         storage.save_engram(&e2).unwrap();
         storage.save_engram(&e3).unwrap();
         
-        let vs = VectorSearch::new(storage.connection());
+        let mut vs = VectorSearch::new(storage.connection());
         let results = vs.find_similar_to(&e1.id, 10, 0.5).unwrap();
         
         // Should find e2 but not e3, and not e1 itself
@@ -262,7 +281,7 @@ mod tests {
         storage.save_engram(&e1).unwrap();
         storage.save_engram(&e2).unwrap();
         
-        let vs = VectorSearch::new(storage.connection());
+        let mut vs = VectorSearch::new(storage.connection());
         
         assert_eq!(vs.count_with_embeddings().unwrap(), 1);
         assert_eq!(vs.count_without_embeddings().unwrap(), 1);

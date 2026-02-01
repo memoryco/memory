@@ -28,7 +28,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
     
-    fn load_identity(&self) -> StorageResult<Option<Identity>> {
+    fn load_identity(&mut self) -> StorageResult<Option<Identity>> {
         Ok(self.identity.clone())
     }
     
@@ -37,46 +37,26 @@ impl Storage for MemoryStorage {
         Ok(())
     }
     
-    fn load_engram(&self, id: &EngramId) -> StorageResult<Option<Engram>> {
+    fn load_engram(&mut self, id: &EngramId) -> StorageResult<Option<Engram>> {
         Ok(self.engrams.get(id).cloned())
     }
     
-    fn load_all_engrams(&self) -> StorageResult<Vec<Engram>> {
+    fn load_all_engrams(&mut self) -> StorageResult<Vec<Engram>> {
         Ok(self.engrams.values().cloned().collect())
     }
     
-    fn load_engrams_by_state(&self, state: MemoryState) -> StorageResult<Vec<Engram>> {
+    fn load_engrams_by_state(&mut self, state: MemoryState) -> StorageResult<Vec<Engram>> {
         Ok(self.engrams.values()
             .filter(|e| e.state == state)
             .cloned()
             .collect())
     }
     
-    fn load_engrams_by_tag(&self, tag: &str) -> StorageResult<Vec<Engram>> {
+    fn load_engrams_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Engram>> {
         let tag_lower = tag.to_lowercase();
         Ok(self.engrams.values()
             .filter(|e| e.tags.iter().any(|t| t.to_lowercase() == tag_lower))
             .cloned()
-            .collect())
-    }
-    
-    fn search_content(&self, query: &str) -> StorageResult<Vec<EngramId>> {
-        // Simple in-memory search: tokenize query and match any token
-        let tokens: Vec<String> = query.split_whitespace()
-            .map(|t| t.to_lowercase())
-            .collect();
-        
-        if tokens.is_empty() {
-            return Ok(Vec::new());
-        }
-        
-        Ok(self.engrams.values()
-            .filter(|e| {
-                let content_lower = e.content.to_lowercase();
-                let tags_lower: Vec<String> = e.tags.iter().map(|t| t.to_lowercase()).collect();
-                tokens.iter().any(|t| content_lower.contains(t) || tags_lower.iter().any(|tag| tag.contains(t)))
-            })
-            .map(|e| e.id)
             .collect())
     }
     
@@ -97,14 +77,14 @@ impl Storage for MemoryStorage {
         Ok(())
     }
     
-    fn load_associations_from(&self, from: &EngramId) -> StorageResult<Vec<Association>> {
+    fn load_associations_from(&mut self, from: &EngramId) -> StorageResult<Vec<Association>> {
         Ok(self.associations.iter()
             .filter(|a| &a.from == from)
             .cloned()
             .collect())
     }
     
-    fn load_all_associations(&self) -> StorageResult<Vec<Association>> {
+    fn load_all_associations(&mut self) -> StorageResult<Vec<Association>> {
         Ok(self.associations.clone())
     }
     
@@ -118,7 +98,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
     
-    fn load_config(&self) -> StorageResult<Option<Config>> {
+    fn load_config(&mut self) -> StorageResult<Option<Config>> {
         Ok(self.config.clone())
     }
     
@@ -127,7 +107,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
     
-    fn load_last_decay_at(&self) -> StorageResult<Option<i64>> {
+    fn load_last_decay_at(&mut self) -> StorageResult<Option<i64>> {
         Ok(self.last_decay_at)
     }
     

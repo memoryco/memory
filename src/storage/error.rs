@@ -55,5 +55,14 @@ impl From<serde_json::Error> for StorageError {
     }
 }
 
+impl From<diesel::result::Error> for StorageError {
+    fn from(err: diesel::result::Error) -> Self {
+        match err {
+            diesel::result::Error::NotFound => StorageError::NotFound("Record not found".into()),
+            _ => StorageError::Database(err.to_string()),
+        }
+    }
+}
+
 /// Result type alias for storage operations.
 pub type StorageResult<T> = Result<T, StorageError>;

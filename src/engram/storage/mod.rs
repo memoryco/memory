@@ -7,6 +7,8 @@
 mod memory;
 mod diesel;
 mod vector;
+pub mod schema;
+pub mod models;
 
 pub use memory::MemoryStorage;
 pub use diesel::EngramStorage;

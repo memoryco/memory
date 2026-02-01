@@ -1,5 +1,5 @@
-//! Diesel schema definitions
-//! 
+//! Diesel schema definitions for engram storage
+//!
 //! Note: Manually maintained to ensure correct types.
 //! SQLite doesn't have strict types, so we specify what Rust expects.
 

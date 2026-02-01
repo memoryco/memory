@@ -6,7 +6,7 @@
 use crate::engram::EngramId;
 use crate::engram::storage::{StorageResult, StorageError};
 use crate::embedding::cosine_similarity;
-use crate::storage::models::{embedding_to_bytes, bytes_to_embedding};
+use super::models::{embedding_to_bytes, bytes_to_embedding};
 
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;

@@ -1,10 +1,10 @@
-//! Diesel model types for database rows
+//! Diesel model types for engram database rows
 //!
 //! These are the DB-layer representations. They get converted to/from
 //! the domain types in `crate::engram::*`.
 
 use diesel::prelude::*;
-use crate::storage::schema::*;
+use super::schema::*;
 
 // ============================================================================
 // ENGRAMS

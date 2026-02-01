@@ -9,8 +9,8 @@ use crate::engram::{
     EngramId, Engram, MemoryState, Config, Association,
     Identity,
 };
-use crate::storage::schema::{engrams, associations, config, identity, metadata};
-use crate::storage::models::*;
+use super::schema::{engrams, associations, config, identity, metadata};
+use super::models::*;
 
 use diesel::prelude::*;
 use diesel::connection::SimpleConnection;

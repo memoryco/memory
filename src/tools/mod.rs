@@ -11,6 +11,7 @@ pub mod engram;
 pub mod identity;
 pub mod config;
 pub mod lenses;
+pub mod plans;
 pub mod reference;
 
 use crate::engram::Engram;
@@ -54,6 +55,15 @@ pub use reference::{
     ReferenceGetTool,
     ReferenceSectionsTool,
     ReferenceCitationTool,
+};
+
+pub use plans::{
+    PlansListTool,
+    PlanGetTool,
+    PlanStartTool,
+    PlanStopTool,
+    StepAddTool,
+    StepCompleteTool,
 };
 
 // =============================================================================

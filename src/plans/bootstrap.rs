@@ -1,6 +1,6 @@
 //! Plans bootstrap - seed operational instructions on first run
 
-use crate::engram::Brain;
+use crate::engram::{Brain, UpsertResult};
 
 const INSTRUCTIONS: &str = r#"## Plans
 
@@ -32,25 +32,22 @@ Plans are lightweight task tracking for multi-step work. Use them to stay organi
 - One plan per task, stop it when you're done
 "#;
 
-/// Marker to detect if plans instructions already exist
+/// Marker to detect plans instructions
 const MARKER: &str = "## Plans";
 
-/// Bootstrap plans instructions into identity if not present
+/// Bootstrap plans instructions into identity
+/// Adds if missing, updates if changed, skips if identical
 pub fn bootstrap(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if already bootstrapped
-    let already_present = brain.identity().instructions.iter()
-        .any(|i| i.contains(MARKER));
-    
-    if already_present {
-        return Ok(());
+    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+        UpsertResult::Added => {
+            eprintln!("  Plans instructions added to identity");
+        }
+        UpsertResult::Updated => {
+            eprintln!("  Plans instructions updated in identity");
+        }
+        UpsertResult::Unchanged => {
+            // Already up to date, no message needed
+        }
     }
-    
-    eprintln!("  Bootstrapping plans instructions...");
-    
-    let mut identity = brain.identity().clone();
-    identity = identity.with_instruction(INSTRUCTIONS);
-    brain.set_identity(identity)?;
-    
-    eprintln!("  Plans instructions added to identity");
     Ok(())
 }

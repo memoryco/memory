@@ -1,6 +1,6 @@
 //! Engram bootstrap - seed operational instructions on first run
 
-use super::Brain;
+use super::{Brain, UpsertResult};
 
 const INSTRUCTIONS: &str = r#"## Memory Workflow
 
@@ -53,25 +53,22 @@ Before finishing ANY response:
 
 **Your response is not complete until recall and storage are done.**"#;
 
-/// Marker to detect if engram instructions already exist
+/// Marker to detect engram instructions
 const MARKER: &str = "## Memory Workflow";
 
-/// Bootstrap engram instructions into identity if not present
+/// Bootstrap engram instructions into identity
+/// Adds if missing, updates if changed, skips if identical
 pub fn bootstrap(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if already bootstrapped
-    let already_present = brain.identity().instructions.iter()
-        .any(|i| i.contains(MARKER));
-    
-    if already_present {
-        return Ok(());
+    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+        UpsertResult::Added => {
+            eprintln!("  Engram instructions added to identity");
+        }
+        UpsertResult::Updated => {
+            eprintln!("  Engram instructions updated in identity");
+        }
+        UpsertResult::Unchanged => {
+            // Already up to date, no message needed
+        }
     }
-    
-    eprintln!("  Bootstrapping engram instructions...");
-    
-    let mut identity = brain.identity().clone();
-    identity = identity.with_instruction(INSTRUCTIONS);
-    brain.set_identity(identity)?;
-    
-    eprintln!("  Engram instructions added to identity");
     Ok(())
 }

@@ -1,6 +1,6 @@
 //! Lenses bootstrap - create directory and add instructions to identity
 
-use crate::engram::Brain;
+use crate::engram::{Brain, UpsertResult};
 use std::path::Path;
 
 const INSTRUCTIONS: &str = r#"## Lenses
@@ -70,21 +70,21 @@ are meant to be held in working memory during an entire task.
 Delete this file once you've created your own lenses!
 "#;
 
-/// Marker to detect if lenses instructions already exist
+/// Marker to detect lenses instructions
 const MARKER: &str = "## Lenses";
 
 /// Bootstrap lenses: add instructions to identity and create directory
+/// Adds if missing, updates if changed, skips if identical
 pub fn bootstrap(brain: &mut Brain, lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Add instructions to identity if not present
-    let already_present = brain.identity().instructions.iter()
-        .any(|i| i.contains(MARKER));
-    
-    if !already_present {
-        eprintln!("  Bootstrapping lenses instructions...");
-        let mut identity = brain.identity().clone();
-        identity = identity.with_instruction(INSTRUCTIONS);
-        brain.set_identity(identity)?;
-        eprintln!("  Lenses instructions added to identity");
+    // Upsert instructions to identity
+    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+        UpsertResult::Added => {
+            eprintln!("  Lenses instructions added to identity");
+        }
+        UpsertResult::Updated => {
+            eprintln!("  Lenses instructions updated in identity");
+        }
+        UpsertResult::Unchanged => {}
     }
     
     // Create directory if it doesn't exist

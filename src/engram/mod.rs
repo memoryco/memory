@@ -23,7 +23,7 @@ pub use substrate::{Substrate, SubstrateStats, StimulationResult, RecallResult, 
 pub use association::Association;
 pub use identity::{Identity, Persona, Value, Preference, Relationship, Antipattern, CommunicationStyle, IdentitySearchResults};
 pub use storage::{Storage, StorageError, StorageResult, MemoryStorage, EngramStorage, SimilarityResult};
-pub use brain::Brain;
+pub use brain::{Brain, UpsertResult};
 
 /// Unique identifier for an engram
 pub type EngramId = uuid::Uuid;

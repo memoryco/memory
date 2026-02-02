@@ -1,6 +1,6 @@
 //! Reference bootstrap - add instructions and per-source citations to identity
 
-use crate::engram::Brain;
+use crate::engram::{Brain, UpsertResult};
 use super::ReferenceManager;
 
 /// General instructions for using reference tools
@@ -27,33 +27,26 @@ Use for clinical guidelines, standards, legal codes - sources requiring citation
 - References: query authoritative docs, always cite sources
 "#;
 
-/// Marker to detect if reference instructions already exist
+/// Marker to detect reference instructions
 const MARKER: &str = "## References";
 
 /// Bootstrap references: add general instructions and per-source citations to identity
+/// Adds if missing, updates if changed, skips if identical
 pub fn bootstrap(brain: &mut Brain, references: &ReferenceManager) -> Result<(), Box<dyn std::error::Error>> {
-    // Add general instructions if not present
-    let instructions_present = brain.identity().instructions.iter()
-        .any(|i| i.contains(MARKER));
-    
-    if !instructions_present {
-        eprintln!("  Bootstrapping reference instructions...");
-        let mut identity = brain.identity().clone();
-        identity = identity.with_instruction(INSTRUCTIONS);
-        brain.set_identity(identity)?;
-        eprintln!("  Reference instructions added to identity");
+    // Upsert general instructions
+    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+        UpsertResult::Added => {
+            eprintln!("  Reference instructions added to identity");
+        }
+        UpsertResult::Updated => {
+            eprintln!("  Reference instructions updated in identity");
+        }
+        UpsertResult::Unchanged => {}
     }
 
-    // Add per-source citation instructions
+    // Upsert per-source citation instructions
     for source_name in references.sources() {
-        // Check if this source already has citation instructions
         let marker = format!("reference:{}", source_name);
-        let already_present = brain.identity().instructions.iter()
-            .any(|i| i.contains(&marker));
-        
-        if already_present {
-            continue;
-        }
         
         // Get source metadata
         let meta = match references.get_meta(source_name) {
@@ -66,8 +59,6 @@ pub fn bootstrap(brain: &mut Brain, references: &ReferenceManager) -> Result<(),
         
         // Build citation instruction if citation info is available
         if let Some(citation) = &meta.citation {
-            eprintln!("  Bootstrapping citation instructions for '{}'", source_name);
-            
             let instruction = format!(
                 "<!-- reference:{} -->\n\
                 When presenting information from {}, always include the APA 7 citation.\n\n\
@@ -77,11 +68,15 @@ pub fn bootstrap(brain: &mut Brain, references: &ReferenceManager) -> Result<(),
                 citation.format_reference()
             );
             
-            let mut identity = brain.identity().clone();
-            identity = identity.with_instruction(&instruction);
-            brain.set_identity(identity)?;
-            
-            eprintln!("  Citation instructions for '{}' added to identity", source_name);
+            match brain.upsert_instruction(&instruction, &marker)? {
+                UpsertResult::Added => {
+                    eprintln!("  Citation instructions for '{}' added to identity", source_name);
+                }
+                UpsertResult::Updated => {
+                    eprintln!("  Citation instructions for '{}' updated in identity", source_name);
+                }
+                UpsertResult::Unchanged => {}
+            }
         }
     }
     

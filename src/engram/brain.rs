@@ -13,6 +13,17 @@ use super::{
     Storage, StorageResult, SimilarityResult,
 };
 
+/// Result of an instruction upsert operation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpsertResult {
+    /// Instruction was added (marker not found)
+    Added,
+    /// Instruction was updated (marker found, content differed)
+    Updated,
+    /// No change needed (marker found, content identical)
+    Unchanged,
+}
+
 /// The Brain - coordinates Identity, Substrate, and Storage
 /// 
 /// This is the main entry point for the engram system.
@@ -103,6 +114,48 @@ impl Brain {
     /// Persist identity changes to storage
     pub fn save_identity(&mut self) -> StorageResult<()> {
         self.storage.save_identity(&self.identity)
+    }
+    
+    /// Upsert an instruction by marker
+    /// 
+    /// - If no instruction contains the marker: adds the new instruction
+    /// - If an instruction contains the marker but content differs: replaces it
+    /// - If an instruction contains the marker and content is identical: no-op
+    /// 
+    /// Returns what action was taken.
+    pub fn upsert_instruction(&mut self, content: &str, marker: &str) -> StorageResult<UpsertResult> {
+        let mut identity = self.identity.clone();
+        
+        // Find existing instruction with this marker
+        let existing_idx = identity.instructions.iter()
+            .position(|i| i.contains(marker));
+        
+        let result = match existing_idx {
+            Some(idx) => {
+                // Found existing - check if content differs
+                if identity.instructions[idx] == content {
+                    UpsertResult::Unchanged
+                } else {
+                    // Replace it
+                    identity.instructions.remove(idx);
+                    identity.instructions.push(content.to_string());
+                    UpsertResult::Updated
+                }
+            }
+            None => {
+                // Not found - add it
+                identity.instructions.push(content.to_string());
+                UpsertResult::Added
+            }
+        };
+        
+        // Only persist if we made a change
+        if result != UpsertResult::Unchanged {
+            self.identity = identity;
+            self.save_identity()?;
+        }
+        
+        Ok(result)
     }
     
     // ==================

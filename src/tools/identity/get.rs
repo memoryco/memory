@@ -1,7 +1,7 @@
 //! identity_get - Get the current identity
 
 use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -31,8 +31,9 @@ impl Tool<Context> for IdentityGetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let brain = context.brain.lock().unwrap();
-        let identity = brain.identity();
+        let mut store = context.identity.lock().unwrap();
+        let identity = store.get()
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         if identity.persona.name.is_empty() && identity.values.is_empty() && identity.instructions.is_empty() {
             return Ok(text_response("No identity configured yet.".to_string()));

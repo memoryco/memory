@@ -45,8 +45,10 @@ impl Tool<Context> for IdentitySearchTool {
         let args: Args = serde_json::from_value(args)
             .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let brain = context.brain.lock().unwrap();
-        let results = brain.identity().search(&args.query);
+        let mut store = context.identity.lock().unwrap();
+        let identity = store.get()
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
+        let results = identity.search(&args.query);
 
         if results.is_empty() {
             return Ok(text_response(format!(

@@ -17,7 +17,8 @@ mod lenses;
 mod storage;
 
 use crate::embedding::EmbeddingGenerator;
-use crate::engram::{Brain, EngramStorage, Storage};
+use crate::engram::Brain;
+use crate::identity::{IdentityStore, DieselIdentityStorage};
 use crate::plans::{PlanStore, DieselPlanStorage};
 use crate::reference::ReferenceManager;
 use sml_mcps::{Server, ServerConfig, StdioTransport};
@@ -29,6 +30,7 @@ use std::sync::{Arc, Mutex};
 /// References is plain Mutex since it's only used synchronously.
 pub struct Context {
     pub brain: Arc<Mutex<Brain>>,
+    pub identity: Arc<Mutex<IdentityStore>>,
     pub plans: Arc<Mutex<PlanStore>>,
     pub references: Mutex<ReferenceManager>,
     pub lenses_dir: PathBuf,
@@ -50,6 +52,7 @@ fn main() {
     // All paths derived from MEMORY_HOME
     let memory_home = get_memory_home();
     let db_path = memory_home.join("brain.db");
+    let identity_db_path = memory_home.join("identity.db");
     let plans_db_path = memory_home.join("plans.db");
     let lenses_dir = memory_home.join("lenses");
     let references_dir = memory_home.join("references");
@@ -61,18 +64,13 @@ fn main() {
 
     eprintln!("Memory home: {}", memory_home.display());
     eprintln!("  Database: {}", db_path.display());
+    eprintln!("  Identity DB: {}", identity_db_path.display());
     eprintln!("  Plans DB: {}", plans_db_path.display());
     eprintln!("  Lenses: {}", lenses_dir.display());
     eprintln!("  References: {}", references_dir.display());
 
-    // Open or create the brain
-    let mut storage = EngramStorage::open(&db_path)
-        .expect("Failed to open database");
-    
-    // Initialize schema
-    storage.initialize().expect("Failed to initialize database");
-    
-    let mut brain = Brain::open(storage)
+    // Open or create the brain (with async persistence support)
+    let mut brain = Brain::open_path(&db_path)
         .expect("Failed to open brain");
 
     // Apply any decay that accumulated while server was offline
@@ -139,6 +137,25 @@ fn main() {
         Err(e) => eprintln!("Warning: Failed to bootstrap semantic associations: {}", e),
     }
 
+    // Open or create the identity store
+    let identity_storage = DieselIdentityStorage::open(&identity_db_path)
+        .expect("Failed to open identity database");
+    let mut identity = IdentityStore::new(identity_storage)
+        .expect("Failed to open identity store");
+
+    // Migrate identity from old JSON blob to new flat storage (one-time)
+    // brain.identity() returns the Identity loaded from old JSON blob storage
+    let old_identity = brain.identity();
+    match identity.migrate_from_identity(old_identity) {
+        Ok(crate::identity::MigrationResult::Migrated { items }) => {
+            eprintln!("Migrated {} identity items to new storage", items);
+        }
+        Ok(crate::identity::MigrationResult::AlreadyMigrated) => {
+            // Already migrated, nothing to do
+        }
+        Err(e) => eprintln!("Warning: Failed to migrate identity: {}", e),
+    }
+
     // Open or create the plans store
     let plans_storage = DieselPlanStorage::open(&plans_db_path)
         .expect("Failed to open plans database");
@@ -162,6 +179,7 @@ fn main() {
 
     let context = Context {
         brain: Arc::new(Mutex::new(brain)),
+        identity: Arc::new(Mutex::new(identity)),
         plans: Arc::new(Mutex::new(plans)),
         references: Mutex::new(references),
         lenses_dir: lenses_dir.clone(),
@@ -188,11 +206,20 @@ fn main() {
 
     // Register identity tools
     server.add_tool(tools::IdentityGetTool).expect("Failed to add identity_get tool");
-    server.add_tool(tools::IdentitySetTool).expect("Failed to add identity_set tool");
-    server.add_tool(tools::IdentityAddTool).expect("Failed to add identity_add tool");
     server.add_tool(tools::IdentitySearchTool).expect("Failed to add identity_search tool");
+    server.add_tool(tools::IdentityListTool).expect("Failed to add identity_list tool");
+    server.add_tool(tools::IdentityRemoveTool).expect("Failed to add identity_remove tool");
+    server.add_tool(tools::IdentitySetPersonaNameTool).expect("Failed to add identity_set_persona_name tool");
+    server.add_tool(tools::IdentitySetPersonaDescriptionTool).expect("Failed to add identity_set_persona_description tool");
+    server.add_tool(tools::IdentityAddTraitTool).expect("Failed to add identity_add_trait tool");
+    server.add_tool(tools::IdentityAddExpertiseTool).expect("Failed to add identity_add_expertise tool");
     server.add_tool(tools::IdentityAddInstructionTool).expect("Failed to add identity_add_instruction tool");
-    server.add_tool(tools::IdentityRemoveInstructionTool).expect("Failed to add identity_remove_instruction tool");
+    server.add_tool(tools::IdentityAddToneTool).expect("Failed to add identity_add_tone tool");
+    server.add_tool(tools::IdentityAddDirectiveTool).expect("Failed to add identity_add_directive tool");
+    server.add_tool(tools::IdentityAddValueTool).expect("Failed to add identity_add_value tool");
+    server.add_tool(tools::IdentityAddPreferenceTool).expect("Failed to add identity_add_preference tool");
+    server.add_tool(tools::IdentityAddRelationshipTool).expect("Failed to add identity_add_relationship tool");
+    server.add_tool(tools::IdentityAddAntipatternTool).expect("Failed to add identity_add_antipattern tool");
 
     // Register config tools
     server.add_tool(tools::ConfigGetTool).expect("Failed to add config_get tool");

@@ -18,7 +18,7 @@ pub use vector::{VectorSearch, SimilarityResult};
 pub use crate::storage::{StorageError, StorageResult};
 
 use super::{EngramId, Engram, Association, Config, MemoryState};
-use super::identity::Identity;
+use crate::identity::Identity;
 
 /// The storage contract
 /// 

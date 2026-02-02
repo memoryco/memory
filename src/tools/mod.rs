@@ -31,12 +31,23 @@ pub use engram::{  // tools::engram (tool implementations)
 };
 
 pub use identity::{
-    IdentityAddTool,
+    // Core identity tools
     IdentityGetTool,
-    IdentitySetTool,
     IdentitySearchTool,
+    IdentityListTool,
+    IdentityRemoveTool,
+    // Typed add tools
+    IdentitySetPersonaNameTool,
+    IdentitySetPersonaDescriptionTool,
+    IdentityAddTraitTool,
+    IdentityAddExpertiseTool,
     IdentityAddInstructionTool,
-    IdentityRemoveInstructionTool,
+    IdentityAddToneTool,
+    IdentityAddDirectiveTool,
+    IdentityAddValueTool,
+    IdentityAddPreferenceTool,
+    IdentityAddRelationshipTool,
+    IdentityAddAntipatternTool,
 };
 
 pub use config::{

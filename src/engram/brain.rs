@@ -6,12 +6,15 @@
 //! All mutating operations automatically persist changes.
 //! Search operations are read-only and don't hit storage.
 
+use std::path::PathBuf;
+
 use super::{
     EngramId, Engram, Config, Association,
     Identity,
     Substrate, RecallResult, SearchOptions, TagMatchMode, SubstrateStats,
     Storage, StorageResult, SimilarityResult,
 };
+use super::persistence::{PersistenceWorker, PersistenceWork};
 
 /// Result of an instruction upsert operation
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,10 +36,17 @@ pub struct Brain {
     /// Made pub(crate) for testing decay behavior
     pub(crate) substrate: Substrate,
     storage: Box<dyn Storage>,
+    /// Background worker for async recall persistence
+    /// None for in-memory storage (no persistence needed)
+    persistence_worker: Option<PersistenceWorker>,
+    /// Path to database (needed to create persistence worker)
+    db_path: Option<PathBuf>,
 }
 
 impl Brain {
     /// Create a new Brain with empty identity and substrate
+    /// Note: This constructor doesn't create a persistence worker since
+    /// we don't have a db_path. Use `open_path` for full persistence support.
     pub fn new<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
         storage.initialize()?;
         
@@ -46,10 +56,14 @@ impl Brain {
             identity: Identity::new(),
             substrate: Substrate::with_config(config),
             storage: Box::new(storage),
+            persistence_worker: None, // No async persistence for generic storage
+            db_path: None,
         })
     }
     
     /// Open an existing Brain from storage, or create new if empty
+    /// Note: This constructor doesn't create a persistence worker since
+    /// we don't have a db_path. Use `open_path` for full persistence support.
     pub fn open<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
         storage.initialize()?;
         
@@ -87,6 +101,59 @@ impl Brain {
             identity,
             substrate,
             storage: Box::new(storage),
+            persistence_worker: None, // No async persistence for generic storage
+            db_path: None,
+        })
+    }
+    
+    /// Open a Brain from a database path with full async persistence support
+    /// This is the preferred way to open a Brain for production use.
+    pub fn open_path(db_path: impl Into<PathBuf>) -> StorageResult<Self> {
+        use super::storage::EngramStorage;
+        
+        let path = db_path.into();
+        let mut storage = EngramStorage::open(&path)?;
+        storage.initialize()?;
+        
+        // Load config
+        let config = storage.load_config()?.unwrap_or_default();
+        
+        // Load identity
+        let identity = storage.load_identity()?.unwrap_or_default();
+        
+        // Load substrate
+        let mut substrate = Substrate::with_config(config);
+        
+        // Load last decay timestamp
+        let default_decay_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64 - 86400;
+        let last_decay = storage.load_last_decay_at()?.unwrap_or(default_decay_at);
+        substrate.set_last_decay_at(last_decay);
+        
+        // Load all engrams
+        let engrams = storage.load_all_engrams()?;
+        for engram in engrams {
+            substrate.insert_engram(engram);
+        }
+        
+        // Load all associations
+        let associations = storage.load_all_associations()?;
+        for assoc in associations {
+            substrate.insert_association(assoc);
+        }
+        
+        // Create persistence worker with its own connection
+        let persistence_worker = PersistenceWorker::new(&path);
+        eprintln!("[brain] Persistence worker started for {:?}", path);
+        
+        Ok(Self {
+            identity,
+            substrate,
+            storage: Box::new(storage),
+            persistence_worker: Some(persistence_worker),
+            db_path: Some(path),
         })
     }
     
@@ -221,17 +288,17 @@ impl Brain {
     // RECALL (active)
     // ==================
     
-    /// Recall a memory - stimulates it and persists changes
+    /// Recall a memory - stimulates it and persists changes asynchronously
     pub fn recall(&mut self, id: EngramId) -> StorageResult<RecallResult> {
         let result = self.substrate.recall(id);
-        self.persist_recall_effects(&result)?;
+        self.async_persist_recall_effects(&result);
         Ok(result)
     }
     
     /// Recall with custom stimulation strength
     pub fn recall_with_strength(&mut self, id: EngramId, strength: f64) -> StorageResult<RecallResult> {
         let result = self.substrate.recall_with_strength(id, strength);
-        self.persist_recall_effects(&result)?;
+        self.async_persist_recall_effects(&result);
         Ok(result)
     }
     
@@ -239,14 +306,53 @@ impl Brain {
     pub fn recall_many(&mut self, ids: &[EngramId]) -> StorageResult<Vec<RecallResult>> {
         let results = self.substrate.recall_many(ids);
         
+        // Build combined work for all recalls
+        let mut work = PersistenceWork::new();
         for result in &results {
-            self.persist_recall_effects(result)?;
+            self.build_persistence_work_into(result, &mut work);
+        }
+        
+        // Send to worker (fire and forget)
+        if let Some(ref worker) = self.persistence_worker {
+            worker.send(work);
         }
         
         Ok(results)
     }
     
-    /// Persist the side effects of a recall operation
+    /// Build persistence work from a recall result (helper)
+    fn build_persistence_work_into(&self, result: &RecallResult, work: &mut PersistenceWork) {
+        // Gather energy updates for affected engrams
+        for id in &result.affected_ids {
+            if let Some(engram) = self.substrate.get(id) {
+                work.energy_updates.push((*id, engram.energy, engram.state.clone()));
+            }
+        }
+        
+        // Gather associations modified by Hebbian learning
+        for (from_id, to_id) in &result.modified_associations {
+            if let Some(assocs) = self.substrate.associations_from(from_id) {
+                if let Some(assoc) = assocs.iter().find(|a| a.to == *to_id) {
+                    work.associations.push(assoc.clone());
+                }
+            }
+        }
+    }
+    
+    /// Send recall effects to background worker for async persistence
+    fn async_persist_recall_effects(&self, result: &RecallResult) {
+        // Skip if no persistence worker (in-memory storage)
+        let worker = match &self.persistence_worker {
+            Some(w) => w,
+            None => return,
+        };
+        
+        let mut work = PersistenceWork::new();
+        self.build_persistence_work_into(result, &mut work);
+        worker.send(work);
+    }
+    
+    /// Persist the side effects of a recall operation (synchronous, for flush)
     fn persist_recall_effects(&mut self, result: &RecallResult) -> StorageResult<()> {
         // Save only energy/state for affected engrams (skips FTS rebuild)
         let updates: Vec<_> = result.affected_ids.iter()

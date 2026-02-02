@@ -1,15 +1,30 @@
 //! Identity tools - persona, values, preferences management
 
-mod add;
+mod add_typed;
 mod get;
-mod set;
+mod list;
+mod remove;
 mod search;
-mod add_instruction;
-mod remove_instruction;
+// TODO: set.rs needs rework to clear + re-add items
+// mod set;
 
-pub use add::IdentityAddTool;
+// Core tools
 pub use get::IdentityGetTool;
-pub use set::IdentitySetTool;
 pub use search::IdentitySearchTool;
-pub use add_instruction::IdentityAddInstructionTool;
-pub use remove_instruction::IdentityRemoveInstructionTool;
+pub use list::IdentityListTool;
+pub use remove::IdentityRemoveTool;
+
+// Typed add tools
+pub use add_typed::{
+    IdentitySetPersonaNameTool,
+    IdentitySetPersonaDescriptionTool,
+    IdentityAddTraitTool,
+    IdentityAddExpertiseTool,
+    IdentityAddInstructionTool,  // v2 - uses new storage
+    IdentityAddToneTool,
+    IdentityAddDirectiveTool,
+    IdentityAddValueTool,
+    IdentityAddPreferenceTool,
+    IdentityAddRelationshipTool,
+    IdentityAddAntipatternTool,
+};

@@ -31,8 +31,8 @@ pub mod bootstrap;
 
 pub use citation::{Citation, SourceMeta};
 pub use error::{ReferenceError, Result};
-pub use extractor::{PageText, PdfExtractor};
-pub use profiles::{DocumentProfile, ProfileRegistry, Section, SectionType};
+pub use extractor::PdfExtractor;
+pub use profiles::{DocumentProfile, ProfileRegistry};
 pub use searcher::SearchResult;
 pub use source::ReferenceSource;
 

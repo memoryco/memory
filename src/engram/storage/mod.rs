@@ -10,7 +10,6 @@ mod vector;
 pub mod schema;
 pub mod models;
 
-pub use memory::MemoryStorage;
 pub use diesel::EngramStorage;
 pub use vector::{VectorSearch, SimilarityResult};
 

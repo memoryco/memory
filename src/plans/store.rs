@@ -3,7 +3,7 @@
 //! PlanStore wraps storage and provides the high-level API
 //! for managing plans and steps.
 
-use super::{Plan, PlanId, Step};
+use super::{Plan, PlanId};
 use super::storage::{PlanStorage, StorageResult};
 
 /// PlanStore - high-level API for plan management

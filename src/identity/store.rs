@@ -5,8 +5,8 @@
 //! this layer knows about the semantics of each identity type.
 
 use super::types::{
-    Identity, Persona, Value, Preference, Relationship, 
-    Antipattern, CommunicationStyle,
+    Identity, Value, Preference, Relationship,
+    Antipattern,
 };
 use super::storage::{
     IdentityStorage, IdentityItemType, IdentityItemRow, StorageResult,

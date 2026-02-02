@@ -7,7 +7,14 @@ use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
+use crate::identity::{classify, IdentityField};
 use crate::tools::text_response;
+
+/// Classify content and return a warning string if the content looks like
+/// it belongs to a different identity field than the one being added to.
+fn classification_warning(content: &str, expected: IdentityField) -> Option<String> {
+    classify(content).and_then(|c| c.mismatch_warning(expected))
+}
 
 // ================================
 // PERSONA (singular, replaces)
@@ -135,11 +142,15 @@ impl Tool<Context> for IdentityAddTraitTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| McpError::InvalidParams("trait is required".into()))?;
 
+        let warning = classification_warning(trait_name, IdentityField::Trait);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_trait(trait_name)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        Ok(text_response(format!("Added trait: \"{}\" [{}]", trait_name, id)))
+        let mut msg = format!("Added trait: \"{}\" [{}]", trait_name, id);
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
+        Ok(text_response(msg))
     }
 }
 
@@ -177,11 +188,15 @@ impl Tool<Context> for IdentityAddExpertiseTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| McpError::InvalidParams("area is required".into()))?;
 
+        let warning = classification_warning(area, IdentityField::Expertise);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_expertise(area)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        Ok(text_response(format!("Added expertise: \"{}\" [{}]", area, id)))
+        let mut msg = format!("Added expertise: \"{}\" [{}]", area, id);
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
+        Ok(text_response(msg))
     }
 }
 
@@ -219,11 +234,15 @@ impl Tool<Context> for IdentityAddInstructionTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| McpError::InvalidParams("instruction is required".into()))?;
 
+        let warning = classification_warning(instruction, IdentityField::Instruction);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_instruction(instruction)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        Ok(text_response(format!("Added instruction [{}]", id)))
+        let mut msg = format!("Added instruction [{}]", id);
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
+        Ok(text_response(msg))
     }
 }
 
@@ -359,11 +378,15 @@ impl Tool<Context> for IdentityAddValueTool {
         let why = args.get("why").and_then(|v| v.as_str());
         let category = args.get("category").and_then(|v| v.as_str());
 
+        let warning = classification_warning(principle, IdentityField::Value);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_value(principle, why, category)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        Ok(text_response(format!("Added value: \"{}\" [{}]", principle, id)))
+        let mut msg = format!("Added value: \"{}\" [{}]", principle, id);
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
+        Ok(text_response(msg))
     }
 }
 
@@ -411,6 +434,8 @@ impl Tool<Context> for IdentityAddPreferenceTool {
         let over = args.get("over").and_then(|v| v.as_str());
         let category = args.get("category").and_then(|v| v.as_str());
 
+        let warning = classification_warning(prefer, IdentityField::Preference);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_preference(prefer, over, category)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
@@ -421,6 +446,8 @@ impl Tool<Context> for IdentityAddPreferenceTool {
             format!("Added preference: \"{}\" [{}]", prefer, id)
         };
 
+        let mut msg = msg;
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
         Ok(text_response(msg))
     }
 }
@@ -471,11 +498,16 @@ impl Tool<Context> for IdentityAddRelationshipTool {
             .ok_or_else(|| McpError::InvalidParams("relation is required".into()))?;
         let context_opt = args.get("context").and_then(|v| v.as_str());
 
+        let classify_text = format!("{} {}", entity, relation);
+        let warning = classification_warning(&classify_text, IdentityField::Relationship);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_relationship(entity, relation, context_opt)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        Ok(text_response(format!("Added relationship: {} - {} [{}]", entity, relation, id)))
+        let mut msg = format!("Added relationship: {} - {} [{}]", entity, relation, id);
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
+        Ok(text_response(msg))
     }
 }
 
@@ -523,10 +555,14 @@ impl Tool<Context> for IdentityAddAntipatternTool {
         let instead = args.get("instead").and_then(|v| v.as_str());
         let why = args.get("why").and_then(|v| v.as_str());
 
+        let warning = classification_warning(avoid, IdentityField::Antipattern);
+
         let mut store = context.identity.lock().unwrap();
         let id = store.add_antipattern(avoid, instead, why)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        Ok(text_response(format!("Added antipattern: \"{}\" [{}]", avoid, id)))
+        let mut msg = format!("Added antipattern: \"{}\" [{}]", avoid, id);
+        if let Some(w) = warning { msg = format!("⚠️ {}\n\n{}", w, msg); }
+        Ok(text_response(msg))
     }
 }

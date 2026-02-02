@@ -15,7 +15,7 @@ pub mod storage;
 pub mod store;
 
 pub use store::PlanStore;
-pub use storage::{PlanStorage, DieselPlanStorage, StorageResult, StorageError};
+pub use storage::DieselPlanStorage;
 
 use serde::{Serialize, Deserialize};
 

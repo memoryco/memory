@@ -19,16 +19,13 @@ pub mod bootstrap;
 pub mod persistence;
 
 pub use engram::{Engram, MemoryState};
-pub use substrate::{Substrate, SubstrateStats, StimulationResult, RecallResult, SearchOptions, StateFilter, TagMatchMode};
+pub use substrate::{Substrate, SubstrateStats, RecallResult, SearchOptions, TagMatchMode};
 pub use association::Association;
-pub use storage::{Storage, StorageError, StorageResult, MemoryStorage, EngramStorage, SimilarityResult};
+pub use storage::{Storage, StorageResult, SimilarityResult};
 pub use brain::{Brain, UpsertResult};
 
 // Re-export identity types from the identity module for backwards compatibility
-pub use crate::identity::{
-    Identity, Persona, Value, Preference, Relationship, 
-    Antipattern, CommunicationStyle, IdentitySearchResults,
-};
+pub use crate::identity::{Identity};
 
 /// Unique identifier for an engram
 pub type EngramId = uuid::Uuid;

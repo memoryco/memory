@@ -11,10 +11,11 @@ mod types;
 mod store;
 pub mod storage;
 
-pub use classifier::{classify, ClassificationResult, IdentityField};
-pub use storage::{IdentityStorage, DieselIdentityStorage, IdentityItemType, IdentityItemRow};
+pub use classifier::{classify, IdentityField};
+pub use storage::{DieselIdentityStorage, IdentityItemType};
 pub use store::{IdentityStore, ListedItem, MigrationResult};
+#[allow(unused_imports)] // Public API surface — used by consumers of the crate
 pub use types::{
-    Identity, Persona, Value, Preference, Relationship, 
+    Identity, Persona, Value, Preference, Relationship,
     Antipattern, CommunicationStyle, IdentitySearchResults,
 };

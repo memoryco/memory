@@ -46,6 +46,7 @@ impl PlanRow {
 // STEP
 // ==================
 
+#[allow(dead_code)] // Fields mapped from DB schema
 #[derive(Queryable, Selectable, Debug)]
 #[diesel(table_name = steps)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]

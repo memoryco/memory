@@ -105,6 +105,7 @@ impl<'a> VectorSearch<'a> {
     }
     
     /// Find engrams similar to a given engram by ID
+    #[allow(dead_code)]
     pub fn find_similar_to(
         &mut self,
         engram_id: &EngramId,

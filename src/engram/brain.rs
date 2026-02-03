@@ -39,31 +39,28 @@ pub struct Brain {
     /// Background worker for async recall persistence
     /// None for in-memory storage (no persistence needed)
     persistence_worker: Option<PersistenceWorker>,
-    /// Path to database (needed to create persistence worker)
-    db_path: Option<PathBuf>,
 }
 
 impl Brain {
     /// Create a new Brain with empty identity and substrate
     /// Note: This constructor doesn't create a persistence worker since
-    /// we don't have a db_path. Use `open_path` for full persistence support.
+    /// we don't have a db path. Use `open_path` for full persistence support.
     pub fn new<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
         storage.initialize()?;
-        
+
         let config = storage.load_config()?.unwrap_or_default();
-        
+
         Ok(Self {
             identity: Identity::new(),
             substrate: Substrate::with_config(config),
             storage: Box::new(storage),
-            persistence_worker: None, // No async persistence for generic storage
-            db_path: None,
+            persistence_worker: None,
         })
     }
     
     /// Open an existing Brain from storage, or create new if empty
     /// Note: This constructor doesn't create a persistence worker since
-    /// we don't have a db_path. Use `open_path` for full persistence support.
+    /// we don't have a db path. Use `open_path` for full persistence support.
     pub fn open<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
         storage.initialize()?;
         
@@ -101,11 +98,10 @@ impl Brain {
             identity,
             substrate,
             storage: Box::new(storage),
-            persistence_worker: None, // No async persistence for generic storage
-            db_path: None,
+            persistence_worker: None,
         })
     }
-    
+
     /// Open a Brain from a database path with full async persistence support
     /// This is the preferred way to open a Brain for production use.
     pub fn open_path(db_path: impl Into<PathBuf>) -> StorageResult<Self> {
@@ -153,7 +149,6 @@ impl Brain {
             substrate,
             storage: Box::new(storage),
             persistence_worker: Some(persistence_worker),
-            db_path: Some(path),
         })
     }
     
@@ -350,34 +345,6 @@ impl Brain {
         let mut work = PersistenceWork::new();
         self.build_persistence_work_into(result, &mut work);
         worker.send(work);
-    }
-    
-    /// Persist the side effects of a recall operation (synchronous, for flush)
-    fn persist_recall_effects(&mut self, result: &RecallResult) -> StorageResult<()> {
-        // Save only energy/state for affected engrams (skips FTS rebuild)
-        let updates: Vec<_> = result.affected_ids.iter()
-            .filter_map(|id| self.substrate.get(id))
-            .map(|e| (&e.id, e.energy, e.state.clone()))
-            .collect();
-        
-        self.storage.save_engram_energies(&updates)?;
-        
-        // Save any associations modified by Hebbian learning
-        if !result.modified_associations.is_empty() {
-            let mut assocs_to_save = Vec::new();
-            
-            for (from_id, to_id) in &result.modified_associations {
-                if let Some(assocs) = self.substrate.associations_from(from_id) {
-                    if let Some(assoc) = assocs.iter().find(|a| a.to == *to_id) {
-                        assocs_to_save.push(assoc);
-                    }
-                }
-            }
-            
-            self.storage.save_associations(&assocs_to_save)?;
-        }
-        
-        Ok(())
     }
     
     // ==================

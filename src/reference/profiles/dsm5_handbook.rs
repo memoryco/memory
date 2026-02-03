@@ -193,6 +193,7 @@ impl DocumentProfile for Dsm5HandbookProfile {
 }
 
 /// Type of structural element in the handbook.
+#[allow(dead_code)] // Variant data used for structural context
 #[derive(Debug, Clone)]
 enum ElementType {
     Part,

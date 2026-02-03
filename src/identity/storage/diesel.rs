@@ -48,7 +48,7 @@ impl DieselIdentityStorage {
     }
     
     /// Create an in-memory database (for testing) - SQLite only
-    #[cfg(feature = "sqlite")]
+    #[cfg(test)]
     pub fn in_memory() -> StorageResult<Self> {
         let mut conn = DbConnection::establish(":memory:")
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -57,11 +57,6 @@ impl DieselIdentityStorage {
             .map_err(|e| StorageError::Database(e.to_string()))?;
         
         Ok(Self { conn })
-    }
-    
-    /// Get mutable reference to the underlying connection
-    pub fn connection(&mut self) -> &mut DbConnection {
-        &mut self.conn
     }
     
     /// Create the database schema (SQLite)

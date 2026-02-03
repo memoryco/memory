@@ -170,6 +170,7 @@ impl DocumentProfile for NaswEthicsProfile {
 }
 
 /// Type of structural element in the Code of Ethics.
+#[allow(dead_code)] // Variant data used for structural context
 #[derive(Debug, Clone)]
 enum ElementType {
     TopLevel,                // Preamble, Purpose, etc.

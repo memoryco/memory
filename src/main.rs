@@ -102,19 +102,23 @@ fn main() {
                 match brain.get_ids_without_embeddings(50) {
                     Ok(ids) if ids.is_empty() => break,
                     Ok(ids) => {
-                        for id in &ids {
-                            if let Some(engram) = brain.get(id) {
-                                match generator.generate(&engram.content) {
-                                    Ok(embedding) => {
-                                        if brain.set_embedding(id, &embedding).is_ok() {
-                                            processed += 1;
-                                        } else {
-                                            errors += 1;
-                                        }
+                        // Collect contents for batch embedding
+                        let items: Vec<_> = ids.iter()
+                            .filter_map(|id| brain.get(id).map(|e| (*id, e.content.clone())))
+                            .collect();
+                        let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
+
+                        match generator.generate_batch(&texts) {
+                            Ok(embeddings) => {
+                                for ((id, _), embedding) in items.iter().zip(embeddings.iter()) {
+                                    if brain.set_embedding(id, embedding).is_ok() {
+                                        processed += 1;
+                                    } else {
+                                        errors += 1;
                                     }
-                                    Err(_) => errors += 1,
                                 }
                             }
+                            Err(_) => errors += items.len(),
                         }
                         eprint!("\r  Processed {}/{} memories...", processed, count);
                     }

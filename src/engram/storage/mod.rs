@@ -4,7 +4,8 @@
 //! Implementations can be SQLite, in-memory, Postgres, Redis, whatever.
 //! The key is: the rest of the system doesn't care.
 
-mod memory;
+#[cfg(test)]
+pub(crate) mod memory;
 mod diesel;
 mod vector;
 pub mod schema;

@@ -31,6 +31,7 @@ impl IdentityField {
         }
     }
     
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "value" => Some(Self::Value),
@@ -45,6 +46,7 @@ impl IdentityField {
     }
     
     /// All field types
+    #[allow(dead_code)]
     pub fn all() -> &'static [IdentityField] {
         &[
             Self::Value,
@@ -187,6 +189,7 @@ pub struct ClassificationResult {
 
 impl ClassificationResult {
     /// Check if prediction matches the expected field
+    #[allow(dead_code)]
     pub fn matches(&self, expected: IdentityField) -> bool {
         self.predicted == expected
     }

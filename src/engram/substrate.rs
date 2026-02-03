@@ -110,6 +110,7 @@ impl Substrate {
     }
     
     /// Get an engram by ID (mutable) - only if writable
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, id: &EngramId) -> Option<&mut Engram> {
         self.engrams.get_mut(id).filter(|e| e.state.is_writable())
     }
@@ -418,6 +419,7 @@ impl Substrate {
     }
     
     /// Get all engrams in deep storage
+    #[allow(dead_code)]
     pub fn deep_engrams(&self) -> impl Iterator<Item = &Engram> {
         self.engrams.values().filter(|e| e.is_deep())
     }
@@ -623,11 +625,13 @@ impl Substrate {
     }
     
     /// Count of engrams in the substrate (all states)
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.engrams.len()
     }
-    
+
     /// Is the substrate empty?
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.engrams.is_empty()
     }
@@ -906,9 +910,11 @@ mod tests {
     fn decay_reduces_energy() {
         let mut substrate = Substrate::new();
         let id = substrate.create("test");
-        
-        substrate.tick_decay();
-        
+
+        // Backdate last decay so apply_time_decay actually fires
+        substrate.set_last_decay_at(substrate.last_decay_at - 86400);
+        substrate.apply_time_decay();
+
         let engram = substrate.get(&id).unwrap();
         assert!(engram.energy < 1.0);
     }
@@ -970,7 +976,7 @@ mod tests {
     #[test]
     fn stats_track_all_states() {
         let mut substrate = Substrate::new();
-        let a = substrate.create("A");
+        let _a = substrate.create("A");
         let b = substrate.create("B");
         let c = substrate.create("C");
         let d = substrate.create("D");

@@ -22,6 +22,8 @@ pub use engram::{Engram, MemoryState};
 pub use substrate::{Substrate, SubstrateStats, RecallResult, SearchOptions, TagMatchMode};
 pub use association::Association;
 pub use storage::{Storage, StorageResult, SimilarityResult};
+#[cfg(test)]
+pub use storage::memory::MemoryStorage;
 pub use brain::{Brain, UpsertResult};
 
 // Re-export identity types from the identity module for backwards compatibility

@@ -12,6 +12,7 @@ use super::schema::*;
 
 /// Queryable engram row (SELECT)
 /// Field order MUST match schema.rs column order
+#[allow(dead_code)] // Fields mapped from DB schema
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = engrams)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -78,6 +79,7 @@ pub struct NewAssociation<'a> {
 // ============================================================================
 
 /// Queryable config row
+#[allow(dead_code)] // Fields mapped from DB schema
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = config)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -99,6 +101,7 @@ pub struct NewConfig<'a> {
 // ============================================================================
 
 /// Queryable identity row
+#[allow(dead_code)] // Fields mapped from DB schema
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = identity)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -120,6 +123,7 @@ pub struct NewIdentity<'a> {
 // ============================================================================
 
 /// Queryable metadata row
+#[allow(dead_code)] // Fields mapped from DB schema
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = metadata)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]

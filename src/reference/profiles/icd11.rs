@@ -211,6 +211,7 @@ impl DocumentProfile for Icd11Profile {
 }
 
 /// Type of structural element in ICD-11.
+#[allow(dead_code)] // Variant data used for structural context
 #[derive(Debug, Clone)]
 enum ElementType {
     Chapter(String),  // chapter number

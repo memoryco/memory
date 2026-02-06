@@ -50,9 +50,10 @@ impl Tool<Context> for EngramGetTool {
         let id: EngramId = args.id.parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;
 
-        let brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.lock().unwrap();
+        let _ = brain.sync_from_storage();
 
-        match brain.get(&id) {
+        match brain.get_or_load(&id) {
             Some(engram) => Ok(text_response(format_engram(engram))),
             None => Ok(text_response(format!("Memory {} not found.", id))),
         }

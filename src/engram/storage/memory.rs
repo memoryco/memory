@@ -70,6 +70,10 @@ impl Storage for MemoryStorage {
         Ok(existed)
     }
     
+    fn count_engrams(&mut self) -> StorageResult<usize> {
+        Ok(self.engrams.len())
+    }
+    
     fn save_association(&mut self, assoc: &Association) -> StorageResult<()> {
         // Upsert: remove existing if present, then add
         self.associations.retain(|a| !(a.from == assoc.from && a.to == assoc.to));

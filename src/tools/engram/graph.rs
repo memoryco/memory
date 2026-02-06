@@ -61,8 +61,9 @@ impl Tool<Context> for EngramGraphTool {
         let min_weight = args.min_weight.unwrap_or(0.0);
         let mut brain = context.brain.lock().unwrap();
         
-        // Lazy decay - check if interval elapsed, apply if so
+        // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();
+        let _ = brain.sync_from_storage();
 
         // Collect all associations
         let all_assocs = brain.all_associations();

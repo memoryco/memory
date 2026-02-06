@@ -74,6 +74,10 @@ pub trait Storage: Send {
     /// Returns true if the engram existed and was deleted
     fn delete_engram(&mut self, id: &EngramId) -> StorageResult<bool>;
     
+    /// Count total engrams in storage
+    /// Used for lightweight cross-process sync detection
+    fn count_engrams(&mut self) -> StorageResult<usize>;
+    
     /// Update only energy and state for engrams (efficient bulk update)
     /// Used by decay and recall effects where content hasn't changed
     /// Default implementation is no-op; implementations should override

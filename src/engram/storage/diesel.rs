@@ -342,6 +342,13 @@ impl Storage for EngramStorage {
         Ok(deleted > 0)
     }
     
+    fn count_engrams(&mut self) -> StorageResult<usize> {
+        let count: i64 = engrams::table
+            .count()
+            .get_result(&mut self.conn)?;
+        Ok(count as usize)
+    }
+    
     fn save_engram_energies(&mut self, updates: &[(&EngramId, f64, MemoryState)]) -> StorageResult<()> {
         if updates.is_empty() {
             return Ok(());

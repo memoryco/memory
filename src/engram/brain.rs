@@ -391,9 +391,27 @@ impl Brain {
         self.substrate.all_associations()
     }
     
-    /// Get a memory by ID
+    /// Get a memory by ID (substrate only - no storage fallback)
     pub fn get(&self, id: &EngramId) -> Option<&Engram> {
         self.substrate.get(id)
+    }
+    
+    /// Get a memory by ID, falling back to storage if not in substrate.
+    /// This handles cross-process writes where another process created a memory
+    /// that this process's substrate doesn't know about yet.
+    pub fn get_or_load(&mut self, id: &EngramId) -> Option<&Engram> {
+        // Check substrate first (fast path)
+        if self.substrate.get(id).is_some() {
+            return self.substrate.get(id);
+        }
+        
+        // Fall back to storage (handles cross-process writes)
+        if let Ok(Some(engram)) = self.storage.load_engram(id) {
+            self.substrate.insert_engram(engram);
+            return self.substrate.get(id);
+        }
+        
+        None
     }
     
     // ==================
@@ -428,6 +446,45 @@ impl Brain {
     // ==================
     // LIFECYCLE
     // ==================
+    
+    /// Sync substrate with storage to pick up cross-process writes.
+    /// Does a lightweight count check first — only reloads if counts diverge.
+    /// Returns true if new engrams were loaded.
+    pub fn sync_from_storage(&mut self) -> StorageResult<bool> {
+        let db_count = self.storage.count_engrams()?;
+        let substrate_count = self.substrate.len();
+        
+        if db_count <= substrate_count {
+            return Ok(false);
+        }
+        
+        // New engrams exist in DB that substrate doesn't have — load them
+        let engrams = self.storage.load_all_engrams()?;
+        let mut loaded = 0;
+        for engram in engrams {
+            if self.substrate.get(&engram.id).is_none() {
+                self.substrate.insert_engram(engram);
+                loaded += 1;
+            }
+        }
+        
+        if loaded > 0 {
+            // Also sync associations (new engrams may have associations)
+            let associations = self.storage.load_all_associations()?;
+            for assoc in associations {
+                let exists = self.substrate.associations_from(&assoc.from)
+                    .map(|a| a.iter().any(|existing| existing.to == assoc.to))
+                    .unwrap_or(false);
+                if !exists {
+                    self.substrate.insert_association(assoc);
+                }
+            }
+            
+            eprintln!("[brain] Synced {} new engrams from storage", loaded);
+        }
+        
+        Ok(loaded > 0)
+    }
     
     /// Apply time-based decay to all memories and persist
     /// Returns true if decay was applied, false if not enough time elapsed
@@ -801,5 +858,93 @@ mod tests {
         
         // Energy should still be 1.0
         assert_eq!(brain.get(&id).unwrap().energy, 1.0);
+    }
+    
+    #[test]
+    fn cross_process_get_or_load() {
+        // Simulate two processes sharing the same SQLite file.
+        // Process A creates a memory, Process B (opened before the write)
+        // should be able to see it via get_or_load().
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("brain.db");
+        
+        // "Process A" — create and write a memory
+        let mut brain_a = Brain::open_path(&db_path).unwrap();
+        let id = brain_a.create("artichokes are delicious").unwrap();
+        brain_a.flush().unwrap();
+        
+        // "Process B" — opened AFTER A's write, but simulating a stale substrate
+        // by opening a fresh Brain (its substrate will load the memory).
+        // To truly test staleness, we open B, then have A create another memory.
+        let mut brain_b = Brain::open_path(&db_path).unwrap();
+        
+        // B can see the first memory (loaded at startup)
+        assert!(brain_b.get(&id).is_some(), "B should see memory loaded at startup");
+        
+        // Now A creates a NEW memory that B doesn't know about
+        let id2 = brain_a.create("the artichoke memory was a test").unwrap();
+        brain_a.flush().unwrap();
+        
+        // B's substrate doesn't have id2
+        assert!(brain_b.get(&id2).is_none(), "B's substrate should NOT have the new memory");
+        
+        // But get_or_load falls back to storage and finds it
+        assert!(brain_b.get_or_load(&id2).is_some(), "get_or_load should find cross-process write");
+        assert_eq!(
+            brain_b.get(&id2).unwrap().content,
+            "the artichoke memory was a test",
+        );
+    }
+    
+    #[test]
+    fn cross_process_sync_from_storage() {
+        // sync_from_storage should bulk-load all new cross-process memories
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("brain.db");
+        
+        let mut brain_a = Brain::open_path(&db_path).unwrap();
+        let mut brain_b = Brain::open_path(&db_path).unwrap();
+        
+        // A creates several memories after B is already open
+        let id1 = brain_a.create("memory one").unwrap();
+        let id2 = brain_a.create("memory two").unwrap();
+        let id3 = brain_a.create("memory three").unwrap();
+        brain_a.flush().unwrap();
+        
+        // B doesn't see any of them
+        assert!(brain_b.get(&id1).is_none());
+        assert!(brain_b.get(&id2).is_none());
+        assert!(brain_b.get(&id3).is_none());
+        
+        // After sync, B sees all of them
+        let synced = brain_b.sync_from_storage().unwrap();
+        assert!(synced, "sync should have loaded new memories");
+        assert!(brain_b.get(&id1).is_some());
+        assert!(brain_b.get(&id2).is_some());
+        assert!(brain_b.get(&id3).is_some());
+        
+        // Calling sync again with no changes should be a no-op
+        let synced_again = brain_b.sync_from_storage().unwrap();
+        assert!(!synced_again, "sync should be no-op when nothing changed");
+    }
+    
+    #[test]
+    fn count_engrams_storage() {
+        use super::super::storage::EngramStorage;
+        
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("brain.db");
+        
+        let mut storage = EngramStorage::open(&db_path).unwrap();
+        storage.initialize().unwrap();
+        
+        assert_eq!(storage.count_engrams().unwrap(), 0);
+        
+        let e1 = Engram::new("first");
+        let e2 = Engram::new("second");
+        storage.save_engram(&e1).unwrap();
+        storage.save_engram(&e2).unwrap();
+        
+        assert_eq!(storage.count_engrams().unwrap(), 2);
     }
 }

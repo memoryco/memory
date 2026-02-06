@@ -83,8 +83,9 @@ impl Tool<Context> for EngramSearchTool {
 
         let mut brain = context.brain.lock().unwrap();
 
-        // Lazy decay - check if interval elapsed, apply if so
+        // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();
+        let _ = brain.sync_from_storage();
 
         // Generate query embedding
         let generator = EmbeddingGenerator::new();
@@ -107,7 +108,7 @@ impl Tool<Context> for EngramSearchTool {
         }
 
         let mut scored: Vec<ScoredResult> = vector_results.iter().filter_map(|r| {
-            let engram = brain.get(&r.id)?;
+            let engram = brain.get_or_load(&r.id)?;
             
             // State filter
             let state_ok = if include_archived {

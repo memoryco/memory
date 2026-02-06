@@ -32,8 +32,9 @@ impl Tool<Context> for EngramStatsTool {
     ) -> sml_mcps::Result<CallToolResult> {
         let mut brain = context.brain.lock().unwrap();
         
-        // Lazy decay - check if interval elapsed, apply if so
+        // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();
+        let _ = brain.sync_from_storage();
         
         let stats = brain.stats();
 

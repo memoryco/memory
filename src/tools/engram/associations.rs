@@ -59,7 +59,8 @@ impl Tool<Context> for EngramAssociationsTool {
             .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;
 
         let direction = args.direction.as_deref().unwrap_or("outbound");
-        let brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.lock().unwrap();
+        let _ = brain.sync_from_storage();
 
         let memory_info = match brain.get(&id) {
             Some(e) => format!("Memory: {} (energy: {:.2})\n", truncate_content(&e.content, 60), e.energy),

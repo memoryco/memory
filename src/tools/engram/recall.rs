@@ -58,8 +58,9 @@ impl Tool<Context> for EngramRecallTool {
 
         let mut brain = context.brain.lock().unwrap();
         
-        // Lazy decay - check if interval elapsed, apply if so
+        // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();
+        let _ = brain.sync_from_storage();
         
         let mut output = String::new();
         let mut recalled_count = 0;

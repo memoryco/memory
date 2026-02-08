@@ -13,6 +13,7 @@ pub mod config;
 mod embedding;
 mod engram;
 mod identity;
+mod install;
 mod lenses;
 mod plans;
 mod reference;

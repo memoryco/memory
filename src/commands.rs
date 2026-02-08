@@ -1,12 +1,13 @@
 //! CLI command implementations.
 //!
-//! Each subcommand gets its own function. Most are stubs for now.
+//! Each subcommand gets its own function.
 
 use crate::config;
+use crate::install::{self, InstallStatus};
 use std::io::{self, Write};
 
 /// `memoryco setup` — full first-run experience.
-pub fn setup(_yes: bool) {
+pub fn setup(yes: bool) {
     eprintln!("memoryco setup");
     eprintln!("──────────────");
 
@@ -14,7 +15,7 @@ pub fn setup(_yes: bool) {
     cache();
 
     // Step 2: Install into detected clients
-    install(_yes);
+    install(yes);
 
     // Step 3: Start serving
     eprintln!("\nStarting server...");
@@ -40,32 +41,91 @@ pub fn cache() {
 }
 
 /// `memoryco install` — detect MCP clients and inject config.
-pub fn install(_yes: bool) {
-    eprintln!("Client auto-detection not yet implemented.");
-    eprintln!("For now, add this to your MCP client config manually:\n");
+pub fn install(yes: bool) {
+    let clients = install::all_clients();
+    let mut found = 0;
+    let mut installed = 0;
 
-    let exe = std::env::current_exe()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "memoryco".to_string());
+    for client in &clients {
+        let status = client.check_existing();
 
-    let memory_home = config::get_memory_home();
+        match status {
+            InstallStatus::ClientNotFound => continue,
+            InstallStatus::Installed => {
+                found += 1;
+                eprintln!("✓ {} — already configured", client.name());
+            }
+            InstallStatus::NotInstalled => {
+                found += 1;
+                if yes || prompt_yes_no(&format!("  Found {}. Add MemoryCo?", client.name())) {
+                    match client.install() {
+                        Ok(()) => {
+                            eprintln!("  ✓ Configured {}", client.name());
+                            installed += 1;
+                        }
+                        Err(e) => eprintln!("  ✗ Failed to configure {}: {}", client.name(), e),
+                    }
+                } else {
+                    eprintln!("  Skipped {}", client.name());
+                }
+            }
+            InstallStatus::NeedsUpdate { ref current_command } => {
+                found += 1;
+                eprintln!("  {} — outdated (pointing to {})", client.name(), current_command);
+                if yes || prompt_yes_no("  Update to current binary?") {
+                    match client.install() {
+                        Ok(()) => {
+                            eprintln!("  ✓ Updated {}", client.name());
+                            installed += 1;
+                        }
+                        Err(e) => eprintln!("  ✗ Failed to update {}: {}", client.name(), e),
+                    }
+                } else {
+                    eprintln!("  Skipped {}", client.name());
+                }
+            }
+        }
+    }
 
-    eprintln!("  {{");
-    eprintln!("    \"mcpServers\": {{");
-    eprintln!("      \"memoryco\": {{");
-    eprintln!("        \"command\": \"{}\",", exe);
-    eprintln!("        \"args\": [\"serve\"],");
-    eprintln!("        \"env\": {{");
-    eprintln!("          \"MEMORY_HOME\": \"{}\"", memory_home.display());
-    eprintln!("        }}");
-    eprintln!("      }}");
-    eprintln!("    }}");
-    eprintln!("  }}");
+    if found == 0 {
+        eprintln!("No supported MCP clients detected.");
+        eprintln!();
+        print_manual_config();
+    } else {
+        eprintln!();
+        eprintln!("Detected {} client(s), configured {}.", found, installed);
+    }
 }
 
 /// `memoryco uninstall` — remove from MCP client configs.
-pub fn uninstall(_yes: bool) {
-    eprintln!("Client uninstall not yet implemented.");
+pub fn uninstall(yes: bool) {
+    let clients = install::all_clients();
+    let mut removed = 0;
+
+    for client in &clients {
+        let status = client.check_existing();
+
+        match status {
+            InstallStatus::Installed | InstallStatus::NeedsUpdate { .. } => {
+                if yes || prompt_yes_no(&format!("  Remove MemoryCo from {}?", client.name())) {
+                    match client.uninstall() {
+                        Ok(()) => {
+                            eprintln!("  ✓ Removed from {}", client.name());
+                            removed += 1;
+                        }
+                        Err(e) => eprintln!("  ✗ Failed to remove from {}: {}", client.name(), e),
+                    }
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    if removed == 0 {
+        eprintln!("No MemoryCo configurations found to remove.");
+    } else {
+        eprintln!("\nRemoved from {} client(s).", removed);
+    }
 }
 
 /// `memoryco doctor` — health check.
@@ -80,14 +140,12 @@ pub fn doctor() {
         memory_home.exists());
 
     // Databases
-    let brain_path = memory_home.join("brain.db");
-    check("Brain database", "brain.db", brain_path.exists());
-
-    let identity_path = memory_home.join("identity.db");
-    check("Identity database", "identity.db", identity_path.exists());
-
-    let plans_path = memory_home.join("plans.db");
-    check("Plans database", "plans.db", plans_path.exists());
+    check("Brain database", "brain.db",
+        memory_home.join("brain.db").exists());
+    check("Identity database", "identity.db",
+        memory_home.join("identity.db").exists());
+    check("Plans database", "plans.db",
+        memory_home.join("plans.db").exists());
 
     // Embedding model
     let model_dir = config::get_model_cache_dir();
@@ -112,20 +170,52 @@ pub fn doctor() {
         .unwrap_or(0);
     check("References", &format!("{} sources", ref_count), refs_dir.exists());
 
+    // MCP Clients
     eprintln!();
+    eprintln!("MCP Clients");
+    eprintln!("────────────");
+    let clients = install::all_clients();
+    let mut issues = 0;
+
+    for client in &clients {
+        let status = client.check_existing();
+        let (icon, detail) = match &status {
+            InstallStatus::Installed => ("✓", "configured".to_string()),
+            InstallStatus::NotInstalled => {
+                issues += 1;
+                ("✗", "detected but not configured".to_string())
+            }
+            InstallStatus::NeedsUpdate { current_command } => {
+                issues += 1;
+                ("⚠", format!("outdated (→ {})", current_command))
+            }
+            InstallStatus::ClientNotFound => ("·", "not installed".to_string()),
+        };
+        eprintln!("{} {:20} {}", icon, client.name(), detail);
+    }
+
+    eprintln!();
+    if issues > 0 {
+        eprintln!("{} issue(s) found. Run `memoryco install` to fix.", issues);
+    } else {
+        eprintln!("All checks passed.");
+    }
 }
 
 /// `memoryco reset` — delete databases with confirmation.
 pub fn reset() {
     let memory_home = config::get_memory_home();
+    let db_files = [
+        "brain.db", "brain.db-wal", "brain.db-shm",
+        "identity.db", "identity.db-wal", "identity.db-shm",
+        "plans.db", "plans.db-wal", "plans.db-shm",
+    ];
 
     eprintln!("⚠️  This will permanently delete all memories, identity, and plans.");
     eprintln!("   Cache, lenses, and references will be preserved.");
     eprintln!();
     eprintln!("   Files to delete:");
-    for name in &["brain.db", "brain.db-wal", "brain.db-shm",
-                   "identity.db", "identity.db-wal", "identity.db-shm",
-                   "plans.db", "plans.db-wal", "plans.db-shm"] {
+    for name in &db_files {
         let path = memory_home.join(name);
         if path.exists() {
             eprintln!("     {}", path.display());
@@ -137,9 +227,7 @@ pub fn reset() {
 
     let mut input = String::new();
     if io::stdin().read_line(&mut input).is_ok() && input.trim() == "reset" {
-        for name in &["brain.db", "brain.db-wal", "brain.db-shm",
-                       "identity.db", "identity.db-wal", "identity.db-shm",
-                       "plans.db", "plans.db-wal", "plans.db-shm"] {
+        for name in &db_files {
             let path = memory_home.join(name);
             if path.exists() {
                 if let Err(e) = std::fs::remove_file(&path) {
@@ -155,8 +243,44 @@ pub fn reset() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 /// Print a doctor check line.
 fn check(label: &str, detail: &str, ok: bool) {
     let icon = if ok { "✓" } else { "✗" };
     eprintln!("{} {:20} {}", icon, label, detail);
+}
+
+/// Prompt user for Y/n confirmation. Returns true for yes (default).
+fn prompt_yes_no(question: &str) -> bool {
+    eprint!("{} [Y/n] ", question);
+    io::stderr().flush().ok();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return false;
+    }
+    let trimmed = input.trim().to_lowercase();
+    trimmed.is_empty() || trimmed == "y" || trimmed == "yes"
+}
+
+/// Print manual configuration instructions as a fallback.
+fn print_manual_config() {
+    let (command, _, _) = install::memoryco_server_entry();
+    let memory_home = config::get_memory_home();
+
+    eprintln!("Add this to your MCP client config manually:\n");
+    eprintln!("  {{");
+    eprintln!("    \"mcpServers\": {{");
+    eprintln!("      \"memoryco\": {{");
+    eprintln!("        \"command\": \"{}\",", command);
+    eprintln!("        \"args\": [\"serve\"],");
+    eprintln!("        \"env\": {{");
+    eprintln!("          \"MEMORY_HOME\": \"{}\"", memory_home.display());
+    eprintln!("        }}");
+    eprintln!("      }}");
+    eprintln!("    }}");
+    eprintln!("  }}");
 }

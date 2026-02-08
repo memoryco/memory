@@ -1,31 +1,13 @@
 //! Embedding generator using fastembed (all-MiniLM-L6-v2)
 
+use crate::config;
 use crate::embedding::EMBEDDING_DIM;
-use std::path::PathBuf;
 use std::sync::{OnceLock, Mutex};
 use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 
 /// Global embedding model (lazy-loaded on first use)
 /// Wrapped in Mutex because embed() requires &mut self
 static EMBEDDING_MODEL: OnceLock<Mutex<TextEmbedding>> = OnceLock::new();
-
-/// Get the cache directory for embedding models
-fn get_cache_dir() -> PathBuf {
-    // Use MEMORY_HOME/models if set, otherwise use system cache dir
-    if let Ok(home) = std::env::var("MEMORY_HOME") {
-        PathBuf::from(home).join("models")
-    } else {
-        // Try data_local_dir first (~/Library/Application Support on macOS)
-        // Fall back to cache_dir (~/Library/Caches on macOS)
-        // Last resort: home directory
-        dirs::data_local_dir()
-            .or_else(dirs::cache_dir)
-            .or_else(dirs::home_dir)
-            .expect("Could not determine cache directory")
-            .join("memory")
-            .join("models")
-    }
-}
 
 /// Embedding generator for semantic search
 pub struct EmbeddingGenerator;
@@ -42,7 +24,7 @@ impl EmbeddingGenerator {
     /// Model is lazy-loaded on first call (~22MB download on first use).
     pub fn generate(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
         let model_mutex = EMBEDDING_MODEL.get_or_init(|| {
-            let cache_dir = get_cache_dir();
+            let cache_dir = config::get_model_cache_dir();
             std::fs::create_dir_all(&cache_dir).ok();
             eprintln!("Loading embedding model (cache: {})...", cache_dir.display());
             
@@ -74,7 +56,7 @@ impl EmbeddingGenerator {
     /// Generate embeddings for multiple texts (batch)
     pub fn generate_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         let model_mutex = EMBEDDING_MODEL.get_or_init(|| {
-            let cache_dir = get_cache_dir();
+            let cache_dir = config::get_model_cache_dir();
             std::fs::create_dir_all(&cache_dir).ok();
             eprintln!("Loading embedding model (cache: {})...", cache_dir.display());
             

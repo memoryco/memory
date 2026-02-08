@@ -48,4 +48,11 @@ pub enum Command {
 
     /// Delete all databases (keeps cache, lenses, references)
     Reset,
+
+    /// Update memoryco to the latest version
+    Update {
+        /// Show what would be updated without actually updating
+        #[arg(long)]
+        dry_run: bool,
+    },
 }

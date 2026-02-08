@@ -50,5 +50,6 @@ fn main() {
         Some(cli::Command::Uninstall { yes })=> commands::uninstall(yes),
         Some(cli::Command::Doctor)           => commands::doctor(),
         Some(cli::Command::Reset)            => commands::reset(),
+        Some(cli::Command::Update { dry_run })=> commands::update(dry_run),
     }
 }

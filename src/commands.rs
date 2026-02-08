@@ -4,6 +4,7 @@
 
 use crate::config;
 use crate::install::{self, InstallStatus};
+use self_update::cargo_crate_version;
 use std::io::{self, Write};
 
 /// `memoryco setup` — full first-run experience.
@@ -240,6 +241,65 @@ pub fn reset() {
         eprintln!("\nReset complete. Run `memoryco serve` to start fresh.");
     } else {
         eprintln!("Reset cancelled.");
+    }
+}
+
+/// `memoryco update` — self-update from GitHub Releases.
+pub fn update(dry_run: bool) {
+    let current = cargo_crate_version!();
+    eprintln!("Current version: {}", current);
+    eprintln!("Checking for updates...");
+
+    let update_builder = match self_update::backends::github::Update::configure()
+        .repo_owner("memoryco")
+        .repo_name("releases")
+        .bin_name("memoryco")
+        .current_version(current)
+        .show_download_progress(true)
+        .no_confirm(true)
+        .build()
+    {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("✗ Failed to check for updates: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if dry_run {
+        match update_builder.get_latest_release() {
+            Ok(release) => {
+                let latest = &release.version;
+                if latest == current {
+                    eprintln!("✓ Already on the latest version ({})", current);
+                } else {
+                    eprintln!("  New version available: {} → {}", current, latest);
+                    eprintln!("  Run `memoryco update` to install.");
+                }
+            }
+            Err(e) => {
+                eprintln!("✗ Failed to check for updates: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    match update_builder.update() {
+        Ok(status) => {
+            if status.updated() {
+                eprintln!("✓ Updated to version {}", status.version());
+                // Re-install into any configured MCP clients so the path stays current
+                // (in case the binary moved — unlikely with in-place update, but safe)
+            } else {
+                eprintln!("✓ Already on the latest version ({})", current);
+            }
+        }
+        Err(e) => {
+            eprintln!("✗ Update failed: {}", e);
+            eprintln!("  You can update manually: curl -fsSL https://memoryco.ai/install.sh | sh");
+            std::process::exit(1);
+        }
     }
 }
 

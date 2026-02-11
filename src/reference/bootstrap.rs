@@ -1,6 +1,6 @@
 //! Reference bootstrap - add instructions and per-source citations to identity
 
-use crate::engram::{Brain, UpsertResult};
+use crate::identity::{IdentityStore, UpsertResult};
 use super::ReferenceManager;
 
 /// General instructions for using reference tools
@@ -32,9 +32,9 @@ const MARKER: &str = "## References";
 
 /// Bootstrap references: add general instructions and per-source citations to identity
 /// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(brain: &mut Brain, references: &ReferenceManager) -> Result<(), Box<dyn std::error::Error>> {
+pub fn bootstrap(identity: &mut IdentityStore, references: &ReferenceManager) -> Result<(), Box<dyn std::error::Error>> {
     // Upsert general instructions
-    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
         UpsertResult::Added => {
             eprintln!("  Reference instructions added to identity");
         }
@@ -68,7 +68,7 @@ pub fn bootstrap(brain: &mut Brain, references: &ReferenceManager) -> Result<(),
                 citation.format_reference()
             );
             
-            match brain.upsert_instruction(&instruction, &marker)? {
+            match identity.upsert_instruction(&instruction, &marker)? {
                 UpsertResult::Added => {
                     eprintln!("  Citation instructions for '{}' added to identity", source_name);
                 }

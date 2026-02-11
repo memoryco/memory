@@ -1,6 +1,6 @@
 //! Lenses bootstrap - create directory and add instructions to identity
 
-use crate::engram::{Brain, UpsertResult};
+use crate::identity::{IdentityStore, UpsertResult};
 use std::path::Path;
 
 const INSTRUCTIONS: &str = r#"## Lenses
@@ -75,9 +75,9 @@ const MARKER: &str = "## Lenses";
 
 /// Bootstrap lenses: add instructions to identity and create directory
 /// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(brain: &mut Brain, lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn bootstrap(identity: &mut IdentityStore, lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Upsert instructions to identity
-    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
         UpsertResult::Added => {
             eprintln!("  Lenses instructions added to identity");
         }

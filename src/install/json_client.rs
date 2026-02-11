@@ -19,6 +19,10 @@ pub struct JsonClient {
     config_path: PathBuf,
     /// Top-level key that holds MCP server entries (e.g., "mcpServers" or "servers").
     servers_key: String,
+    /// Optional path to check for client detection.
+    /// If set, this path must exist for the client to be considered installed.
+    /// If None, falls back to checking config file or its parent dir.
+    detect_path: Option<PathBuf>,
 }
 
 impl JsonClient {
@@ -27,7 +31,14 @@ impl JsonClient {
             name: name.into(),
             config_path,
             servers_key: servers_key.into(),
+            detect_path: None,
         }
+    }
+
+    /// Set an explicit path to check for client detection.
+    pub fn with_detect_path(mut self, path: PathBuf) -> Self {
+        self.detect_path = Some(path);
+        self
     }
 
     /// Read and parse the config file. Returns empty object if file doesn't exist.
@@ -86,6 +97,16 @@ impl McpClient for JsonClient {
 
     fn config_path(&self) -> PathBuf {
         self.config_path.clone()
+    }
+
+    fn detect(&self) -> bool {
+        if let Some(ref detect_path) = self.detect_path {
+            detect_path.exists()
+        } else {
+            // Default: config file exists or parent dir exists
+            let path = self.config_path();
+            path.exists() || path.parent().is_some_and(|p| p.exists())
+        }
     }
 
     fn check_existing(&self) -> InstallStatus {
@@ -319,6 +340,34 @@ mod tests {
         let config = client.read_config().unwrap();
         assert!(config["servers"]["memoryco"]["command"].is_string());
         assert!(config["mcpServers"].is_null()); // Should NOT create mcpServers
+    }
+
+    #[test]
+    fn detect_with_detect_path_present() {
+        let dir = TempDir::new().unwrap();
+        let detect_dir = dir.path().join(".claude");
+        std::fs::create_dir(&detect_dir).unwrap();
+
+        let client = JsonClient::new(
+            "Claude Code",
+            dir.path().join(".claude.json"),
+            "mcpServers",
+        ).with_detect_path(detect_dir);
+
+        assert!(client.detect());
+    }
+
+    #[test]
+    fn detect_with_detect_path_absent() {
+        let dir = TempDir::new().unwrap();
+
+        let client = JsonClient::new(
+            "Claude Code",
+            dir.path().join(".claude.json"),
+            "mcpServers",
+        ).with_detect_path(dir.path().join(".claude"));
+
+        assert!(!client.detect());
     }
 
     #[test]

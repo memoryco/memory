@@ -462,6 +462,21 @@ impl Identity {
         }
     }
     
+    /// Render identity persona only (excludes operational instructions).
+    /// Used by identity_setup to show current state without cluttering
+    /// the onboarding guide with bootstrap instructions.
+    pub fn render_persona(&self) -> String {
+        let mut copy = self.clone();
+        copy.instructions.clear();
+        let rendered = copy.render();
+        let trimmed = rendered.trim();
+        if trimmed.is_empty() {
+            "No identity currently configured".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     /// Render identity as a string (for context injection)
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -777,5 +792,43 @@ mod tests {
         assert!(rendered.contains("TestBot"));
         assert!(rendered.contains("Testing is good"));
         assert!(rendered.contains("Green > Red"));
+    }
+
+    #[test]
+    fn render_persona_excludes_instructions() {
+        let identity = Identity::new()
+            .with_persona("Porter", "A pragmatic assistant")
+            .with_trait("direct")
+            .with_instruction("Always search before responding".to_string());
+
+        let rendered = identity.render_persona();
+
+        assert!(rendered.contains("Porter"),
+            "render_persona should include persona name");
+        assert!(rendered.contains("direct"),
+            "render_persona should include traits");
+        assert!(!rendered.contains("Always search"),
+            "render_persona must NOT include instructions");
+    }
+
+    #[test]
+    fn render_persona_empty_identity() {
+        let identity = Identity::new();
+        let rendered = identity.render_persona();
+
+        assert_eq!(rendered, "No identity currently configured",
+            "Empty identity should render as not configured");
+    }
+
+    #[test]
+    fn render_persona_instructions_only() {
+        // Identity with only instructions (like a fresh bootstrap)
+        let identity = Identity::new()
+            .with_instruction("## Memory Workflow\nDo stuff".to_string());
+
+        let rendered = identity.render_persona();
+
+        assert_eq!(rendered, "No identity currently configured",
+            "Instructions-only identity should render as not configured for persona");
     }
 }

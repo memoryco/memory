@@ -24,7 +24,7 @@ pub use association::Association;
 pub use storage::{Storage, StorageResult, SimilarityResult};
 #[cfg(test)]
 pub use storage::memory::MemoryStorage;
-pub use brain::{Brain, UpsertResult};
+pub use brain::Brain;
 
 // Re-export identity types from the identity module for backwards compatibility
 pub use crate::identity::{Identity};

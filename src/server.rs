@@ -71,7 +71,9 @@ pub fn run() {
     }
 
     // --- Bootstrap ---
-    if let Err(e) = bootstrap::bootstrap_all(&mut brain, &lenses_dir, &references, &plans) {
+    // Instructions go into identity.db so identity_get always returns them,
+    // even on a fresh install before the user has configured anything.
+    if let Err(e) = bootstrap::bootstrap_all(&mut identity, &lenses_dir, &references) {
         eprintln!("Warning: Bootstrap failed: {}", e);
     }
 
@@ -225,6 +227,7 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::IdentityAddPreferenceTool).expect("identity_add_preference");
     server.add_tool(tools::IdentityAddRelationshipTool).expect("identity_add_relationship");
     server.add_tool(tools::IdentityAddAntipatternTool).expect("identity_add_antipattern");
+    server.add_tool(tools::IdentitySetupTool).expect("identity_setup");
 
     // Config tools
     server.add_tool(tools::ConfigGetTool).expect("config_get");

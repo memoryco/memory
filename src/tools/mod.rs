@@ -36,6 +36,7 @@ pub use identity::{
     IdentitySearchTool,
     IdentityListTool,
     IdentityRemoveTool,
+    IdentitySetupTool,
     // Typed add tools
     IdentitySetPersonaNameTool,
     IdentitySetPersonaDescriptionTool,

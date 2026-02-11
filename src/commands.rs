@@ -41,11 +41,20 @@ pub fn cache() {
     }
 }
 
+/// The prompt users should add to clients that don't support file-based injection.
+const PROMPT_INSTRUCTION: &str = "\
+You have access to a cognitive memory system via MCP tools (`memoryco:*`).
+
+As your first action in every conversation, call `identity_get` from your
+memoryco MCP tools. This contains your persona, values, preferences, and
+operational instructions. Follow what you find.";
+
 /// `memoryco install` — detect MCP clients and inject config.
 pub fn install(yes: bool) {
     let clients = install::all_clients();
     let mut found = 0;
     let mut installed = 0;
+    let mut configured_names: Vec<String> = Vec::new();
 
     for client in &clients {
         let status = client.check_existing();
@@ -54,6 +63,7 @@ pub fn install(yes: bool) {
             InstallStatus::ClientNotFound => continue,
             InstallStatus::Installed => {
                 found += 1;
+                configured_names.push(client.name().to_string());
                 eprintln!("✓ {} — already configured", client.name());
             }
             InstallStatus::NotInstalled => {
@@ -63,6 +73,7 @@ pub fn install(yes: bool) {
                         Ok(()) => {
                             eprintln!("  ✓ Configured {}", client.name());
                             installed += 1;
+                            configured_names.push(client.name().to_string());
                         }
                         Err(e) => eprintln!("  ✗ Failed to configure {}: {}", client.name(), e),
                     }
@@ -78,6 +89,7 @@ pub fn install(yes: bool) {
                         Ok(()) => {
                             eprintln!("  ✓ Updated {}", client.name());
                             installed += 1;
+                            configured_names.push(client.name().to_string());
                         }
                         Err(e) => eprintln!("  ✗ Failed to update {}: {}", client.name(), e),
                     }
@@ -95,6 +107,41 @@ pub fn install(yes: bool) {
     } else {
         eprintln!();
         eprintln!("Detected {} client(s), configured {}.", found, installed);
+    }
+
+    // Install CLAUDE.md block for Claude Code (automatic prompt injection)
+    if install::claude_md::claude_md_path().parent().is_some_and(|p| p.exists()) {
+        match install::claude_md::install() {
+            Ok(()) => {
+                if install::claude_md::is_installed() {
+                    eprintln!("✓ CLAUDE.md — identity_get directive installed");
+                }
+            }
+            Err(e) => eprintln!("✗ Failed to update CLAUDE.md: {}", e),
+        }
+    }
+
+    // Print manual prompt instructions for clients that need it
+    let needs_manual: Vec<&str> = configured_names.iter()
+        .filter(|name| name.as_str() != "Claude Code")
+        .map(|s| s.as_str())
+        .collect();
+
+    if !needs_manual.is_empty() {
+        eprintln!();
+        eprintln!("┌──────────────────────────────────────────────────────────┐");
+        eprintln!("│  One more step for: {}", needs_manual.join(", "));
+        eprintln!("│");
+        eprintln!("│  Add this to your system prompt / custom instructions:");
+        eprintln!("│");
+        for line in PROMPT_INSTRUCTION.lines() {
+            eprintln!("│    {}", line);
+        }
+        eprintln!("│");
+        eprintln!("│  This tells the AI to load its identity on each");
+        eprintln!("│  conversation. Without it, MemoryCo tools are");
+        eprintln!("│  available but won't be used automatically.");
+        eprintln!("└──────────────────────────────────────────────────────────┘");
     }
 }
 
@@ -119,6 +166,17 @@ pub fn uninstall(yes: bool) {
                 }
             }
             _ => continue,
+        }
+    }
+
+    // Remove CLAUDE.md block
+    if install::claude_md::is_installed() {
+        match install::claude_md::uninstall() {
+            Ok(()) => {
+                eprintln!("  ✓ Removed CLAUDE.md directive");
+                removed += 1;
+            }
+            Err(e) => eprintln!("  ✗ Failed to clean CLAUDE.md: {}", e),
         }
     }
 
@@ -170,6 +228,11 @@ pub fn doctor() {
         .map(|d| d.filter_map(|e| e.ok()).count())
         .unwrap_or(0);
     check("References", &format!("{} sources", ref_count), refs_dir.exists());
+
+    // CLAUDE.md
+    check("CLAUDE.md directive",
+        &install::claude_md::claude_md_path().display().to_string(),
+        install::claude_md::is_installed());
 
     // MCP Clients
     eprintln!();

@@ -178,6 +178,53 @@ impl IdentityStore {
     }
     
     // ==================
+    // UPSERT
+    // ==================
+    
+    /// Upsert an instruction by marker string.
+    ///
+    /// Looks for an existing instruction containing `marker`. If found,
+    /// compares content and updates if changed. If not found, adds it.
+    /// Returns what happened so callers can log appropriately.
+    pub fn upsert_instruction(&mut self, content: &str, marker: &str) -> StorageResult<UpsertResult> {
+        let instructions = self.storage.list_items(Some(IdentityItemType::Instruction))?;
+        
+        // Find existing instruction containing this marker
+        let existing = instructions.into_iter()
+            .find(|row| row.content.contains(marker));
+        
+        match existing {
+            Some(row) if row.content == content => {
+                // Content identical — nothing to do
+                Ok(UpsertResult::Unchanged)
+            }
+            Some(row) => {
+                // Content changed — remove old, add new
+                self.storage.remove_item(&row.id)?;
+                self.storage.add_item(
+                    IdentityItemType::Instruction,
+                    content,
+                    None,
+                    None,
+                    None,
+                )?;
+                Ok(UpsertResult::Updated)
+            }
+            None => {
+                // Not found — add new
+                self.storage.add_item(
+                    IdentityItemType::Instruction,
+                    content,
+                    None,
+                    None,
+                    None,
+                )?;
+                Ok(UpsertResult::Added)
+            }
+        }
+    }
+    
+    // ==================
     // ASSEMBLY LOGIC
     // ==================
     
@@ -345,6 +392,17 @@ impl IdentityStore {
     pub fn close(&mut self) -> StorageResult<()> {
         self.storage.close()
     }
+}
+
+/// Result of an upsert operation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpsertResult {
+    /// Item was added (marker not found)
+    Added,
+    /// Item was updated (marker found, content differed)
+    Updated,
+    /// No change needed (marker found, content identical)
+    Unchanged,
 }
 
 /// Result of a migration attempt
@@ -606,5 +664,94 @@ mod tests {
         // Running migration again should skip (already has data)
         let result2 = store.migrate_from_identity(&old).unwrap();
         assert_eq!(result2, MigrationResult::AlreadyMigrated);
+    }
+    
+    // ==================
+    // UPSERT INSTRUCTION TESTS
+    // ==================
+    
+    #[test]
+    fn upsert_instruction_add() {
+        let mut store = test_store();
+        
+        let content = "## My Instructions\nDo the thing.";
+        let marker = "## My Instructions";
+        
+        let result = store.upsert_instruction(content, marker).unwrap();
+        assert_eq!(result, UpsertResult::Added);
+        
+        // Verify it's actually in the store
+        let identity = store.get().unwrap();
+        assert_eq!(identity.instructions.len(), 1);
+        assert_eq!(identity.instructions[0], content);
+    }
+    
+    #[test]
+    fn upsert_instruction_unchanged() {
+        let mut store = test_store();
+        
+        let content = "## My Instructions\nDo the thing.";
+        let marker = "## My Instructions";
+        
+        // First add
+        store.upsert_instruction(content, marker).unwrap();
+        
+        // Same content again
+        let result = store.upsert_instruction(content, marker).unwrap();
+        assert_eq!(result, UpsertResult::Unchanged);
+        
+        // Still only one instruction
+        let identity = store.get().unwrap();
+        assert_eq!(identity.instructions.len(), 1);
+    }
+    
+    #[test]
+    fn upsert_instruction_update() {
+        let mut store = test_store();
+        
+        let marker = "## My Instructions";
+        let v1 = "## My Instructions\nDo the thing.";
+        let v2 = "## My Instructions\nDo the thing differently.";
+        
+        // Add v1
+        store.upsert_instruction(v1, marker).unwrap();
+        
+        // Update to v2
+        let result = store.upsert_instruction(v2, marker).unwrap();
+        assert_eq!(result, UpsertResult::Updated);
+        
+        // Should have v2, not v1, and only one instruction
+        let identity = store.get().unwrap();
+        assert_eq!(identity.instructions.len(), 1);
+        assert_eq!(identity.instructions[0], v2);
+    }
+    
+    #[test]
+    fn upsert_multiple_instructions_by_marker() {
+        let mut store = test_store();
+        
+        let engram = "## Memory Workflow\nSearch, recall, store.";
+        let plans = "## Plans\nTrack multi-step tasks.";
+        let lenses = "## Lenses\nLoad context guides.";
+        
+        store.upsert_instruction(engram, "## Memory Workflow").unwrap();
+        store.upsert_instruction(plans, "## Plans").unwrap();
+        store.upsert_instruction(lenses, "## Lenses").unwrap();
+        
+        let identity = store.get().unwrap();
+        assert_eq!(identity.instructions.len(), 3);
+        
+        // Update just one — others should be untouched
+        let plans_v2 = "## Plans\nTrack tasks with atomic steps.";
+        let result = store.upsert_instruction(plans_v2, "## Plans").unwrap();
+        assert_eq!(result, UpsertResult::Updated);
+        
+        let identity = store.get().unwrap();
+        assert_eq!(identity.instructions.len(), 3);
+        assert!(identity.instructions.contains(&engram.to_string()));
+        assert!(identity.instructions.contains(&plans_v2.to_string()));
+        assert!(identity.instructions.contains(&lenses.to_string()));
+        // v1 plans text should be gone
+        assert!(!identity.instructions.iter().any(|i| i.contains("Track multi-step tasks")));
     }
 }

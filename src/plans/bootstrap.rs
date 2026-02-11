@@ -1,6 +1,6 @@
 //! Plans bootstrap - seed operational instructions on first run
 
-use crate::engram::{Brain, UpsertResult};
+use crate::identity::{IdentityStore, UpsertResult};
 
 const INSTRUCTIONS: &str = r#"## Plans
 
@@ -37,8 +37,8 @@ const MARKER: &str = "## Plans";
 
 /// Bootstrap plans instructions into identity
 /// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {
-    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+pub fn bootstrap(identity: &mut IdentityStore) -> Result<(), Box<dyn std::error::Error>> {
+    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
         UpsertResult::Added => {
             eprintln!("  Plans instructions added to identity");
         }

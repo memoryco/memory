@@ -13,7 +13,7 @@ pub mod storage;
 
 pub use classifier::{classify, IdentityField};
 pub use storage::{DieselIdentityStorage, IdentityItemType};
-pub use store::{IdentityStore, ListedItem, MigrationResult};
+pub use store::{IdentityStore, ListedItem, MigrationResult, UpsertResult};
 #[allow(unused_imports)] // Public API surface — used by consumers of the crate
 pub use types::{
     Identity, Persona, Value, Preference, Relationship,

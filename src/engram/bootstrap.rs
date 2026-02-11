@@ -1,6 +1,6 @@
 //! Engram bootstrap - seed operational instructions on first run
 
-use super::{Brain, UpsertResult};
+use crate::identity::{IdentityStore, UpsertResult};
 
 const INSTRUCTIONS: &str = r#"## Memory Workflow
 
@@ -58,8 +58,8 @@ const MARKER: &str = "## Memory Workflow";
 
 /// Bootstrap engram instructions into identity
 /// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(brain: &mut Brain) -> Result<(), Box<dyn std::error::Error>> {
-    match brain.upsert_instruction(INSTRUCTIONS, MARKER)? {
+pub fn bootstrap(identity: &mut IdentityStore) -> Result<(), Box<dyn std::error::Error>> {
+    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
         UpsertResult::Added => {
             eprintln!("  Engram instructions added to identity");
         }

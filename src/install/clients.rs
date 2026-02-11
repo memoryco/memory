@@ -25,12 +25,12 @@ pub fn all_clients() -> Vec<Box<dyn McpClient>> {
     )));
 
     // Claude Code
-    //   All platforms: ~/.claude/settings.json
+    //   Config: ~/.claude.json  (detect via ~/.claude/ directory)
     clients.push(Box::new(JsonClient::new(
         "Claude Code",
-        home.join(".claude/settings.json"),
+        home.join(".claude.json"),
         "mcpServers",
-    )));
+    ).with_detect_path(home.join(".claude"))));
 
     // Cursor
     //   All platforms: ~/.cursor/mcp.json

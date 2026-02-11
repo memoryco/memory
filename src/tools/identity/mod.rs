@@ -5,6 +5,7 @@ mod get;
 mod list;
 mod remove;
 mod search;
+mod setup;
 // TODO: set.rs needs rework to clear + re-add items
 // mod set;
 
@@ -13,6 +14,7 @@ pub use get::IdentityGetTool;
 pub use search::IdentitySearchTool;
 pub use list::IdentityListTool;
 pub use remove::IdentityRemoveTool;
+pub use setup::IdentitySetupTool;
 
 // Typed add tools
 pub use add_typed::{

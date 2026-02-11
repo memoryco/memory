@@ -6,6 +6,7 @@
 mod json_client;
 mod codex;
 mod clients;
+pub mod claude_md;
 
 pub use clients::all_clients;
 

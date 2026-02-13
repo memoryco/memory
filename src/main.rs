@@ -16,6 +16,7 @@ mod identity;
 mod install;
 mod lenses;
 mod plans;
+mod plugins;
 mod reference;
 mod server;
 mod storage;

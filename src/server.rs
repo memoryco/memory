@@ -73,7 +73,7 @@ pub fn run() {
     // --- Bootstrap ---
     // Instructions go into identity.db so identity_get always returns them,
     // even on a fresh install before the user has configured anything.
-    if let Err(e) = bootstrap::bootstrap_all(&mut identity, &lenses_dir, &references) {
+    if let Err(e) = bootstrap::bootstrap_all(&mut identity, &lenses_dir, &references, &memory_home) {
         eprintln!("Warning: Bootstrap failed: {}", e);
     }
 

@@ -18,19 +18,23 @@ pub fn bootstrap_all(
     identity: &mut IdentityStore,
     lenses_dir: &Path,
     references: &ReferenceManager,
+    memory_home: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Engram first (core memory instructions)
     crate::engram::bootstrap::bootstrap(identity)?;
-    
+
     // Lenses (adds instructions + creates directory)
     crate::lenses::bootstrap(identity, lenses_dir)?;
-    
+
     // Reference (adds per-source citation instructions)
     crate::reference::bootstrap::bootstrap(identity, references)?;
-    
+
     // Plans (task tracking instructions)
     crate::plans::bootstrap::bootstrap(identity)?;
-    
+
+    // External plugins (TOML manifests in bootstrap.d/)
+    crate::plugins::bootstrap::bootstrap(identity, memory_home)?;
+
     Ok(())
 }
 
@@ -51,6 +55,7 @@ mod tests {
         let mut identity = test_store();
         let tmp = TempDir::new().unwrap();
         let lenses_dir = tmp.path().join("lenses");
+        let memory_home = tmp.path();
         let references = ReferenceManager::new();
 
         // Before bootstrap: identity should be empty
@@ -59,7 +64,7 @@ mod tests {
             "Fresh IdentityStore should have no instructions");
 
         // Run bootstrap
-        bootstrap_all(&mut identity, &lenses_dir, &references).unwrap();
+        bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
 
         // After bootstrap: identity must have instructions
         let after = identity.get().unwrap();
@@ -83,14 +88,15 @@ mod tests {
         let mut identity = test_store();
         let tmp = TempDir::new().unwrap();
         let lenses_dir = tmp.path().join("lenses");
+        let memory_home = tmp.path();
         let references = ReferenceManager::new();
 
         // Run bootstrap twice
-        bootstrap_all(&mut identity, &lenses_dir, &references).unwrap();
+        bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
         let first = identity.get().unwrap();
         let count_after_first = first.instructions.len();
 
-        bootstrap_all(&mut identity, &lenses_dir, &references).unwrap();
+        bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
         let second = identity.get().unwrap();
         let count_after_second = second.instructions.len();
 
@@ -106,9 +112,10 @@ mod tests {
         let mut identity = test_store();
         let tmp = TempDir::new().unwrap();
         let lenses_dir = tmp.path().join("lenses");
+        let memory_home = tmp.path();
         let references = ReferenceManager::new();
 
-        bootstrap_all(&mut identity, &lenses_dir, &references).unwrap();
+        bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
 
         let result = identity.get().unwrap();
 
@@ -126,5 +133,41 @@ mod tests {
             result.persona.name.is_empty(),
             result.values.is_empty(),
             result.instructions.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_all_picks_up_plugin_manifests() {
+        let mut identity = test_store();
+        let tmp = TempDir::new().unwrap();
+        let lenses_dir = tmp.path().join("lenses");
+        let memory_home = tmp.path();
+        let references = ReferenceManager::new();
+
+        // Drop a plugin manifest
+        let bootstrap_dir = memory_home.join("bootstrap.d");
+        std::fs::create_dir_all(&bootstrap_dir).unwrap();
+        std::fs::write(
+            bootstrap_dir.join("testplugin.toml"),
+            r#"[meta]
+name = "testplugin"
+version = "0.1.0"
+marker = "<!-- plugin:testplugin -->"
+
+[instructions]
+content = """
+<!-- plugin:testplugin -->
+## Test Plugin
+
+This is a test plugin instruction.
+"""
+"#,
+        ).unwrap();
+
+        bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
+
+        let result = identity.get().unwrap();
+        let all_text: String = result.instructions.join("\n");
+        assert!(all_text.contains("<!-- plugin:testplugin -->"),
+            "bootstrap_all should pick up plugin manifests from bootstrap.d/");
     }
 }

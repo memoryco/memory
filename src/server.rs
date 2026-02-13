@@ -31,6 +31,9 @@ pub fn run() {
     std::fs::create_dir_all(&references_dir).ok();
     std::fs::create_dir_all(config::get_model_cache_dir()).ok();
 
+    // Register our MEMORY_HOME in the shared registry
+    crate::registry::ensure_registered(&memory_home);
+
     eprintln!("Memory home: {}", memory_home.display());
     eprintln!("  Database: {}", db_path.display());
     eprintln!("  Identity DB: {}", identity_db_path.display());

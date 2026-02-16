@@ -5,7 +5,7 @@
 //! completely independent of the MCP stdio transport.
 
 use crate::engram::Brain;
-use crate::identity::{DieselIdentityStorage, IdentityStore};
+use crate::identity::IdentityStore;
 use crate::reference::{self, ReferenceManager};
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashSet;
@@ -15,47 +15,29 @@ use std::sync::{Arc, Mutex};
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
 const BIND_ADDR: &str = "127.0.0.1:4243";
 
-/// Shared state for the dashboard thread.
-/// Opens its own DB connections to avoid contention with the MCP server.
+/// Shared state for the dashboard thread — backed by the same Arcs as the MCP
+/// server so edits in the dashboard are immediately visible via MCP and vice-versa.
 #[allow(dead_code)]
 struct DashboardState {
-    brain: Mutex<Brain>,
-    identity: Mutex<IdentityStore>,
-    references: Mutex<ReferenceManager>,
+    brain: Arc<Mutex<Brain>>,
+    identity: Arc<Mutex<IdentityStore>>,
+    references: Arc<Mutex<ReferenceManager>>,
     memory_home: PathBuf,
     references_dir: PathBuf,
 }
 
-impl DashboardState {
-    fn open(memory_home: &Path) -> Result<Self, String> {
-        let db_path = memory_home.join("brain.db");
-        let identity_db_path = memory_home.join("identity.db");
-        let references_dir = memory_home.join("references");
-
-        let brain = Brain::open_path(&db_path)
-            .map_err(|e| format!("Failed to open brain: {}", e))?;
-
-        let identity_storage = DieselIdentityStorage::open(&identity_db_path)
-            .map_err(|e| format!("Failed to open identity: {}", e))?;
-        let identity = IdentityStore::new(identity_storage)
-            .map_err(|e| format!("Failed to open identity store: {}", e))?;
-
-        let mut references = ReferenceManager::new();
-        let _ = references.load_directory(&references_dir);
-
-        Ok(Self {
-            brain: Mutex::new(brain),
-            identity: Mutex::new(identity),
-            references: Mutex::new(references),
-            memory_home: memory_home.to_path_buf(),
-            references_dir,
-        })
-    }
-}
-
 /// Start the dashboard HTTP server on a background daemon thread.
-pub fn start_dashboard(memory_home: &Path) {
+///
+/// Accepts the same shared `Arc<Mutex<>>` instances used by the MCP server so
+/// that edits through the dashboard are immediately visible to tools and vice-versa.
+pub fn start_dashboard(
+    brain: Arc<Mutex<Brain>>,
+    identity: Arc<Mutex<IdentityStore>>,
+    references: Arc<Mutex<ReferenceManager>>,
+    memory_home: &Path,
+) {
     let memory_home = memory_home.to_path_buf();
+    let references_dir = memory_home.join("references");
 
     let server = match tiny_http::Server::http(BIND_ADDR) {
         Ok(s) => s,
@@ -70,13 +52,13 @@ pub fn start_dashboard(memory_home: &Path) {
     std::thread::Builder::new()
         .name("dashboard".into())
         .spawn(move || {
-            let state = match DashboardState::open(&memory_home) {
-                Ok(s) => Arc::new(s),
-                Err(e) => {
-                    eprintln!("Dashboard: Failed to initialize state: {}", e);
-                    return;
-                }
-            };
+            let state = Arc::new(DashboardState {
+                brain,
+                identity,
+                references,
+                memory_home,
+                references_dir,
+            });
 
             for request in server.incoming_requests() {
                 let url = request.url().to_string();
@@ -262,14 +244,36 @@ fn handle_get_identity(
     state: &Arc<DashboardState>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let mut identity = state.identity.lock().unwrap();
-    match identity.get() {
-        Ok(id) => {
-            let json = serde_json::to_string(&id)
-                .unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e));
-            json_response(200, &json)
+
+    // Get structured identity
+    let id = match identity.get() {
+        Ok(id) => id,
+        Err(e) => return json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+    };
+
+    // Also get raw items with IDs so the dashboard can delete them
+    use crate::identity::storage::IdentityItemType;
+    let all_types = IdentityItemType::all();
+    let mut items: Vec<JsonValue> = Vec::new();
+    for item_type in all_types {
+        if let Ok(listed) = identity.list(*item_type) {
+            for item in listed {
+                items.push(json!({
+                    "id": item.id,
+                    "type": item.item_type.to_string(),
+                    "content": item.content,
+                    "secondary": item.secondary,
+                    "tertiary": item.tertiary,
+                    "category": item.category,
+                }));
+            }
         }
-        Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
     }
+
+    let mut result = serde_json::to_value(&id).unwrap_or(json!({}));
+    result["_items"] = json!(items);
+
+    json_ok(&result)
 }
 
 fn handle_set_persona_name(
@@ -464,10 +468,23 @@ fn handle_upload_reference(
 
     let _ = std::fs::remove_file(&temp_path);
 
-    // Reload references
-    let mut refs = state.references.lock().unwrap();
-    match refs.add_source(&dest) {
-        Ok(name) => json_ok(&json!({"uploaded": name})),
+    // Reload references and bootstrap citation instructions
+    let upload_result = {
+        let mut refs = state.references.lock().unwrap();
+        refs.add_source(&dest).map(|name| name.to_string())
+    };
+
+    match upload_result {
+        Ok(name) => {
+            // Bootstrap citation instructions into identity so new references
+            // are immediately usable without restarting the server.
+            let refs = state.references.lock().unwrap();
+            let mut identity = state.identity.lock().unwrap();
+            if let Err(e) = crate::reference::bootstrap::bootstrap(&mut identity, &refs) {
+                eprintln!("Dashboard: Warning: reference bootstrap failed: {}", e);
+            }
+            json_ok(&json!({"uploaded": name}))
+        }
         Err(e) => json_response(500, &format!(r#"{{"error":"Failed to index: {}"}}"#, e)),
     }
 }
@@ -492,14 +509,21 @@ fn handle_delete_reference(
         return json_response(500, &format!(r#"{{"error":"Failed to delete: {}"}}"#, e));
     }
 
-    // Also remove the index db if it exists
+    // Also remove the index db and idx files if they exist
     let index_path = state.references_dir.join(format!("{}.db", decoded_name));
     let _ = std::fs::remove_file(&index_path);
+    let idx_path = state.references_dir.join(format!("{}.idx", decoded_name));
+    let _ = std::fs::remove_file(&idx_path);
 
     // Reload references
     let mut refs = state.references.lock().unwrap();
     *refs = ReferenceManager::new();
     let _ = refs.load_directory(&state.references_dir);
+
+    // TODO: Clean up orphaned citation instructions from identity when a reference
+    // is deleted. Would need to find and remove the instruction whose marker matches
+    // `reference:<decoded_name>`. For now, stale citation instructions persist until
+    // the next server restart when bootstrap reconciles them.
 
     json_ok(&json!({"deleted": decoded_name}))
 }

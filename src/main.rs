@@ -37,7 +37,7 @@ pub struct Context {
     pub brain: Arc<Mutex<Brain>>,
     pub identity: Arc<Mutex<IdentityStore>>,
     pub plans: Arc<Mutex<PlanStore>>,
-    pub references: Mutex<ReferenceManager>,
+    pub references: Arc<Mutex<ReferenceManager>>,
     pub lenses_dir: PathBuf,
     pub memory_home: PathBuf,
 }

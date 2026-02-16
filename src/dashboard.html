@@ -1,12 +1,1753 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MemoryCo Dashboard</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>memory.dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0b;
+  --surface: #111113;
+  --surface-raised: #18181b;
+  --border: #27272a;
+  --border-subtle: #1e1e21;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #71717a;
+  --accent-blue: #3b82f6;
+  --accent-amber: #f59e0b;
+  --accent-violet: #8b5cf6;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+header { margin-bottom: 2.5rem; }
+
+.logo {
+  font-family: 'Instrument Serif', serif;
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.logo .dim {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.subtitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.brand-attr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-top: 0.35rem;
+  letter-spacing: 0.02em;
+}
+
+/* ── Tab bar ── */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 1.5rem;
+}
+
+.tab {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  position: relative;
+  bottom: -1px;
+}
+
+.tab:hover { color: var(--text-muted); }
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent-blue);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1.25rem;
+  transition: border-color 0.2s ease;
+}
+
+.card:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.badge-active   { background: rgba(16, 185, 129, 0.12); color: var(--accent-emerald); }
+.badge-dormant  { background: rgba(245, 158, 11, 0.12); color: var(--accent-amber); }
+.badge-deep     { background: rgba(139, 92, 246, 0.12); color: var(--accent-violet); }
+.badge-archived { background: rgba(113, 113, 122, 0.12); color: var(--text-dim); }
+
+/* ── Buttons ── */
+.btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+  color: #fff;
+  padding: 0.4rem 0.85rem;
+}
+
+.btn-primary:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 0.4rem 0.85rem;
+}
+
+.btn-ghost:hover {
+  border-color: var(--text-dim);
+  color: var(--text-muted);
+}
+
+.btn-danger {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  color: var(--accent-rose);
+  padding: 0.15rem 0.55rem;
+  font-size: 0.6rem;
+  border-radius: 999px;
+}
+
+.btn-danger:hover {
+  background: rgba(244, 63, 94, 0.2);
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.btn-add {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-add:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+/* ── Toolbar ── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  min-height: 2rem;
+}
+
+/* ── Scrollbar ── */
+@-moz-document url-prefix() {
+  .scrollable {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.08) transparent;
+  }
+}
+
+.scrollable::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollable::-webkit-scrollbar-track { background: transparent; }
+.scrollable::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+.scrollable::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+.scrollable::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── Animations ── */
+.fade-in {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Empty state ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  text-align: center;
+}
+
+.empty-state .icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.6;
+}
+
+.empty-state .message {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.5rem;
+  color: var(--text-dim);
+}
+
+.empty-state .hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-top: 0.5rem;
+}
+
+/* ── Section label ── */
+.section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+  margin-top: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-label:first-child { margin-top: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   IDENTITY TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.persona-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-left: 3px solid var(--accent-violet);
+}
+
+.persona-name {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.8rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--text);
+  width: 100%;
+  padding: 0;
+  outline: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.persona-name:hover { border-bottom-color: var(--border); }
+.persona-name:focus { border-bottom-color: var(--accent-blue); }
+
+.persona-name::placeholder { color: var(--text-dim); }
+
+.persona-desc {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  padding: 0.25rem 0;
+  outline: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+  resize: none;
+  line-height: 1.5;
+}
+
+.persona-desc:hover { border-bottom-color: var(--border); }
+.persona-desc:focus { border-bottom-color: var(--accent-blue); }
+.persona-desc::placeholder { color: var(--text-dim); }
+
+.identity-section { margin-bottom: 1rem; }
+
+.identity-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.identity-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+
+.identity-item:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.identity-item .del-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.identity-item:hover .del-btn { opacity: 1; }
+.identity-item .del-btn:hover { color: var(--accent-rose); }
+
+.identity-item .item-detail {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+/* Instruction items are block-level */
+.identity-item.instruction-item {
+  display: flex;
+  width: 100%;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  max-height: 3.5rem;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+/* Inline add form */
+.inline-form {
+  display: none;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.inline-form.visible { display: flex; }
+
+.inline-form input, .inline-form textarea {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: var(--text);
+  outline: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-form input:focus, .inline-form textarea:focus {
+  border-color: var(--accent-blue);
+}
+
+.inline-form input::placeholder, .inline-form textarea::placeholder {
+  color: var(--text-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REFERENCES TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  margin-bottom: 1.5rem;
+}
+
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.upload-zone .icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.5;
+}
+
+.upload-zone .label {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.2rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.upload-zone .hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.upload-zone .status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.upload-zone .status.success { color: var(--accent-emerald); }
+.upload-zone .status.error { color: var(--accent-rose); }
+.upload-zone .status.uploading { color: var(--accent-amber); }
+
+.ref-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.ref-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1.25rem;
+  border-left: 3px solid var(--accent-amber);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  transition: border-color 0.2s ease;
+}
+
+.ref-card:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.ref-name {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.1rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.ref-title {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MEMORY TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.search-bar {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.search-bar input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-bar input:focus { border-color: var(--accent-blue); }
+.search-bar input::placeholder { color: var(--text-dim); }
+
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1rem;
+}
+
+.memory-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1.25rem;
+  transition: border-color 0.2s ease;
+  position: relative;
+}
+
+.memory-card:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.memory-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.memory-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+.energy-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.energy-dot.active   { background: var(--accent-emerald); }
+.energy-dot.dormant  { background: var(--accent-amber); }
+.energy-dot.deep     { background: var(--accent-violet); }
+.energy-dot.archived { background: var(--text-dim); }
+
+.memory-content {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.memory-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.6rem;
+}
+
+.memory-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.memory-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GRAPH TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.graph-container {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 200px);
+  min-height: 500px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.graph-container svg {
+  width: 100%;
+  height: 100%;
+}
+
+.graph-legend {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  z-index: 10;
+}
+
+.graph-legend-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 0.5rem;
+}
+
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.graph-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graph-stats {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  z-index: 10;
+}
+
+.graph-stat {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+}
+
+.graph-stat span {
+  color: var(--text-muted);
+}
+
+.graph-tooltip {
+  position: absolute;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  pointer-events: none;
+  z-index: 20;
+  max-width: 300px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.graph-tooltip.visible { opacity: 1; }
+
+.graph-tooltip .tt-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin-bottom: 0.15rem;
+}
+
+.graph-tooltip .tt-value {
+  color: var(--text);
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+  word-break: break-word;
+}
+
+.graph-tooltip .tt-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+.graph-controls {
+  position: absolute;
+  bottom: 1rem;
+  left: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.graph-controls button {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.graph-controls button:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
+/* ── Toast notification ── */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  z-index: 100;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.success { border-left: 3px solid var(--accent-emerald); }
+.toast.error { border-left: 3px solid var(--accent-rose); }
+
+/* ── Modal ── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-width: 420px;
+  width: 90vw;
+  padding: 1.5rem;
+  animation: modalSlideIn 0.25s ease;
+}
+
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-title {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.3rem;
+  font-weight: 400;
+  margin-bottom: 1rem;
+}
+
+.modal-field {
+  margin-bottom: 0.75rem;
+}
+
+.modal-field label {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 0.25rem;
+}
+
+.modal-field input, .modal-field textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text);
+  outline: none;
+}
+
+.modal-field input:focus, .modal-field textarea:focus {
+  border-color: var(--accent-blue);
+}
+
+.modal-field textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .container { padding: 1rem; }
+  .memory-grid { grid-template-columns: 1fr; }
+  .ref-list { grid-template-columns: 1fr; }
+  .graph-container { height: calc(100vh - 180px); min-height: 400px; }
+  .graph-legend, .graph-stats { font-size: 0.65rem; }
+}
+</style>
 </head>
 <body>
-  <h1>MemoryCo Dashboard</h1>
-  <p>Dashboard loading... The full UI will be built separately.</p>
+<div class="container">
+  <header>
+    <div class="logo">memory<span class="dim">co</span></div>
+    <div class="brand-attr">dashboard</div>
+    <div class="subtitle" id="subtitle">loading...</div>
+  </header>
+
+  <div class="tab-bar">
+    <button class="tab active" data-tab="identity" onclick="switchTab('identity')">Identity</button>
+    <button class="tab" data-tab="references" onclick="switchTab('references')">References</button>
+    <button class="tab" data-tab="memory" onclick="switchTab('memory')">Memory</button>
+    <button class="tab" data-tab="graph" onclick="switchTab('graph')">Graph</button>
+  </div>
+
+  <div id="identity-tab" class="tab-content active">
+    <div id="identity-content"></div>
+  </div>
+
+  <div id="references-tab" class="tab-content">
+    <div id="references-content"></div>
+  </div>
+
+  <div id="memory-tab" class="tab-content">
+    <div class="search-bar">
+      <input type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()">
+      <button class="btn btn-primary" onclick="searchMemories()">Search</button>
+    </div>
+    <div class="toolbar" id="memory-toolbar"></div>
+    <div id="memory-content"></div>
+  </div>
+
+  <div id="graph-tab" class="tab-content">
+    <div id="graph-content"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  // ── State ──
+  var activeTab = 'identity';
+  var identityData = null;
+  var identityItems = [];
+  var refsData = [];
+  var memoryData = null;
+  var memorySearchTimeout = null;
+  var graphLoaded = false;
+
+  // ── Helpers ──
+  function escapeHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function truncate(str, len) {
+    if (!str) return '';
+    return str.length > len ? str.slice(0, len) + '...' : str;
+  }
+
+  function showToast(msg, type) {
+    var toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = 'toast visible ' + (type || 'success');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(function() {
+      toast.className = 'toast';
+    }, 2500);
+  }
+
+  function apiFetch(url, opts) {
+    opts = opts || {};
+    return fetch(url, opts).then(function(r) {
+      if (!r.ok) {
+        return r.json().then(function(data) {
+          throw new Error(data.error || 'Request failed');
+        }).catch(function() {
+          throw new Error('Request failed: ' + r.status);
+        });
+      }
+      return r.json();
+    });
+  }
+
+  // ── Tab switching ──
+  window.switchTab = function(tab) {
+    activeTab = tab;
+    document.querySelectorAll('.tab').forEach(function(t) {
+      t.classList.toggle('active', t.getAttribute('data-tab') === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(function(tc) {
+      tc.classList.toggle('active', tc.id === tab + '-tab');
+    });
+    if (tab === 'identity') fetchIdentity();
+    if (tab === 'references') fetchReferences();
+    if (tab === 'memory') fetchMemories();
+    if (tab === 'graph') fetchGraph();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // IDENTITY TAB
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function findItemId(type, content) {
+    for (var i = 0; i < identityItems.length; i++) {
+      var item = identityItems[i];
+      if (item.type === type && item.content === content) return item.id;
+    }
+    return null;
+  }
+
+  function findItemIdBySecondary(type, content, secondary) {
+    for (var i = 0; i < identityItems.length; i++) {
+      var item = identityItems[i];
+      if (item.type === type && item.content === content) {
+        if (secondary == null || item.secondary === secondary) return item.id;
+      }
+    }
+    return null;
+  }
+
+  var IDENTITY_SECTIONS = [
+    { key: 'traits', label: 'Traits', type: 'trait', path: 'persona.traits', fields: [{name:'content',placeholder:'e.g. pragmatic, curious'}] },
+    { key: 'values', label: 'Values', type: 'value', path: 'values', fields: [{name:'content',placeholder:'Principle'},{name:'secondary',placeholder:'Why (optional)'},{name:'category',placeholder:'Category (optional)'}] },
+    { key: 'preferences', label: 'Preferences', type: 'preference', path: 'preferences', fields: [{name:'content',placeholder:'Prefer'},{name:'secondary',placeholder:'Over (optional)'},{name:'category',placeholder:'Category (optional)'}] },
+    { key: 'relationships', label: 'Relationships', type: 'relationship', path: 'relationships', fields: [{name:'content',placeholder:'Entity'},{name:'secondary',placeholder:'Relation'},{name:'category',placeholder:'Context (optional)'}] },
+    { key: 'antipatterns', label: 'Antipatterns', type: 'antipattern', path: 'antipatterns', fields: [{name:'content',placeholder:'Avoid'},{name:'secondary',placeholder:'Instead (optional)'},{name:'tertiary',placeholder:'Why (optional)'}] },
+    { key: 'tones', label: 'Tones', type: 'tone', path: 'communication.tone', fields: [{name:'content',placeholder:'e.g. direct, warm'}] },
+    { key: 'directives', label: 'Directives', type: 'directive', path: 'communication.directives', fields: [{name:'content',placeholder:'Communication directive'}] },
+    { key: 'expertise', label: 'Expertise', type: 'expertise', path: 'expertise', fields: [{name:'content',placeholder:'e.g. Rust, distributed systems'}] },
+    { key: 'instructions', label: 'Instructions', type: 'instruction', path: 'instructions', fields: [{name:'content',placeholder:'Instruction text'}] },
+  ];
+
+  function getNestedValue(obj, path) {
+    var parts = path.split('.');
+    var val = obj;
+    for (var i = 0; i < parts.length; i++) {
+      if (val == null) return [];
+      val = val[parts[i]];
+    }
+    return val || [];
+  }
+
+  function renderIdentityItem(section, item) {
+    var displayText = '';
+    var itemId = null;
+
+    if (typeof item === 'string') {
+      displayText = escapeHtml(item);
+      itemId = findItemId(section.type, item);
+    } else if (section.type === 'value') {
+      displayText = escapeHtml(item.principle);
+      if (item.why) displayText += ' <span class="item-detail">(' + escapeHtml(item.why) + ')</span>';
+      if (item.category) displayText += ' <span class="item-detail">[' + escapeHtml(item.category) + ']</span>';
+      itemId = findItemIdBySecondary('value', item.principle, item.why || null);
+    } else if (section.type === 'preference') {
+      displayText = escapeHtml(item.prefer);
+      if (item.over) displayText += ' <span class="item-detail">&gt; ' + escapeHtml(item.over) + '</span>';
+      if (item.category) displayText += ' <span class="item-detail">[' + escapeHtml(item.category) + ']</span>';
+      itemId = findItemIdBySecondary('preference', item.prefer, item.over || null);
+    } else if (section.type === 'relationship') {
+      displayText = '<strong>' + escapeHtml(item.entity) + '</strong>: ' + escapeHtml(item.relation);
+      if (item.context) displayText += ' <span class="item-detail">(' + escapeHtml(truncate(item.context, 60)) + ')</span>';
+      itemId = findItemIdBySecondary('relationship', item.entity, item.relation || null);
+    } else if (section.type === 'antipattern') {
+      displayText = escapeHtml(item.avoid);
+      if (item.instead) displayText += ' <span class="item-detail">&rarr; ' + escapeHtml(item.instead) + '</span>';
+      itemId = findItemIdBySecondary('antipattern', item.avoid, item.instead || null);
+    }
+
+    var isInstruction = section.type === 'instruction';
+    var delAttr = itemId ? ' onclick="deleteIdentityItem(\'' + escapeHtml(itemId) + '\')"' : '';
+    return '<div class="identity-item' + (isInstruction ? ' instruction-item' : '') + '">' +
+      '<span>' + displayText + '</span>' +
+      (itemId ? '<button class="del-btn"' + delAttr + '>&times;</button>' : '') +
+      '</div>';
+  }
+
+  function renderIdentity() {
+    if (!identityData) return;
+    var el = document.getElementById('identity-content');
+    var html = '';
+
+    // Persona card
+    html += '<div class="persona-card fade-in">';
+    html += '<input class="persona-name" id="persona-name" value="' + escapeHtml(identityData.persona.name || '') + '" placeholder="Persona name" onblur="savePersonaName()">';
+    html += '<textarea class="persona-desc" id="persona-desc" placeholder="Description" rows="2" onblur="savePersonaDesc()">' + escapeHtml(identityData.persona.description || '') + '</textarea>';
+    html += '</div>';
+
+    // Identity sections
+    IDENTITY_SECTIONS.forEach(function(section, sectionIdx) {
+      var items = getNestedValue(identityData, section.path);
+      var count = items.length;
+
+      html += '<div class="identity-section">';
+      html += '<div class="section-label">';
+      html += '<span>' + section.label + (count > 0 ? ' (' + count + ')' : '') + '</span>';
+      html += '<button class="btn-add" onclick="toggleAddForm(' + sectionIdx + ')">+ Add</button>';
+      html += '</div>';
+
+      html += '<div class="identity-items">';
+      items.forEach(function(item) {
+        html += renderIdentityItem(section, item);
+      });
+      html += '</div>';
+
+      // Inline add form
+      html += '<div class="inline-form" id="add-form-' + sectionIdx + '">';
+      section.fields.forEach(function(field) {
+        html += '<input placeholder="' + escapeHtml(field.placeholder) + '" data-field="' + field.name + '">';
+      });
+      html += '<button class="btn btn-primary" onclick="addIdentityItem(' + sectionIdx + ')">Add</button>';
+      html += '<button class="btn btn-ghost" onclick="toggleAddForm(' + sectionIdx + ')">Cancel</button>';
+      html += '</div>';
+
+      html += '</div>';
+    });
+
+    el.innerHTML = html;
+
+    // Auto-resize persona description
+    var descEl = document.getElementById('persona-desc');
+    if (descEl) {
+      descEl.style.height = 'auto';
+      descEl.style.height = descEl.scrollHeight + 'px';
+    }
+  }
+
+  window.toggleAddForm = function(idx) {
+    var form = document.getElementById('add-form-' + idx);
+    if (form) {
+      form.classList.toggle('visible');
+      if (form.classList.contains('visible')) {
+        var first = form.querySelector('input');
+        if (first) first.focus();
+      }
+    }
+  };
+
+  window.savePersonaName = function() {
+    var el = document.getElementById('persona-name');
+    if (!el || el.value === (identityData.persona.name || '')) return;
+    apiFetch('/api/identity/persona/name', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({value: el.value})
+    }).then(function() {
+      showToast('Name updated');
+      fetchIdentity();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  window.savePersonaDesc = function() {
+    var el = document.getElementById('persona-desc');
+    if (!el || el.value === (identityData.persona.description || '')) return;
+    apiFetch('/api/identity/persona/description', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({value: el.value})
+    }).then(function() {
+      showToast('Description updated');
+      fetchIdentity();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  window.addIdentityItem = function(sectionIdx) {
+    var section = IDENTITY_SECTIONS[sectionIdx];
+    var form = document.getElementById('add-form-' + sectionIdx);
+    if (!form) return;
+
+    var inputs = form.querySelectorAll('input');
+    var body = { type: section.type };
+
+    inputs.forEach(function(inp) {
+      var field = inp.getAttribute('data-field');
+      var val = inp.value.trim();
+      if (val) body[field] = val;
+    });
+
+    if (!body.content) {
+      showToast('Content is required', 'error');
+      return;
+    }
+
+    apiFetch('/api/identity/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function() {
+      showToast(section.label.slice(0, -1) + ' added');
+      inputs.forEach(function(inp) { inp.value = ''; });
+      form.classList.remove('visible');
+      fetchIdentity();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  window.deleteIdentityItem = function(id) {
+    apiFetch('/api/identity/' + id, { method: 'DELETE' }).then(function() {
+      showToast('Removed');
+      fetchIdentity();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  function fetchIdentity() {
+    apiFetch('/api/identity').then(function(data) {
+      identityItems = data._items || [];
+      delete data._items;
+      identityData = data;
+      document.getElementById('subtitle').textContent = identityData.persona.name ? identityData.persona.name + "'s memory" : 'dashboard';
+      renderIdentity();
+    }).catch(function() {});
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // REFERENCES TAB
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function renderReferences() {
+    var el = document.getElementById('references-content');
+    var html = '';
+
+    // Upload zone
+    html += '<div class="upload-zone fade-in" id="upload-zone" onclick="document.getElementById(\'file-input\').click()">';
+    html += '<div class="icon">\u{1F4C4}</div>';
+    html += '<div class="label">Drop a PDF here or click to upload</div>';
+    html += '<div class="hint">.pdf files only</div>';
+    html += '<div class="status" id="upload-status"></div>';
+    html += '</div>';
+    html += '<input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFileSelect(event)">';
+
+    // Reference list
+    if (refsData.length === 0) {
+      html += '<div class="empty-state" style="min-height:20vh">';
+      html += '<div class="message" style="font-size:1.1rem">No references loaded</div>';
+      html += '<div class="hint">upload a PDF to get started</div>';
+      html += '</div>';
+    } else {
+      html += '<div class="section-label"><span>Loaded (' + refsData.length + ')</span></div>';
+      html += '<div class="ref-list">';
+      refsData.forEach(function(ref) {
+        html += '<div class="ref-card">';
+        html += '<div>';
+        html += '<div class="ref-name">' + escapeHtml(ref.name) + '</div>';
+        if (ref.title && ref.title !== ref.name) {
+          html += '<div class="ref-title">' + escapeHtml(truncate(ref.title, 80)) + '</div>';
+        }
+        html += '</div>';
+        html += '<button class="btn btn-danger" onclick="deleteReference(\'' + escapeHtml(ref.name) + '\')">&times;</button>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+    setupDragDrop();
+  }
+
+  function setupDragDrop() {
+    var zone = document.getElementById('upload-zone');
+    if (!zone) return;
+
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      zone.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      var files = e.dataTransfer.files;
+      if (files.length > 0) uploadFile(files[0]);
+    });
+  }
+
+  window.handleFileSelect = function(e) {
+    var files = e.target.files;
+    if (files.length > 0) uploadFile(files[0]);
+    e.target.value = '';
+  };
+
+  function uploadFile(file) {
+    var status = document.getElementById('upload-status');
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      if (status) {
+        status.textContent = 'Only .pdf files are accepted';
+        status.className = 'status error';
+      }
+      return;
+    }
+
+    if (status) {
+      status.textContent = 'Uploading ' + file.name + '...';
+      status.className = 'status uploading';
+    }
+
+    var formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/references/upload', {
+      method: 'POST',
+      body: formData
+    }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        if (status) {
+          status.textContent = data.error;
+          status.className = 'status error';
+        }
+      } else {
+        if (status) {
+          status.textContent = 'Uploaded: ' + (data.uploaded || file.name);
+          status.className = 'status success';
+        }
+        showToast('Reference uploaded');
+        fetchReferences();
+      }
+    }).catch(function(e) {
+      if (status) {
+        status.textContent = 'Upload failed: ' + e.message;
+        status.className = 'status error';
+      }
+    });
+  }
+
+  window.deleteReference = function(name) {
+    if (!confirm('Delete reference "' + name + '"?')) return;
+    apiFetch('/api/references/' + encodeURIComponent(name), { method: 'DELETE' }).then(function() {
+      showToast('Reference deleted');
+      fetchReferences();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  function fetchReferences() {
+    apiFetch('/api/references').then(function(data) {
+      refsData = data;
+      renderReferences();
+    }).catch(function() {});
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MEMORY TAB
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function stateClass(state) {
+    if (!state) return 'active';
+    var s = state.toLowerCase();
+    if (s.indexOf('active') >= 0) return 'active';
+    if (s.indexOf('dormant') >= 0) return 'dormant';
+    if (s.indexOf('deep') >= 0) return 'deep';
+    if (s.indexOf('archived') >= 0) return 'archived';
+    return 'active';
+  }
+
+  function stateName(state) {
+    if (!state) return 'Active';
+    var s = state.toLowerCase();
+    if (s.indexOf('active') >= 0) return 'Active';
+    if (s.indexOf('dormant') >= 0) return 'Dormant';
+    if (s.indexOf('deep') >= 0) return 'Deep';
+    if (s.indexOf('archived') >= 0) return 'Archived';
+    return state;
+  }
+
+  function energyPercent(energy) {
+    return Math.round((energy || 0) * 100);
+  }
+
+  function renderMemory(engram) {
+    var sc = stateClass(engram.state);
+    var html = '<div class="memory-card fade-in">';
+    html += '<div class="memory-card-header">';
+    html += '<div class="memory-state">';
+    html += '<span class="energy-dot ' + sc + '"></span>';
+    html += (engram.state_emoji || '') + ' ' + stateName(engram.state);
+    html += '</div>';
+    html += '<button class="btn btn-danger" onclick="deleteEngram(\'' + engram.id + '\')">&times;</button>';
+    html += '</div>';
+
+    if (engram.tags && engram.tags.length > 0) {
+      html += '<div class="memory-tags">';
+      engram.tags.forEach(function(tag) {
+        html += '<span class="memory-tag">' + escapeHtml(tag) + '</span>';
+      });
+      html += '</div>';
+    }
+
+    html += '<div class="memory-content">' + escapeHtml(truncate(engram.content, 200)) + '</div>';
+    html += '<div class="memory-meta">';
+    html += '<span>energy: ' + energyPercent(engram.energy) + '%</span>';
+    html += '<span>accessed: ' + (engram.access_count || 0) + 'x</span>';
+    if (engram.score != null) html += '<span>score: ' + engram.score.toFixed(2) + '</span>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderMemories() {
+    var el = document.getElementById('memory-content');
+    var toolbar = document.getElementById('memory-toolbar');
+
+    if (!memoryData) {
+      el.innerHTML = '<div class="empty-state"><div class="icon">\u{1F9E0}</div><div class="message">Loading memories...</div></div>';
+      return;
+    }
+
+    var engrams = memoryData.engrams || [];
+    var stats = memoryData.stats;
+
+    if (stats) {
+      toolbar.innerHTML = '<span class="badge badge-active">' + (stats.active || 0) + ' active</span>' +
+        '<span class="badge badge-dormant">' + (stats.dormant || 0) + ' dormant</span>' +
+        '<span class="badge badge-deep">' + (stats.deep || 0) + ' deep</span>' +
+        '<span class="badge badge-archived">' + (stats.archived || 0) + ' archived</span>';
+    }
+
+    if (engrams.length === 0) {
+      el.innerHTML = '<div class="empty-state" style="min-height:30vh"><div class="icon">\u{1F9E0}</div><div class="message">No memories found</div><div class="hint">memories are created through AI conversations</div></div>';
+      return;
+    }
+
+    var html = '<div class="memory-grid">';
+    engrams.forEach(function(engram) {
+      html += renderMemory(engram);
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  window.searchMemories = function() {
+    var q = document.getElementById('memory-search').value.trim();
+    var url = '/api/engrams?limit=50';
+    if (q) url += '&q=' + encodeURIComponent(q);
+    url += '&include_archived=true&include_deep=true';
+
+    apiFetch(url).then(function(data) {
+      memoryData = data;
+      renderMemories();
+    }).catch(function() {});
+  };
+
+  window.deleteEngram = function(id) {
+    apiFetch('/api/engrams/' + id, { method: 'DELETE' }).then(function() {
+      showToast('Memory deleted');
+      fetchMemories();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  function fetchMemories() {
+    var q = document.getElementById('memory-search');
+    var query = q ? q.value.trim() : '';
+    var url = '/api/engrams?limit=50&include_archived=true&include_deep=true';
+    if (query) url += '&q=' + encodeURIComponent(query);
+
+    apiFetch(url).then(function(data) {
+      memoryData = data;
+      renderMemories();
+    }).catch(function() {});
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GRAPH TAB
+  // ═══════════════════════════════════════════════════════════════════════
+
+  var graphSim = null;
+  var graphSvg = null;
+  var graphZoom = null;
+
+  function stateColor(state) {
+    if (!state) return '#10b981';
+    var s = state.toLowerCase();
+    if (s.indexOf('active') >= 0 || s === '\u{1f7e2}') return '#10b981';
+    if (s.indexOf('dormant') >= 0 || s === '\u{1f7e1}') return '#f59e0b';
+    if (s.indexOf('deep') >= 0 || s === '\u{1f7e3}') return '#8b5cf6';
+    if (s.indexOf('archived') >= 0 || s === '\u26aa') return '#71717a';
+    return '#10b981';
+  }
+
+  function renderGraph(data) {
+    var el = document.getElementById('graph-content');
+    var nodes = data.nodes || [];
+    var edges = data.edges || [];
+    var meta = data.meta || {};
+
+    if (nodes.length === 0) {
+      el.innerHTML = '<div class="empty-state"><div class="icon">\u{1F578}\uFE0F</div><div class="message">No graph data</div><div class="hint">memories need associations to form a graph</div></div>';
+      return;
+    }
+
+    // Calculate avg energy
+    var totalEnergy = 0;
+    nodes.forEach(function(n) { totalEnergy += (n.energy || 0); });
+    var avgEnergy = nodes.length > 0 ? (totalEnergy / nodes.length) : 0;
+
+    var html = '<div class="graph-container" id="graph-svg-container">';
+    html += '<div class="graph-legend">';
+    html += '<div class="graph-legend-title">Node State</div>';
+    html += '<div class="graph-legend-item"><div class="graph-legend-dot" style="background:#10b981"></div>Active</div>';
+    html += '<div class="graph-legend-item"><div class="graph-legend-dot" style="background:#f59e0b"></div>Dormant</div>';
+    html += '<div class="graph-legend-item"><div class="graph-legend-dot" style="background:#8b5cf6"></div>Deep</div>';
+    html += '<div class="graph-legend-item"><div class="graph-legend-dot" style="background:#71717a"></div>Archived</div>';
+    html += '</div>';
+    html += '<div class="graph-stats">';
+    html += '<div class="graph-stat">Nodes: <span>' + meta.total_nodes + '</span></div>';
+    html += '<div class="graph-stat">Edges: <span>' + meta.total_edges + '</span></div>';
+    html += '<div class="graph-stat">Avg energy: <span>' + Math.round(avgEnergy * 100) + '%</span></div>';
+    html += '</div>';
+    html += '<div class="graph-tooltip" id="graph-tooltip"></div>';
+    html += '<div class="graph-controls">';
+    html += '<button onclick="graphZoomIn()" title="Zoom in">+</button>';
+    html += '<button onclick="graphZoomOut()" title="Zoom out">\u2212</button>';
+    html += '<button onclick="graphReset()" title="Reset">\u21BA</button>';
+    html += '</div>';
+    html += '</div>';
+
+    el.innerHTML = html;
+
+    // Wait for D3 to load
+    if (typeof d3 === 'undefined') {
+      var script = document.createElement('script');
+      script.src = 'https://d3js.org/d3.v7.min.js';
+      script.onload = function() { initGraph(nodes, edges); };
+      document.head.appendChild(script);
+    } else {
+      initGraph(nodes, edges);
+    }
+  }
+
+  function initGraph(nodes, edges) {
+    var container = document.getElementById('graph-svg-container');
+    if (!container) return;
+
+    var width = container.clientWidth;
+    var height = container.clientHeight;
+
+    // Build node map
+    var nodeMap = {};
+    nodes.forEach(function(n) { nodeMap[n.id] = n; });
+
+    // Build links with node references
+    var links = edges.map(function(e) {
+      return {
+        source: e.from,
+        target: e.to,
+        weight: e.weight,
+        co_activations: e.co_activations
+      };
+    }).filter(function(l) { return nodeMap[l.source] && nodeMap[l.target]; });
+
+    var svg = d3.select(container).append('svg')
+      .attr('width', width)
+      .attr('height', height);
+
+    // Zoom behavior
+    graphZoom = d3.zoom()
+      .scaleExtent([0.1, 8])
+      .on('zoom', function(event) {
+        g.attr('transform', event.transform);
+      });
+
+    svg.call(graphZoom);
+
+    var g = svg.append('g');
+
+    // Simulation
+    graphSim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(function(d) { return d.id; }).distance(80))
+      .force('charge', d3.forceManyBody().strength(-150))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide().radius(function(d) { return nodeRadius(d) + 5; }));
+
+    // Edges
+    var link = g.append('g')
+      .selectAll('line')
+      .data(links)
+      .join('line')
+      .attr('stroke', '#27272a')
+      .attr('stroke-opacity', function(d) { return 0.3 + d.weight * 0.7; })
+      .attr('stroke-width', function(d) { return 0.5 + d.weight * 2; });
+
+    // Nodes
+    var node = g.append('g')
+      .selectAll('circle')
+      .data(nodes)
+      .join('circle')
+      .attr('r', nodeRadius)
+      .attr('fill', function(d) { return stateColor(d.state); })
+      .attr('fill-opacity', 0.8)
+      .attr('stroke', function(d) { return stateColor(d.state); })
+      .attr('stroke-width', 1.5)
+      .attr('stroke-opacity', 0.4)
+      .attr('cursor', 'pointer')
+      .call(d3.drag()
+        .on('start', dragstarted)
+        .on('drag', dragged)
+        .on('end', dragended));
+
+    // Tooltip
+    var tooltip = document.getElementById('graph-tooltip');
+
+    node.on('mouseover', function(event, d) {
+      tooltip.innerHTML = '<div class="tt-label">Content</div><div class="tt-value">' + escapeHtml(d.label) + '</div>' +
+        '<div class="tt-meta">energy: ' + Math.round((d.energy || 0) * 100) + '% | accessed: ' + (d.access_count || 0) + 'x</div>';
+      tooltip.classList.add('visible');
+      var rect = container.getBoundingClientRect();
+      tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
+      tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+    })
+    .on('mousemove', function(event) {
+      var rect = container.getBoundingClientRect();
+      tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
+      tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+    })
+    .on('mouseout', function() {
+      tooltip.classList.remove('visible');
+    });
+
+    // Labels (only if few nodes)
+    if (nodes.length < 60) {
+      g.append('g')
+        .selectAll('text')
+        .data(nodes)
+        .join('text')
+        .text(function(d) { return truncate(d.label, 15); })
+        .attr('font-family', 'JetBrains Mono, monospace')
+        .attr('font-size', '8px')
+        .attr('fill', '#a1a1aa')
+        .attr('text-anchor', 'middle')
+        .attr('dy', function(d) { return nodeRadius(d) + 12; })
+        .attr('pointer-events', 'none');
+    }
+
+    graphSim.on('tick', function() {
+      link
+        .attr('x1', function(d) { return d.source.x; })
+        .attr('y1', function(d) { return d.source.y; })
+        .attr('x2', function(d) { return d.target.x; })
+        .attr('y2', function(d) { return d.target.y; });
+
+      node
+        .attr('cx', function(d) { return d.x; })
+        .attr('cy', function(d) { return d.y; });
+
+      if (nodes.length < 60) {
+        g.selectAll('text')
+          .attr('x', function(d) { return d.x; })
+          .attr('y', function(d) { return d.y; });
+      }
+    });
+
+    graphSvg = svg;
+
+    function nodeRadius(d) {
+      var base = 5;
+      var energyBonus = (d.energy || 0) * 8;
+      var accessBonus = Math.min((d.access_count || 0) * 0.5, 6);
+      return base + energyBonus + accessBonus;
+    }
+
+    function dragstarted(event) {
+      if (!event.active) graphSim.alphaTarget(0.3).restart();
+      event.subject.fx = event.subject.x;
+      event.subject.fy = event.subject.y;
+    }
+
+    function dragged(event) {
+      event.subject.fx = event.x;
+      event.subject.fy = event.y;
+    }
+
+    function dragended(event) {
+      if (!event.active) graphSim.alphaTarget(0);
+      event.subject.fx = null;
+      event.subject.fy = null;
+    }
+  }
+
+  window.graphZoomIn = function() {
+    if (graphSvg && graphZoom) graphSvg.transition().duration(300).call(graphZoom.scaleBy, 1.5);
+  };
+
+  window.graphZoomOut = function() {
+    if (graphSvg && graphZoom) graphSvg.transition().duration(300).call(graphZoom.scaleBy, 0.67);
+  };
+
+  window.graphReset = function() {
+    if (graphSvg && graphZoom) {
+      graphSvg.transition().duration(500).call(graphZoom.transform, d3.zoomIdentity);
+    }
+  };
+
+  function fetchGraph() {
+    // Clear previous graph
+    var el = document.getElementById('graph-content');
+    if (graphSim) { graphSim.stop(); graphSim = null; }
+    graphSvg = null;
+
+    el.innerHTML = '<div class="empty-state" style="min-height:40vh"><div class="message" style="font-size:1rem">Loading graph...</div></div>';
+
+    apiFetch('/api/graph?min_weight=0.0').then(function(data) {
+      renderGraph(data);
+    }).catch(function() {
+      el.innerHTML = '<div class="empty-state"><div class="icon">\u{1F578}\uFE0F</div><div class="message">Failed to load graph</div></div>';
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // INIT
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Initial loads
+  fetchIdentity();
+
+  // Keyboard shortcut: Enter in add forms
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.closest('.inline-form')) {
+      var form = e.target.closest('.inline-form');
+      var idx = form.id.replace('add-form-', '');
+      addIdentityItem(parseInt(idx, 10));
+    }
+    if (e.key === 'Escape') {
+      var modal = document.querySelector('.modal-backdrop');
+      if (modal) modal.remove();
+      // Close any open forms
+      document.querySelectorAll('.inline-form.visible').forEach(function(f) {
+        f.classList.remove('visible');
+      });
+    }
+  });
+
+  // Periodic refresh
+  setInterval(function() {
+    if (activeTab === 'memory') fetchMemories();
+  }, 5000);
+
+  setInterval(function() {
+    if (activeTab === 'references') fetchReferences();
+  }, 10000);
+
+})();
+</script>
 </body>
 </html>

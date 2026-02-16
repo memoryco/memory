@@ -80,12 +80,17 @@ pub fn run() {
         eprintln!("Warning: Bootstrap failed: {}", e);
     }
 
+    // --- Build shared state ---
+    let brain = Arc::new(Mutex::new(brain));
+    let identity = Arc::new(Mutex::new(identity));
+    let references = Arc::new(Mutex::new(references));
+
     // --- Build context ---
     let context = Context {
-        brain: Arc::new(Mutex::new(brain)),
-        identity: Arc::new(Mutex::new(identity)),
+        brain: Arc::clone(&brain),
+        identity: Arc::clone(&identity),
         plans: Arc::new(Mutex::new(plans)),
-        references: Mutex::new(references),
+        references: Arc::clone(&references),
         lenses_dir: lenses_dir.clone(),
         memory_home: memory_home.clone(),
     };
@@ -101,8 +106,8 @@ pub fn run() {
         }
     }
 
-    // --- Dashboard ---
-    crate::dashboard::start_dashboard(&memory_home);
+    // --- Dashboard (shares state with MCP server) ---
+    crate::dashboard::start_dashboard(brain, identity, references, &memory_home);
 
     eprintln!("Memory server starting...");
 
@@ -257,6 +262,9 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::PlanStopTool).expect("plan_stop");
     server.add_tool(tools::StepAddTool).expect("step_add");
     server.add_tool(tools::StepCompleteTool).expect("step_complete");
+
+    // UI tools
+    server.add_tool(tools::UiOpenTool).expect("ui_open");
 
     server
 }

@@ -13,6 +13,7 @@ pub mod config;
 pub mod lenses;
 pub mod plans;
 pub mod reference;
+pub mod ui_open;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
@@ -77,6 +78,8 @@ pub use plans::{
     StepAddTool,
     StepCompleteTool,
 };
+
+pub use ui_open::UiOpenTool;
 
 // =============================================================================
 // Common helpers

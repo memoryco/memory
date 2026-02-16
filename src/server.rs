@@ -101,6 +101,9 @@ pub fn run() {
         }
     }
 
+    // --- Dashboard ---
+    crate::dashboard::start_dashboard(&memory_home);
+
     eprintln!("Memory server starting...");
 
     if let Err(e) = server.start(StdioTransport::new(), context) {

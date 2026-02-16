@@ -10,6 +10,7 @@ mod bootstrap;
 mod cli;
 mod commands;
 pub mod config;
+mod dashboard;
 mod embedding;
 mod engram;
 mod identity;

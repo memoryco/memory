@@ -541,12 +541,16 @@ fn handle_list_engrams(
     let limit: usize = query_param(&params, "limit")
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
+    let offset: usize = query_param(&params, "offset")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let include_archived = query_param(&params, "include_archived")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
     let include_deep = query_param(&params, "include_deep")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
+    let state_filter = query_param(&params, "state");
 
     let mut brain = state.brain.lock().unwrap();
 
@@ -555,7 +559,7 @@ fn handle_list_engrams(
 
     if let Some(q) = search_query {
         if q.is_empty() {
-            return list_recent_engrams(&brain, limit, include_archived, include_deep);
+            return list_recent_engrams(&brain, limit, offset, include_archived, include_deep, state_filter);
         }
 
         // Try semantic search first
@@ -570,6 +574,7 @@ fn handle_list_engrams(
                                 brain.get(&r.id).map(|e| engram_to_json(e, Some(r.score)))
                             })
                             .collect();
+                        let engrams = filter_json_engrams_by_state(engrams, state_filter);
                         json_ok(&json!({
                             "engrams": engrams,
                             "search": q,
@@ -581,6 +586,7 @@ fn handle_list_engrams(
                         let results = brain.search(q);
                         let engrams: Vec<JsonValue> =
                             results.iter().take(limit).map(|e| engram_to_json(e, None)).collect();
+                        let engrams = filter_json_engrams_by_state(engrams, state_filter);
                         json_ok(&json!({
                             "engrams": engrams,
                             "search": q,
@@ -594,6 +600,7 @@ fn handle_list_engrams(
                 let results = brain.search(q);
                 let engrams: Vec<JsonValue> =
                     results.iter().take(limit).map(|e| engram_to_json(e, None)).collect();
+                let engrams = filter_json_engrams_by_state(engrams, state_filter);
                 json_ok(&json!({
                     "engrams": engrams,
                     "search": q,
@@ -602,17 +609,27 @@ fn handle_list_engrams(
             }
         }
     } else {
-        list_recent_engrams(&brain, limit, include_archived, include_deep)
+        list_recent_engrams(&brain, limit, offset, include_archived, include_deep, state_filter)
     }
 }
 
 fn list_recent_engrams(
     brain: &Brain,
     limit: usize,
+    offset: usize,
     include_archived: bool,
     include_deep: bool,
+    state_filter: Option<&str>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let mut engrams: Vec<&crate::engram::Engram> = if include_archived {
+    let mut engrams: Vec<&crate::engram::Engram> = if let Some(state_str) = state_filter {
+        if let Some(target_state) = parse_memory_state(state_str) {
+            brain.all_engrams()
+                .filter(|e| e.state == target_state)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else if include_archived {
         brain.all_engrams().collect()
     } else if include_deep {
         brain
@@ -626,8 +643,11 @@ fn list_recent_engrams(
     // Sort by last_accessed descending (most recent first)
     engrams.sort_by(|a, b| b.last_accessed.cmp(&a.last_accessed));
 
+    let total_filtered = engrams.len();
+
     let result: Vec<JsonValue> = engrams
         .iter()
+        .skip(offset)
         .take(limit)
         .map(|e| engram_to_json(e, None))
         .collect();
@@ -635,6 +655,10 @@ fn list_recent_engrams(
     let stats = brain.stats();
     json_ok(&json!({
         "engrams": result,
+        "total_filtered": total_filtered,
+        "has_more": offset + result.len() < total_filtered,
+        "offset": offset,
+        "limit": limit,
         "stats": {
             "total": stats.total_engrams,
             "active": stats.active_engrams,
@@ -664,6 +688,20 @@ fn engram_to_json(e: &crate::engram::Engram, score: Option<f32>) -> JsonValue {
         obj["score"] = json!(s);
     }
     obj
+}
+
+/// Filter a Vec of JSON engrams by state. The "state" field in JSON is the
+/// Debug format like "Active", "Dormant", etc., so we case-insensitive match.
+fn filter_json_engrams_by_state(engrams: Vec<JsonValue>, state_filter: Option<&str>) -> Vec<JsonValue> {
+    if let Some(state_str) = state_filter {
+        engrams.into_iter().filter(|e| {
+            e.get("state").and_then(|s| s.as_str())
+                .map(|s| s.eq_ignore_ascii_case(state_str))
+                .unwrap_or(false)
+        }).collect()
+    } else {
+        engrams
+    }
 }
 
 fn handle_delete_engram(
@@ -716,9 +754,11 @@ fn handle_graph(
             json!({
                 "id": e.id.to_string(),
                 "label": truncate_content(&e.content, 30),
+                "content": e.content,
                 "energy": e.energy,
                 "state": e.state.emoji(),
-                "access_count": e.access_count
+                "access_count": e.access_count,
+                "tags": e.tags
             })
         })
         .collect();
@@ -914,6 +954,17 @@ fn hex_val(b: u8) -> Option<u8> {
         b'0'..=b'9' => Some(b - b'0'),
         b'a'..=b'f' => Some(b - b'a' + 10),
         b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Parse a state string (from query param) into a MemoryState.
+fn parse_memory_state(s: &str) -> Option<crate::engram::MemoryState> {
+    match s.to_lowercase().as_str() {
+        "active" => Some(crate::engram::MemoryState::Active),
+        "dormant" => Some(crate::engram::MemoryState::Dormant),
+        "deep" => Some(crate::engram::MemoryState::Deep),
+        "archived" => Some(crate::engram::MemoryState::Archived),
         _ => None,
     }
 }

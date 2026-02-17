@@ -231,7 +231,6 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::IdentitySetPersonaDescriptionTool).expect("identity_set_persona_description");
     server.add_tool(tools::IdentityAddTraitTool).expect("identity_add_trait");
     server.add_tool(tools::IdentityAddExpertiseTool).expect("identity_add_expertise");
-    server.add_tool(tools::IdentityAddInstructionTool).expect("identity_add_instruction");
     server.add_tool(tools::IdentityAddToneTool).expect("identity_add_tone");
     server.add_tool(tools::IdentityAddDirectiveTool).expect("identity_add_directive");
     server.add_tool(tools::IdentityAddValueTool).expect("identity_add_value");

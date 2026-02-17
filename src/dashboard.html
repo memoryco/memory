@@ -140,6 +140,11 @@ header { margin-bottom: 2.5rem; }
 .badge-deep     { background: rgba(139, 92, 246, 0.12); color: var(--accent-violet); }
 .badge-archived { background: rgba(113, 113, 122, 0.12); color: var(--text-dim); }
 
+.badge-selected {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -1px;
+}
+
 /* ── Buttons ── */
 .btn {
   font-family: 'JetBrains Mono', monospace;
@@ -388,16 +393,7 @@ header { margin-bottom: 2.5rem; }
   color: var(--text-dim);
 }
 
-/* Instruction items are block-level */
-.identity-item.instruction-item {
-  display: flex;
-  width: 100%;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  max-height: 3.5rem;
-  overflow: hidden;
-  line-height: 1.4;
-}
+
 
 /* Inline add form */
 .inline-form {
@@ -526,12 +522,17 @@ header { margin-bottom: 2.5rem; }
   margin-bottom: 1.25rem;
 }
 
-.search-bar input {
+.search-bar .search-wrap {
   flex: 1;
+  position: relative;
+}
+
+.search-bar input {
+  width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.6rem 1rem;
+  padding: 0.6rem 2rem 0.6rem 1rem;
   font-family: 'DM Sans', sans-serif;
   font-size: 0.85rem;
   color: var(--text);
@@ -541,6 +542,25 @@ header { margin-bottom: 2.5rem; }
 
 .search-bar input:focus { border-color: var(--accent-blue); }
 .search-bar input::placeholder { color: var(--text-dim); }
+
+.search-clear {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.2rem;
+  line-height: 1;
+  display: none;
+  transition: color 0.15s;
+}
+
+.search-clear:hover { color: var(--text-muted); }
+.search-clear.visible { display: block; }
 
 .memory-grid {
   display: grid;
@@ -610,21 +630,6 @@ header { margin-bottom: 2.5rem; }
   padding-top: 0.6rem;
 }
 
-.memory-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-bottom: 0.5rem;
-}
-
-.memory-tag {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
-  color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.1);
-  padding: 0.1rem 0.4rem;
-  border-radius: 3px;
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    GRAPH TAB
@@ -633,8 +638,8 @@ header { margin-bottom: 2.5rem; }
 .graph-container {
   position: relative;
   width: 100%;
-  height: calc(100vh - 200px);
-  min-height: 500px;
+  height: calc(100vh - 240px);
+  min-height: 300px;
   background: var(--surface);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
@@ -720,7 +725,10 @@ header { margin-bottom: 2.5rem; }
   line-height: 1.4;
 }
 
-.graph-tooltip.visible { opacity: 1; }
+.graph-tooltip.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 .graph-tooltip .tt-label {
   font-family: 'JetBrains Mono', monospace;
@@ -743,6 +751,22 @@ header { margin-bottom: 2.5rem; }
   font-size: 0.65rem;
   color: var(--text-dim);
 }
+
+.graph-tooltip .tt-action {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--accent-blue);
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.graph-tooltip .tt-action:hover {
+  border-bottom-color: var(--accent-blue);
+}
+
 
 .graph-controls {
   position: absolute;
@@ -886,7 +910,7 @@ header { margin-bottom: 2.5rem; }
   .container { padding: 1rem; }
   .memory-grid { grid-template-columns: 1fr; }
   .ref-list { grid-template-columns: 1fr; }
-  .graph-container { height: calc(100vh - 180px); min-height: 400px; }
+  .graph-container { height: calc(100vh - 200px); min-height: 250px; }
   .graph-legend, .graph-stats { font-size: 0.65rem; }
 }
 </style>
@@ -916,7 +940,10 @@ header { margin-bottom: 2.5rem; }
 
   <div id="memory-tab" class="tab-content">
     <div class="search-bar">
-      <input type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()">
+      <div class="search-wrap">
+        <input type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="toggleSearchClear()">
+        <button class="search-clear" id="search-clear" onclick="clearSearch()">&times;</button>
+      </div>
       <button class="btn btn-primary" onclick="searchMemories()">Search</button>
     </div>
     <div class="toolbar" id="memory-toolbar"></div>
@@ -939,6 +966,9 @@ header { margin-bottom: 2.5rem; }
   var refsData = [];
   var memoryData = null;
   var memorySearchTimeout = null;
+  var memoryFilter = null; // null = show all, or 'Active', 'Dormant', 'Deep', 'Archived'
+  var lastMemoryStats = null; // cache stats so pills render even on search responses
+  var memoryOffset = 0;
   var graphLoaded = false;
 
   // ── Helpers ──
@@ -1024,7 +1054,6 @@ header { margin-bottom: 2.5rem; }
     { key: 'tones', label: 'Tones', type: 'tone', path: 'communication.tone', fields: [{name:'content',placeholder:'e.g. direct, warm'}] },
     { key: 'directives', label: 'Directives', type: 'directive', path: 'communication.directives', fields: [{name:'content',placeholder:'Communication directive'}] },
     { key: 'expertise', label: 'Expertise', type: 'expertise', path: 'expertise', fields: [{name:'content',placeholder:'e.g. Rust, distributed systems'}] },
-    { key: 'instructions', label: 'Instructions', type: 'instruction', path: 'instructions', fields: [{name:'content',placeholder:'Instruction text'}] },
   ];
 
   function getNestedValue(obj, path) {
@@ -1064,9 +1093,8 @@ header { margin-bottom: 2.5rem; }
       itemId = findItemIdBySecondary('antipattern', item.avoid, item.instead || null);
     }
 
-    var isInstruction = section.type === 'instruction';
     var delAttr = itemId ? ' onclick="deleteIdentityItem(\'' + escapeHtml(itemId) + '\')"' : '';
-    return '<div class="identity-item' + (isInstruction ? ' instruction-item' : '') + '">' +
+    return '<div class="identity-item">' +
       '<span>' + displayText + '</span>' +
       (itemId ? '<button class="del-btn"' + delAttr + '>&times;</button>' : '') +
       '</div>';
@@ -1341,6 +1369,7 @@ header { margin-bottom: 2.5rem; }
 
   function fetchReferences() {
     apiFetch('/api/references').then(function(data) {
+      if (JSON.stringify(data) === JSON.stringify(refsData)) return;
       refsData = data;
       renderReferences();
     }).catch(function() {});
@@ -1385,14 +1414,6 @@ header { margin-bottom: 2.5rem; }
     html += '<button class="btn btn-danger" onclick="deleteEngram(\'' + engram.id + '\')">&times;</button>';
     html += '</div>';
 
-    if (engram.tags && engram.tags.length > 0) {
-      html += '<div class="memory-tags">';
-      engram.tags.forEach(function(tag) {
-        html += '<span class="memory-tag">' + escapeHtml(tag) + '</span>';
-      });
-      html += '</div>';
-    }
-
     html += '<div class="memory-content">' + escapeHtml(truncate(engram.content, 200)) + '</div>';
     html += '<div class="memory-meta">';
     html += '<span>energy: ' + energyPercent(engram.energy) + '%</span>';
@@ -1408,43 +1429,129 @@ header { margin-bottom: 2.5rem; }
     var toolbar = document.getElementById('memory-toolbar');
 
     if (!memoryData) {
-      el.innerHTML = '<div class="empty-state"><div class="icon">\u{1F9E0}</div><div class="message">Loading memories...</div></div>';
+      var loadingHtml = '<div class="empty-state"><div class="icon">\u{1F9E0}</div><div class="message">Loading memories...</div></div>';
+      var temp = document.createElement('div');
+      temp.innerHTML = loadingHtml;
+      while (el.firstChild) el.removeChild(el.firstChild);
+      while (temp.firstChild) el.appendChild(temp.firstChild);
       return;
     }
 
     var engrams = memoryData.engrams || [];
-    var stats = memoryData.stats;
+    var stats = memoryData.stats || lastMemoryStats;
+    if (memoryData.stats) lastMemoryStats = memoryData.stats;
 
     if (stats) {
-      toolbar.innerHTML = '<span class="badge badge-active">' + (stats.active || 0) + ' active</span>' +
-        '<span class="badge badge-dormant">' + (stats.dormant || 0) + ' dormant</span>' +
-        '<span class="badge badge-deep">' + (stats.deep || 0) + ' deep</span>' +
-        '<span class="badge badge-archived">' + (stats.archived || 0) + ' archived</span>';
+      var filters = [
+        { label: 'all', count: stats.total || ((stats.active || 0) + (stats.dormant || 0) + (stats.deep || 0) + (stats.archived || 0)), state: null },
+        { label: 'active', count: stats.active || 0, state: 'Active' },
+        { label: 'dormant', count: stats.dormant || 0, state: 'Dormant' },
+        { label: 'deep', count: stats.deep || 0, state: 'Deep' },
+        { label: 'archived', count: stats.archived || 0, state: 'Archived' },
+      ];
+      var toolbarHtml = '';
+      filters.forEach(function(f) {
+        var isActive = memoryFilter === f.state;
+        var cls = f.state ? 'badge-' + f.label : 'badge-active';
+        if (isActive) cls += ' badge-selected';
+        toolbarHtml += '<span class="badge ' + cls + '" style="cursor:pointer" onclick="filterMemory(' + (f.state ? "'" + f.state + "'" : 'null') + ')">' + f.count + ' ' + f.label + '</span>';
+      });
+      toolbar.innerHTML = toolbarHtml;
     }
 
+    // Filter by state if a filter is active
+    if (memoryFilter) {
+      engrams = engrams.filter(function(e) {
+        return stateName(e.state) === memoryFilter;
+      });
+    }
+
+    // Contextual sorting
+    engrams.sort(function(a, b) {
+      if (memoryFilter === 'Dormant' || memoryFilter === 'Deep') {
+        // Sort by energy descending first, then access_count descending
+        if (b.energy !== a.energy) return b.energy - a.energy;
+        return (b.access_count || 0) - (a.access_count || 0);
+      } else {
+        // Active, Archived, or All: sort by access_count descending first, then energy descending
+        if ((b.access_count || 0) !== (a.access_count || 0)) return (b.access_count || 0) - (a.access_count || 0);
+        return b.energy - a.energy;
+      }
+    });
+
     if (engrams.length === 0) {
-      el.innerHTML = '<div class="empty-state" style="min-height:30vh"><div class="icon">\u{1F9E0}</div><div class="message">No memories found</div><div class="hint">memories are created through AI conversations</div></div>';
+      var emptyHtml = '<div class="empty-state" style="min-height:30vh"><div class="icon">\u{1F9E0}</div><div class="message">No memories found</div><div class="hint">memories are created through AI conversations</div></div>';
+      var temp = document.createElement('div');
+      temp.innerHTML = emptyHtml;
+      while (el.firstChild) el.removeChild(el.firstChild);
+      while (temp.firstChild) el.appendChild(temp.firstChild);
       return;
     }
 
-    var html = '<div class="memory-grid">';
+    var html = '';
+    var totalFiltered = memoryData.total_filtered || engrams.length;
+    if (totalFiltered > 0) {
+      html += '<div style="font-family:\'JetBrains Mono\',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:0.75rem;">Showing ' + engrams.length + ' of ' + totalFiltered + '</div>';
+    }
+
+    html += '<div class="memory-grid">';
     engrams.forEach(function(engram) {
       html += renderMemory(engram);
     });
     html += '</div>';
-    el.innerHTML = html;
+    if (memoryData.has_more) {
+      html += '<div style="text-align:center; margin-top:1.25rem;">';
+      html += '<button class="btn btn-ghost" onclick="loadMore()">Load more</button>';
+      html += '</div>';
+    }
+
+    // Swap pattern: build in detached element, replace children in one frame
+    var temp = document.createElement('div');
+    temp.innerHTML = html;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    while (temp.firstChild) el.appendChild(temp.firstChild);
   }
 
-  window.searchMemories = function() {
-    var q = document.getElementById('memory-search').value.trim();
-    var url = '/api/engrams?limit=50';
-    if (q) url += '&q=' + encodeURIComponent(q);
-    url += '&include_archived=true&include_deep=true';
+  window.filterMemory = function(state) {
+    memoryFilter = (memoryFilter === state) ? null : state;
+    memoryOffset = 0;
+    memoryData = null; // force re-render (bypass stringify guard)
+    fetchMemories();
+  };
 
-    apiFetch(url).then(function(data) {
-      memoryData = data;
-      renderMemories();
-    }).catch(function() {});
+  window.searchMemories = function() {
+    memoryFilter = null;
+    memoryOffset = 0;
+    memoryData = null; // force re-render (bypass stringify guard)
+    toggleSearchClear();
+    fetchMemories();
+  };
+
+  window.toggleSearchClear = function() {
+    var input = document.getElementById('memory-search');
+    var btn = document.getElementById('search-clear');
+    if (btn) btn.classList.toggle('visible', input && input.value.length > 0);
+  };
+
+  window.clearSearch = function() {
+    var input = document.getElementById('memory-search');
+    if (input) input.value = '';
+    toggleSearchClear();
+    searchMemories();
+  };
+
+  window.viewInMemory = function(id) {
+    document.getElementById('memory-search').value = id;
+    switchTab('memory');
+    setTimeout(function() {
+      searchMemories();
+    }, 100);
+  };
+
+  window.loadMore = function() {
+    var current = memoryData ? (memoryData.engrams || []).length : 0;
+    memoryOffset = current;
+    fetchMemories(true);
   };
 
   window.deleteEngram = function(id) {
@@ -1456,13 +1563,21 @@ header { margin-bottom: 2.5rem; }
     });
   };
 
-  function fetchMemories() {
+  function fetchMemories(append) {
     var q = document.getElementById('memory-search');
     var query = q ? q.value.trim() : '';
     var url = '/api/engrams?limit=50&include_archived=true&include_deep=true';
     if (query) url += '&q=' + encodeURIComponent(query);
+    if (memoryFilter) url += '&state=' + encodeURIComponent(memoryFilter);
+    if (memoryOffset > 0) url += '&offset=' + memoryOffset;
 
     apiFetch(url).then(function(data) {
+      if (append && memoryData) {
+        var existing = memoryData.engrams || [];
+        var newEngrams = data.engrams || [];
+        data.engrams = existing.concat(newEngrams);
+      }
+      if (!append && JSON.stringify(data) === JSON.stringify(memoryData)) return;
       memoryData = data;
       renderMemories();
     }).catch(function() {});
@@ -1478,11 +1593,18 @@ header { margin-bottom: 2.5rem; }
 
   function stateColor(state) {
     if (!state) return '#10b981';
-    var s = state.toLowerCase();
-    if (s.indexOf('active') >= 0 || s === '\u{1f7e2}') return '#10b981';
-    if (s.indexOf('dormant') >= 0 || s === '\u{1f7e1}') return '#f59e0b';
-    if (s.indexOf('deep') >= 0 || s === '\u{1f7e3}') return '#8b5cf6';
-    if (s.indexOf('archived') >= 0 || s === '\u26aa') return '#71717a';
+    var s = state;
+    // Check actual emojis sent by backend (state.emoji())
+    if (s.indexOf('\u2728') >= 0) return '#10b981';   // ✨ Active
+    if (s.indexOf('\uD83D\uDCA4') >= 0) return '#f59e0b'; // 💤 Dormant
+    if (s.indexOf('\uD83C\uDF0A') >= 0) return '#8b5cf6'; // 🌊 Deep
+    if (s.indexOf('\uD83E\uDDCA') >= 0) return '#71717a'; // 🧊 Archived
+    // Fall through to text-based matching (memory tab uses format!("{:?}", state))
+    var sl = s.toLowerCase();
+    if (sl.indexOf('active') >= 0) return '#10b981';
+    if (sl.indexOf('dormant') >= 0) return '#f59e0b';
+    if (sl.indexOf('deep') >= 0) return '#8b5cf6';
+    if (sl.indexOf('archived') >= 0) return '#71717a';
     return '#10b981';
   }
 
@@ -1574,19 +1696,24 @@ header { margin-bottom: 2.5rem; }
 
     // Simulation
     graphSim = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(function(d) { return d.id; }).distance(80))
-      .force('charge', d3.forceManyBody().strength(-150))
+      .force('link', d3.forceLink(links)
+        .id(function(d) { return d.id; })
+        .distance(function(d) { return 100 - d.weight * 50; })
+        .strength(function(d) { return d.weight * 0.5; }))
+      .force('charge', d3.forceManyBody()
+        .strength(-200)
+        .distanceMax(400))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(function(d) { return nodeRadius(d) + 5; }));
+      .force('collision', d3.forceCollide().radius(function(d) { return nodeRadius(d) + 10; }));
 
     // Edges
     var link = g.append('g')
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', '#27272a')
+      .attr('stroke', function(d) { return 'rgba(139, 92, 246, ' + (0.1 + d.weight * 0.5) + ')'; })
       .attr('stroke-opacity', function(d) { return 0.3 + d.weight * 0.7; })
-      .attr('stroke-width', function(d) { return 0.5 + d.weight * 2; });
+      .attr('stroke-width', function(d) { return 1 + d.weight * 3; });
 
     // Nodes
     var node = g.append('g')
@@ -1605,40 +1732,59 @@ header { margin-bottom: 2.5rem; }
         .on('drag', dragged)
         .on('end', dragended));
 
-    // Tooltip
+    // Tooltip with hover delay
     var tooltip = document.getElementById('graph-tooltip');
+    var tooltipHideTimeout = null;
+
+    function graphStateLabel(state) {
+      if (!state) return 'Active';
+      if (state.indexOf('\u2728') >= 0) return 'Active';
+      if (state.indexOf('\uD83D\uDCA4') >= 0) return 'Dormant';
+      if (state.indexOf('\uD83C\uDF0A') >= 0) return 'Deep';
+      if (state.indexOf('\uD83E\uDDCA') >= 0) return 'Archived';
+      return 'Active';
+    }
+
+    function buildTooltipHtml(d) {
+      var contentText = d.content ? truncate(d.content, 200) : d.label;
+      var html = '<div class="tt-label">' + escapeHtml(d.state || '') + ' ' + graphStateLabel(d.state) + '</div>';
+      html += '<div class="tt-value">' + escapeHtml(contentText) + '</div>';
+      html += '<div class="tt-meta">energy: ' + Math.round((d.energy || 0) * 100) + '% &middot; accessed: ' + (d.access_count || 0) + 'x</div>';
+      html += '<span class="tt-action" onclick="viewInMemory(\'' + escapeHtml(d.id) + '\')">View in Memory \u2192</span>';
+      return html;
+    }
+
+    function showTooltipAt(event) {
+      var rect = container.getBoundingClientRect();
+      tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
+      tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+    }
 
     node.on('mouseover', function(event, d) {
-      tooltip.innerHTML = '<div class="tt-label">Content</div><div class="tt-value">' + escapeHtml(d.label) + '</div>' +
-        '<div class="tt-meta">energy: ' + Math.round((d.energy || 0) * 100) + '% | accessed: ' + (d.access_count || 0) + 'x</div>';
+      clearTimeout(tooltipHideTimeout);
+      tooltip.innerHTML = buildTooltipHtml(d);
       tooltip.classList.add('visible');
-      var rect = container.getBoundingClientRect();
-      tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
-      tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+      showTooltipAt(event);
     })
     .on('mousemove', function(event) {
-      var rect = container.getBoundingClientRect();
-      tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
-      tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+      showTooltipAt(event);
     })
     .on('mouseout', function() {
+      tooltipHideTimeout = setTimeout(function() {
+        tooltip.classList.remove('visible');
+      }, 200);
+    });
+
+    tooltip.addEventListener('mouseenter', function() {
+      clearTimeout(tooltipHideTimeout);
+    });
+    tooltip.addEventListener('mouseleave', function() {
       tooltip.classList.remove('visible');
     });
 
-    // Labels (only if few nodes)
-    if (nodes.length < 60) {
-      g.append('g')
-        .selectAll('text')
-        .data(nodes)
-        .join('text')
-        .text(function(d) { return truncate(d.label, 15); })
-        .attr('font-family', 'JetBrains Mono, monospace')
-        .attr('font-size', '8px')
-        .attr('fill', '#a1a1aa')
-        .attr('text-anchor', 'middle')
-        .attr('dy', function(d) { return nodeRadius(d) + 12; })
-        .attr('pointer-events', 'none');
-    }
+    graphSim.on('end', function() {
+      graphSim.stop();
+    });
 
     graphSim.on('tick', function() {
       link
@@ -1650,15 +1796,15 @@ header { margin-bottom: 2.5rem; }
       node
         .attr('cx', function(d) { return d.x; })
         .attr('cy', function(d) { return d.y; });
-
-      if (nodes.length < 60) {
-        g.selectAll('text')
-          .attr('x', function(d) { return d.x; })
-          .attr('y', function(d) { return d.y; });
-      }
     });
 
     graphSvg = svg;
+
+    // Store nodes for fitGraph/graphReset
+    graphNodes = nodes;
+
+    // Auto-fit graph after simulation settles
+    setTimeout(function() { fitGraph(nodes); }, 2000);
 
     function nodeRadius(d) {
       var base = 5;
@@ -1685,6 +1831,41 @@ header { margin-bottom: 2.5rem; }
     }
   }
 
+  function fitGraph(nodes) {
+    if (!graphSvg || !graphZoom || !nodes || !nodes.length) return;
+    var container = document.getElementById('graph-svg-container');
+    if (!container) return;
+    var width = container.clientWidth;
+    var height = container.clientHeight;
+
+    var xExtent = d3.extent(nodes, function(d) { return d.x; });
+    var yExtent = d3.extent(nodes, function(d) { return d.y; });
+
+    var dx = xExtent[1] - xExtent[0];
+    var dy = yExtent[1] - yExtent[0];
+    var padding = 60;
+
+    var scale = Math.min(
+      (width - padding * 2) / (dx || 1),
+      (height - padding * 2) / (dy || 1),
+      1.5
+    );
+    scale = Math.max(scale, 0.1);
+
+    var cx = (xExtent[0] + xExtent[1]) / 2;
+    var cy = (yExtent[0] + yExtent[1]) / 2;
+
+    var transform = d3.zoomIdentity
+      .translate(width / 2, height / 2)
+      .scale(scale)
+      .translate(-cx, -cy);
+
+    graphSvg.transition().duration(750).call(graphZoom.transform, transform);
+  }
+
+  // Store nodes reference for graphReset
+  var graphNodes = null;
+
   window.graphZoomIn = function() {
     if (graphSvg && graphZoom) graphSvg.transition().duration(300).call(graphZoom.scaleBy, 1.5);
   };
@@ -1695,7 +1876,7 @@ header { margin-bottom: 2.5rem; }
 
   window.graphReset = function() {
     if (graphSvg && graphZoom) {
-      graphSvg.transition().duration(500).call(graphZoom.transform, d3.zoomIdentity);
+      fitGraph(graphNodes);
     }
   };
 
@@ -1740,12 +1921,15 @@ header { margin-bottom: 2.5rem; }
 
   // Periodic refresh
   setInterval(function() {
-    if (activeTab === 'memory') fetchMemories();
-  }, 5000);
+    if (activeTab === 'memory') {
+      memoryOffset = 0;
+      fetchMemories();
+    }
+  }, 30000);
 
   setInterval(function() {
     if (activeTab === 'references') fetchReferences();
-  }, 10000);
+  }, 30000);
 
 })();
 </script>

@@ -12,7 +12,7 @@ pub struct UiOpenTool;
 
 impl Tool<Context> for UiOpenTool {
     fn name(&self) -> &str {
-        "ui_open"
+        "open_dashboard"
     }
 
     fn description(&self) -> &str {

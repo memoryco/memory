@@ -573,6 +573,108 @@ header { margin-bottom: 2.5rem; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   LENSES TAB
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lens-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1rem;
+}
+
+.lens-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1.25rem;
+  border-left: 3px solid var(--accent-violet);
+  transition: border-color 0.2s ease;
+  cursor: pointer;
+}
+
+.lens-card:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.lens-card.expanded {
+  cursor: default;
+  grid-column: 1 / -1;
+}
+
+.lens-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lens-card-header h3 {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.1rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.lens-description {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.lens-preview {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 0.5rem;
+  max-height: 3.6em;
+  line-height: 1.2em;
+  overflow: hidden;
+}
+
+.lens-editor {
+  width: 100%;
+  min-height: 300px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  padding: 1rem;
+  border-radius: 6px;
+  resize: vertical;
+  outline: none;
+  margin-top: 0.75rem;
+  line-height: 1.5;
+}
+
+.lens-editor:focus {
+  border-color: var(--accent-blue);
+}
+
+.lens-name-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  outline: none;
+  margin-bottom: 0.5rem;
+}
+
+.lens-name-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.lens-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    MEMORY TAB
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -986,6 +1088,7 @@ header { margin-bottom: 2.5rem; }
   <div class="tab-bar">
     <button class="tab active" data-tab="identity" onclick="switchTab('identity')">Identity</button>
     <button class="tab" data-tab="references" onclick="switchTab('references')">References</button>
+    <button class="tab" data-tab="lenses" onclick="switchTab('lenses')">Lenses</button>
     <button class="tab" data-tab="memory" onclick="switchTab('memory')">Memory</button>
     <button class="tab" data-tab="graph" onclick="switchTab('graph')">Graph</button>
   </div>
@@ -996,6 +1099,10 @@ header { margin-bottom: 2.5rem; }
 
   <div id="references-tab" class="tab-content">
     <div id="references-content"></div>
+  </div>
+
+  <div id="lenses-tab" class="tab-content">
+    <div id="lenses-content"></div>
   </div>
 
   <div id="memory-tab" class="tab-content">
@@ -1029,6 +1136,8 @@ header { margin-bottom: 2.5rem; }
   var memoryFilter = null; // null = show all, or 'Active', 'Dormant', 'Deep', 'Archived'
   var lastMemoryStats = null; // cache stats so pills render even on search responses
   var memoryOffset = 0;
+  var lensesData = [];
+  var editingLens = null; // name of lens being edited, or '__new__' for new
   var graphLoaded = false;
 
   // ── Helpers ──
@@ -1079,6 +1188,7 @@ header { margin-bottom: 2.5rem; }
     });
     if (tab === 'identity') fetchIdentity();
     if (tab === 'references') fetchReferences();
+    if (tab === 'lenses') fetchLenses();
     if (tab === 'memory') fetchMemories();
     if (tab === 'graph') fetchGraph();
   };
@@ -1541,6 +1651,257 @@ header { margin-bottom: 2.5rem; }
       renderReferences();
     }).catch(function() {});
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // LENSES TAB
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function fetchLenses() {
+    apiFetch('/api/lenses').then(function(data) {
+      if (JSON.stringify(data) === JSON.stringify(lensesData)) return;
+      lensesData = data;
+      renderLenses();
+    }).catch(function() {});
+  }
+
+  function renderLenses() {
+    var el = document.getElementById('lenses-content');
+    var html = '';
+
+    // Upload zone
+    html += '<div class="upload-zone fade-in" id="lens-upload-zone" onclick="document.getElementById(\'lens-file-input\').click()">';
+    html += '<div class="icon">\u{1F4DD}</div>';
+    html += '<div class="label">Drop .md files here or click to upload</div>';
+    html += '<div class="hint">.md files only</div>';
+    html += '<div class="status" id="lens-upload-status"></div>';
+    html += '</div>';
+    html += '<input type="file" id="lens-file-input" accept=".md" multiple style="display:none" onchange="handleLensFileSelect(event)">';
+
+    // New lens button
+    html += '<div style="margin-bottom:1.25rem;">';
+    html += '<button class="btn btn-primary" onclick="startNewLens()">+ New Lens</button>';
+    html += '</div>';
+
+    // New lens editor (inline)
+    if (editingLens === '__new__') {
+      html += '<div class="lens-card expanded fade-in" style="margin-bottom:1rem;">';
+      html += '<input class="lens-name-input" id="new-lens-name" placeholder="lens-name" autofocus>';
+      html += '<textarea class="lens-editor" id="new-lens-content" placeholder="# Lens Title\n\nMarkdown content here..."></textarea>';
+      html += '<div class="lens-actions">';
+      html += '<button class="btn btn-primary" onclick="saveNewLens()">Save</button>';
+      html += '<button class="btn btn-ghost" onclick="cancelNewLens()">Cancel</button>';
+      html += '</div>';
+      html += '</div>';
+    }
+
+    // Lens cards
+    if (lensesData.length === 0 && editingLens !== '__new__') {
+      html += '<div class="empty-state" style="min-height:20vh">';
+      html += '<div class="message" style="font-size:1.1rem">No lenses loaded</div>';
+      html += '<div class="hint">create or upload a .md file to get started</div>';
+      html += '</div>';
+    } else if (lensesData.length > 0) {
+      html += '<div class="section-label"><span>Loaded (' + lensesData.length + ')</span></div>';
+      html += '<div class="lens-list">';
+      lensesData.forEach(function(lens) {
+        var isEditing = editingLens === lens.name;
+        html += '<div class="lens-card' + (isEditing ? ' expanded' : '') + '"' + (!isEditing ? ' onclick="expandLens(\'' + escapeHtml(lens.name) + '\')"' : '') + '>';
+        html += '<div class="lens-card-header">';
+        html += '<h3>' + escapeHtml(lens.name) + '</h3>';
+        html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteLens(\'' + escapeHtml(lens.name) + '\')">&times;</button>';
+        html += '</div>';
+        if (lens.description) {
+          html += '<div class="lens-description">' + escapeHtml(lens.description) + '</div>';
+        }
+        if (isEditing) {
+          html += '<textarea class="lens-editor" id="edit-lens-content">' + escapeHtml(lens.content) + '</textarea>';
+          html += '<div class="lens-actions">';
+          html += '<button class="btn btn-primary" onclick="event.stopPropagation(); saveLensEdit(\'' + escapeHtml(lens.name) + '\')">Save</button>';
+          html += '<button class="btn btn-ghost" onclick="event.stopPropagation(); cancelLensEdit()">Cancel</button>';
+          html += '</div>';
+        } else {
+          var preview = lens.content || '';
+          // Skip description line for preview
+          var lines = preview.split('\n');
+          if (lines.length > 0 && lines[0].startsWith('#')) lines.shift();
+          preview = lines.join('\n').trim();
+          html += '<div class="lens-preview">' + escapeHtml(truncate(preview, 200)) + '</div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+    setupLensDragDrop();
+  }
+
+  function setupLensDragDrop() {
+    var zone = document.getElementById('lens-upload-zone');
+    if (!zone) return;
+
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      zone.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      var files = e.dataTransfer.files;
+      if (files.length > 0) uploadLensFiles(files);
+    });
+  }
+
+  window.handleLensFileSelect = function(e) {
+    var files = e.target.files;
+    if (files.length > 0) uploadLensFiles(files);
+    e.target.value = '';
+  };
+
+  function uploadLensFiles(fileList) {
+    var files = [];
+    for (var i = 0; i < fileList.length; i++) {
+      files.push(fileList[i]);
+    }
+
+    var status = document.getElementById('lens-upload-status');
+
+    var mdFiles = files.filter(function(f) {
+      return f.name.toLowerCase().endsWith('.md');
+    });
+
+    if (mdFiles.length === 0) {
+      if (status) {
+        status.textContent = 'Only .md files are accepted';
+        status.className = 'status error';
+      }
+      return;
+    }
+
+    if (status) {
+      status.textContent = 'Uploading ' + mdFiles.length + (mdFiles.length === 1 ? ' file' : ' files') + '...';
+      status.className = 'status uploading';
+    }
+
+    var succeeded = 0;
+    var failed = 0;
+    var idx = 0;
+
+    function uploadNext() {
+      if (idx >= mdFiles.length) {
+        if (status) {
+          if (failed === 0) {
+            status.textContent = 'Uploaded ' + succeeded + (succeeded === 1 ? ' lens' : ' lenses');
+            status.className = 'status success';
+          } else {
+            status.textContent = succeeded + ' uploaded, ' + failed + ' failed';
+            status.className = 'status error';
+          }
+        }
+        if (succeeded > 0) {
+          showToast(succeeded === 1 ? 'Lens uploaded' : succeeded + ' lenses uploaded');
+          fetchLenses();
+        }
+        return;
+      }
+
+      var formData = new FormData();
+      formData.append('file', mdFiles[idx]);
+      idx++;
+
+      fetch('/api/lenses/upload', {
+        method: 'POST',
+        body: formData
+      }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { failed++; } else { succeeded++; }
+        uploadNext();
+      }).catch(function() {
+        failed++;
+        uploadNext();
+      });
+    }
+
+    uploadNext();
+  }
+
+  window.startNewLens = function() {
+    editingLens = '__new__';
+    renderLenses();
+  };
+
+  window.cancelNewLens = function() {
+    editingLens = null;
+    renderLenses();
+  };
+
+  window.saveNewLens = function() {
+    var nameEl = document.getElementById('new-lens-name');
+    var contentEl = document.getElementById('new-lens-content');
+    if (!nameEl || !contentEl) return;
+
+    var name = nameEl.value.trim();
+    var content = contentEl.value;
+
+    if (!name) {
+      showToast('Name is required', 'error');
+      return;
+    }
+
+    apiFetch('/api/lenses', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, content: content})
+    }).then(function() {
+      editingLens = null;
+      showToast('Lens saved');
+      fetchLenses();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  window.expandLens = function(name) {
+    editingLens = name;
+    renderLenses();
+  };
+
+  window.cancelLensEdit = function() {
+    editingLens = null;
+    renderLenses();
+  };
+
+  window.saveLensEdit = function(name) {
+    var contentEl = document.getElementById('edit-lens-content');
+    if (!contentEl) return;
+
+    apiFetch('/api/lenses', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, content: contentEl.value})
+    }).then(function() {
+      editingLens = null;
+      showToast('Lens saved');
+      fetchLenses();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
+
+  window.deleteLens = function(name) {
+    if (!confirm('Delete lens "' + name + '"?')) return;
+    apiFetch('/api/lenses/' + encodeURIComponent(name), { method: 'DELETE' }).then(function() {
+      showToast('Lens deleted');
+      if (editingLens === name) editingLens = null;
+      fetchLenses();
+    }).catch(function(e) {
+      showToast(e.message, 'error');
+    });
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // MEMORY TAB
@@ -2096,6 +2457,7 @@ header { margin-bottom: 2.5rem; }
 
   setInterval(function() {
     if (activeTab === 'references') fetchReferences();
+    if (activeTab === 'lenses') fetchLenses();
   }, 30000);
 
 })();

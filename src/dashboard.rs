@@ -116,6 +116,11 @@ fn route(
         ("GET", "/api/references") => handle_list_references(state),
         ("POST", "/api/references/upload") => handle_upload_reference(&mut request, state),
 
+        // Lenses
+        ("GET", "/api/lenses") => handle_list_lenses(state),
+        ("POST", "/api/lenses") => handle_save_lens(&mut request, state),
+        ("POST", "/api/lenses/upload") => handle_upload_lens(&mut request, state),
+
         // Engrams
         ("GET", "/api/engrams") => handle_list_engrams(query, state),
 
@@ -144,6 +149,8 @@ fn route_delete(
         ["api", "engrams", id] => handle_delete_engram(id, state),
         // DELETE /api/references/:name
         ["api", "references", name] => handle_delete_reference(name, state),
+        // DELETE /api/lenses/:name
+        ["api", "lenses", name] => handle_delete_lens(name, state),
         _ => json_response(404, r#"{"error":"Not found"}"#),
     }
 }
@@ -530,6 +537,204 @@ fn handle_delete_reference(
     // the next server restart when bootstrap reconciles them.
 
     json_ok(&json!({"deleted": decoded_name}))
+}
+
+// ---------------------------------------------------------------------------
+// Lenses handlers
+// ---------------------------------------------------------------------------
+
+/// Sanitize a lens name to only allow alphanumeric chars, hyphens, and underscores.
+fn sanitize_lens_name(name: &str) -> Option<String> {
+    let clean: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if clean.is_empty() {
+        None
+    } else {
+        Some(clean)
+    }
+}
+
+fn handle_list_lenses(
+    state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let lenses_dir = state.memory_home.join("lenses");
+    if !lenses_dir.exists() {
+        return json_ok(&json!([]));
+    }
+
+    let entries = match std::fs::read_dir(&lenses_dir) {
+        Ok(e) => e,
+        Err(e) => return json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+    };
+
+    let mut lenses: Vec<JsonValue> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let description = content
+            .lines()
+            .next()
+            .filter(|line| line.starts_with('#'))
+            .map(|line| line.trim_start_matches('#').trim().to_string())
+            .unwrap_or_default();
+
+        lenses.push(json!({
+            "name": name,
+            "description": description,
+            "content": content,
+        }));
+    }
+
+    json_ok(&json!(lenses))
+}
+
+fn handle_save_lens(
+    request: &mut tiny_http::Request,
+    state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let body = match read_body(request) {
+        Ok(b) => b,
+        Err(e) => return json_response(400, &format!(r#"{{"error":"{}"}}"#, e)),
+    };
+
+    let parsed: JsonValue = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => return json_response(400, &format!(r#"{{"error":"{}"}}"#, e)),
+    };
+
+    let raw_name = match parsed.get("name").and_then(|v| v.as_str()) {
+        Some(n) => n,
+        None => return json_response(400, r#"{"error":"Missing 'name' field"}"#),
+    };
+
+    let name = match sanitize_lens_name(raw_name) {
+        Some(n) => n,
+        None => return json_response(400, r#"{"error":"Invalid lens name"}"#),
+    };
+
+    let content = match parsed.get("content").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => return json_response(400, r#"{"error":"Missing 'content' field"}"#),
+    };
+
+    let lenses_dir = state.memory_home.join("lenses");
+    if let Err(e) = std::fs::create_dir_all(&lenses_dir) {
+        return json_response(500, &format!(r#"{{"error":"{}"}}"#, e));
+    }
+
+    let path = lenses_dir.join(format!("{}.md", name));
+    if let Err(e) = std::fs::write(&path, content) {
+        return json_response(500, &format!(r#"{{"error":"{}"}}"#, e));
+    }
+
+    json_ok(&json!({"saved": name}))
+}
+
+fn handle_upload_lens(
+    request: &mut tiny_http::Request,
+    state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let content_type = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Content-Type"))
+        .map(|h| h.value.as_str().to_string())
+        .unwrap_or_default();
+
+    let boundary = match extract_boundary(&content_type) {
+        Some(b) => b,
+        None => {
+            return json_response(
+                400,
+                r#"{"error":"Missing multipart boundary in Content-Type"}"#,
+            )
+        }
+    };
+
+    let body = match read_body_bytes(request) {
+        Ok(b) => b,
+        Err(e) => return json_response(400, &format!(r#"{{"error":"{}"}}"#, e)),
+    };
+
+    let file = match parse_multipart(&body, &boundary) {
+        Some(f) => f,
+        None => return json_response(400, r#"{"error":"No file found in multipart body"}"#),
+    };
+
+    // Only accept .md files
+    if !file.filename.to_lowercase().ends_with(".md") {
+        return json_response(400, r#"{"error":"Only .md files are accepted"}"#);
+    }
+
+    // Derive lens name from filename
+    let raw_name = file
+        .filename
+        .strip_suffix(".md")
+        .or_else(|| file.filename.strip_suffix(".MD"))
+        .unwrap_or(&file.filename);
+
+    let name = match sanitize_lens_name(raw_name) {
+        Some(n) => n,
+        None => return json_response(400, r#"{"error":"Invalid lens filename"}"#),
+    };
+
+    let lenses_dir = state.memory_home.join("lenses");
+    if let Err(e) = std::fs::create_dir_all(&lenses_dir) {
+        return json_response(500, &format!(r#"{{"error":"{}"}}"#, e));
+    }
+
+    let dest = lenses_dir.join(format!("{}.md", name));
+    if let Err(e) = std::fs::write(&dest, &file.data) {
+        return json_response(500, &format!(r#"{{"error":"{}"}}"#, e));
+    }
+
+    json_ok(&json!({"uploaded": name}))
+}
+
+fn handle_delete_lens(
+    name: &str,
+    state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let decoded_name = url_decode(name);
+
+    let sanitized = match sanitize_lens_name(&decoded_name) {
+        Some(n) => n,
+        None => return json_response(400, r#"{"error":"Invalid lens name"}"#),
+    };
+
+    let lenses_dir = state.memory_home.join("lenses");
+    let path = lenses_dir.join(format!("{}.md", sanitized));
+
+    if !path.exists() {
+        return json_response(
+            404,
+            &format!(r#"{{"error":"Lens '{}' not found"}}"#, sanitized),
+        );
+    }
+
+    if let Err(e) = std::fs::remove_file(&path) {
+        return json_response(500, &format!(r#"{{"error":"Failed to delete: {}"}}"#, e));
+    }
+
+    json_ok(&json!({"deleted": sanitized}))
 }
 
 // ---------------------------------------------------------------------------
@@ -1337,5 +1542,45 @@ mod tests {
         let result = truncate_content("this is a long string", 10);
         assert!(result.ends_with("..."));
         assert!(result.len() <= 10);
+    }
+
+    // ── Lens name sanitization ────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_lens_name_basic() {
+        assert_eq!(sanitize_lens_name("humanizer"), Some("humanizer".to_string()));
+        assert_eq!(sanitize_lens_name("codereview"), Some("codereview".to_string()));
+    }
+
+    #[test]
+    fn sanitize_lens_name_strips_bad_chars() {
+        assert_eq!(sanitize_lens_name("../../../etc/passwd"), Some("etcpasswd".to_string()));
+        assert_eq!(sanitize_lens_name("my lens!"), Some("mylens".to_string()));
+        assert_eq!(sanitize_lens_name("foo bar/baz"), Some("foobarbaz".to_string()));
+    }
+
+    #[test]
+    fn sanitize_lens_name_empty_after_strip() {
+        assert_eq!(sanitize_lens_name("../../../"), None);
+        assert_eq!(sanitize_lens_name("..."), None);
+        assert_eq!(sanitize_lens_name("   "), None);
+        assert_eq!(sanitize_lens_name(""), None);
+    }
+
+    #[test]
+    fn sanitize_lens_name_preserves_hyphens_underscores() {
+        assert_eq!(sanitize_lens_name("my-lens_v2"), Some("my-lens_v2".to_string()));
+        assert_eq!(sanitize_lens_name("a-b_c"), Some("a-b_c".to_string()));
+    }
+
+    #[test]
+    fn route_delete_lens() {
+        let segments: Vec<&str> = "api/lenses/humanizer"
+            .split('/')
+            .collect();
+        match segments.as_slice() {
+            ["api", "lenses", name] => assert_eq!(*name, "humanizer"),
+            _ => panic!("Should match lens delete"),
+        }
     }
 }

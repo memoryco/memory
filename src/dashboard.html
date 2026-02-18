@@ -475,6 +475,66 @@ header { margin-bottom: 2.5rem; }
 .upload-zone .status.error { color: var(--accent-rose); }
 .upload-zone .status.uploading { color: var(--accent-amber); }
 
+.upload-file-list {
+  text-align: left;
+  margin-top: 0.75rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.upload-file-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.upload-file-item:last-child { border-bottom: none; }
+
+.upload-file-item .file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.upload-file-item .file-status {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+}
+
+.upload-file-item .file-status.pending { color: var(--text-dim); }
+.upload-file-item .file-status.uploading { color: var(--accent-amber); }
+.upload-file-item .file-status.success { color: var(--accent-emerald); }
+.upload-file-item .file-status.error { color: var(--accent-rose); }
+
+.upload-summary {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+}
+
+.upload-summary.all-success {
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--accent-emerald);
+}
+
+.upload-summary.partial {
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--accent-amber);
+}
+
+.upload-summary.all-failed {
+  background: rgba(244, 63, 94, 0.08);
+  color: var(--accent-rose);
+}
+
 .ref-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -1254,11 +1314,12 @@ header { margin-bottom: 2.5rem; }
     // Upload zone
     html += '<div class="upload-zone fade-in" id="upload-zone" onclick="document.getElementById(\'file-input\').click()">';
     html += '<div class="icon">\u{1F4C4}</div>';
-    html += '<div class="label">Drop a PDF here or click to upload</div>';
+    html += '<div class="label">Drop PDFs here or click to upload</div>';
     html += '<div class="hint">.pdf files only</div>';
     html += '<div class="status" id="upload-status"></div>';
+    html += '<div id="upload-file-list"></div>';
     html += '</div>';
-    html += '<input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFileSelect(event)">';
+    html += '<input type="file" id="file-input" accept=".pdf" multiple style="display:none" onchange="handleFileSelect(event)">';
 
     // Reference list
     if (refsData.length === 0) {
@@ -1303,58 +1364,164 @@ header { margin-bottom: 2.5rem; }
       e.preventDefault();
       zone.classList.remove('drag-over');
       var files = e.dataTransfer.files;
-      if (files.length > 0) uploadFile(files[0]);
+      if (files.length > 0) uploadFiles(files);
     });
   }
 
   window.handleFileSelect = function(e) {
     var files = e.target.files;
-    if (files.length > 0) uploadFile(files[0]);
+    if (files.length > 0) uploadFiles(files);
     e.target.value = '';
   };
 
-  function uploadFile(file) {
+  var uploadInProgress = false;
+
+  function uploadFiles(fileList) {
+    if (uploadInProgress) return;
+    uploadInProgress = true;
+
+    var files = [];
+    for (var i = 0; i < fileList.length; i++) {
+      files.push(fileList[i]);
+    }
+
     var status = document.getElementById('upload-status');
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
+    var listEl = document.getElementById('upload-file-list');
+
+    // Filter to PDFs only, track rejected ones
+    var pdfFiles = [];
+    var rejected = [];
+    files.forEach(function(f) {
+      if (f.name.toLowerCase().endsWith('.pdf')) {
+        pdfFiles.push(f);
+      } else {
+        rejected.push(f.name);
+      }
+    });
+
+    if (pdfFiles.length === 0) {
       if (status) {
         status.textContent = 'Only .pdf files are accepted';
         status.className = 'status error';
       }
+      uploadInProgress = false;
       return;
     }
 
+    // Build per-file status list
+    var fileStates = pdfFiles.map(function(f) {
+      return { file: f, name: f.name, status: 'pending', message: '' };
+    });
+
+    function renderFileList() {
+      if (!listEl) return;
+      var html = '<div class="upload-file-list scrollable">';
+      fileStates.forEach(function(fs) {
+        var indicator = '';
+        if (fs.status === 'pending') indicator = '\u2022';
+        else if (fs.status === 'uploading') indicator = '\u21BB';
+        else if (fs.status === 'success') indicator = '\u2713';
+        else if (fs.status === 'error') indicator = '\u2717';
+
+        html += '<div class="upload-file-item">';
+        html += '<span class="file-status ' + fs.status + '">' + indicator + '</span>';
+        html += '<span class="file-name">' + escapeHtml(fs.name) + '</span>';
+        if (fs.message) {
+          html += '<span class="file-status ' + fs.status + '">' + escapeHtml(fs.message) + '</span>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+      listEl.innerHTML = html;
+    }
+
+    renderFileList();
+
     if (status) {
-      status.textContent = 'Uploading ' + file.name + '...';
+      var totalLabel = pdfFiles.length === 1 ? '1 file' : pdfFiles.length + ' files';
+      status.textContent = 'Uploading ' + totalLabel + '...';
       status.className = 'status uploading';
     }
 
-    var formData = new FormData();
-    formData.append('file', file);
+    var succeeded = 0;
+    var failed = 0;
+    var idx = 0;
 
-    fetch('/api/references/upload', {
-      method: 'POST',
-      body: formData
-    }).then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.error) {
-        if (status) {
-          status.textContent = data.error;
-          status.className = 'status error';
+    function uploadNext() {
+      if (idx >= pdfFiles.length) {
+        // All done — show summary
+        var total = pdfFiles.length;
+        var summaryText = '';
+        var summaryClass = '';
+
+        if (succeeded === total) {
+          summaryText = 'Uploaded ' + succeeded + ' of ' + total + (total === 1 ? ' file' : ' files');
+          summaryClass = 'all-success';
+        } else if (succeeded === 0) {
+          summaryText = 'All ' + total + ' uploads failed';
+          summaryClass = 'all-failed';
+        } else {
+          summaryText = 'Uploaded ' + succeeded + ' of ' + total + ' files (' + failed + ' failed)';
+          summaryClass = 'partial';
         }
-      } else {
-        if (status) {
-          status.textContent = 'Uploaded: ' + (data.uploaded || file.name);
-          status.className = 'status success';
+
+        if (rejected.length > 0) {
+          summaryText += ' \u2022 ' + rejected.length + ' non-PDF ' + (rejected.length === 1 ? 'file' : 'files') + ' skipped';
         }
-        showToast('Reference uploaded');
-        fetchReferences();
+
+        if (status) {
+          status.className = 'status';
+          status.innerHTML = '<div class="upload-summary ' + summaryClass + '">' + escapeHtml(summaryText) + '</div>';
+        }
+
+        if (succeeded > 0) {
+          showToast(succeeded === 1 ? 'Reference uploaded' : succeeded + ' references uploaded');
+          fetchReferences();
+        }
+
+        uploadInProgress = false;
+        return;
       }
-    }).catch(function(e) {
-      if (status) {
-        status.textContent = 'Upload failed: ' + e.message;
-        status.className = 'status error';
-      }
-    });
+
+      var currentIdx = idx;
+      fileStates[currentIdx].status = 'uploading';
+      renderFileList();
+
+      var formData = new FormData();
+      formData.append('file', pdfFiles[currentIdx]);
+
+      idx++;
+
+      fetch('/api/references/upload', {
+        method: 'POST',
+        body: formData
+      }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) {
+          fileStates[currentIdx].status = 'error';
+          fileStates[currentIdx].message = data.error;
+          failed++;
+        } else {
+          fileStates[currentIdx].status = 'success';
+          fileStates[currentIdx].message = data.uploaded || '';
+          succeeded++;
+        }
+        renderFileList();
+        if (status) {
+          status.textContent = 'Uploading... (' + (succeeded + failed) + '/' + pdfFiles.length + ')';
+          status.className = 'status uploading';
+        }
+        uploadNext();
+      }).catch(function(e) {
+        fileStates[currentIdx].status = 'error';
+        fileStates[currentIdx].message = e.message;
+        failed++;
+        renderFileList();
+        uploadNext();
+      });
+    }
+
+    uploadNext();
   }
 
   window.deleteReference = function(name) {

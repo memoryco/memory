@@ -30,6 +30,9 @@ pub mod source;
 pub mod bootstrap;
 pub mod sanitize;
 
+#[cfg(test)]
+mod harness;
+
 pub use citation::{Citation, SourceMeta};
 pub use error::{ReferenceError, Result};
 pub use extractor::PdfExtractor;
@@ -73,9 +76,11 @@ impl ReferenceManager {
     }
 
     /// Add a reference source from a PDF path.
-    /// Builds the index if it doesn't exist or is outdated.
+    /// Validates the PDF first, then builds the index if it doesn't exist or is outdated.
     pub fn add_source(&mut self, pdf_path: impl AsRef<Path>) -> Result<&str> {
-        let mut source = ReferenceSource::new(pdf_path);
+        let path = pdf_path.as_ref();
+        validate_pdf(path)?;
+        let mut source = ReferenceSource::new(path);
         source.ensure_index(self.extractor.as_ref(), &self.profiles)?;
         let name = source.name().to_string();
         self.sources.insert(name.clone(), source);
@@ -96,6 +101,12 @@ impl ReferenceManager {
             let path = entry.path();
 
             if path.extension().and_then(|s| s.to_str()) == Some("pdf") {
+                // Validate before attempting full ingestion
+                if let Err(e) = validate_pdf(&path) {
+                    eprintln!("Warning: skipping invalid PDF {}: {}", path.display(), e);
+                    continue;
+                }
+
                 match self.add_source(&path) {
                     Ok(name) => loaded.push(name.to_string()),
                     Err(e) => {
@@ -262,5 +273,122 @@ impl ReferenceManager {
 impl Default for ReferenceManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn create_fake_pdf(dir: &Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"%PDF-1.4 fake pdf content").unwrap();
+        path
+    }
+
+    fn create_text_file(dir: &Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"This is not a PDF").unwrap();
+        path
+    }
+
+    #[test]
+    fn add_source_rejects_nonexistent_path() {
+        let mut mgr = ReferenceManager::new();
+        let result = mgr.add_source("/nonexistent/missing.pdf");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ReferenceError::Validation(_)),
+            "expected Validation error, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn add_source_rejects_non_pdf_extension() {
+        let dir = TempDir::new().unwrap();
+        let path = create_text_file(dir.path(), "notes.txt");
+        let mut mgr = ReferenceManager::new();
+        let result = mgr.add_source(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ReferenceError::Validation(_)),
+            "expected Validation error, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn add_source_rejects_invalid_magic_bytes() {
+        let dir = TempDir::new().unwrap();
+        let path = create_text_file(dir.path(), "fake.pdf");
+        let mut mgr = ReferenceManager::new();
+        let result = mgr.add_source(&path);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ReferenceError::Validation(_)),
+            "expected Validation error, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn load_directory_skips_invalid_pdfs() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a file with .pdf extension but invalid magic bytes
+        create_text_file(dir.path(), "bad_magic.pdf");
+
+        // Create a non-pdf file
+        create_text_file(dir.path(), "readme.txt");
+
+        let mut mgr = ReferenceManager::new();
+        let loaded = mgr.load_directory(dir.path()).unwrap();
+        // Neither file should have been loaded
+        assert!(
+            loaded.is_empty(),
+            "expected no sources loaded, got: {:?}",
+            loaded
+        );
+    }
+
+    #[test]
+    fn load_directory_nonexistent_dir_returns_empty() {
+        let mut mgr = ReferenceManager::new();
+        let loaded = mgr.load_directory("/nonexistent/dir").unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn load_directory_empty_dir_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let mut mgr = ReferenceManager::new();
+        let loaded = mgr.load_directory(dir.path()).unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn add_source_valid_fake_pdf_fails_at_extraction_not_validation() {
+        // A file with valid PDF magic bytes but no real structure should
+        // pass validation but fail during extraction/indexing
+        let dir = TempDir::new().unwrap();
+        let path = create_fake_pdf(dir.path(), "valid_header.pdf");
+        let mut mgr = ReferenceManager::new();
+        let result = mgr.add_source(&path);
+        // Should fail at extraction, not validation
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            !matches!(err, ReferenceError::Validation(_)),
+            "should have passed validation but failed later, got: {:?}",
+            err
+        );
     }
 }

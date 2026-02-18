@@ -27,7 +27,7 @@ impl<'a> Indexer<'a> {
 
         if pages.is_empty() {
             return Err(ReferenceError::Extraction(
-                "No text content extracted from PDF".to_string(),
+                "No extractable text (PDF may be scanned images without OCR)".to_string(),
             ));
         }
 
@@ -220,5 +220,111 @@ fn section_type_to_str(st: &SectionType) -> &'static str {
         SectionType::AssociatedFeatures => "associated_features",
         SectionType::Comorbidity => "comorbidity",
         SectionType::Other => "other",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    /// A mock extractor that returns empty pages (simulating a scanned-image PDF).
+    struct EmptyExtractor;
+
+    impl PdfExtractor for EmptyExtractor {
+        fn extract(&self, _path: &Path) -> Result<Vec<PageText>> {
+            Ok(vec![])
+        }
+    }
+
+    /// A mock extractor that returns some pages.
+    struct FakeExtractor {
+        pages: Vec<PageText>,
+    }
+
+    impl PdfExtractor for FakeExtractor {
+        fn extract(&self, _path: &Path) -> Result<Vec<PageText>> {
+            Ok(self.pages.clone())
+        }
+    }
+
+    fn create_fake_pdf(dir: &Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"%PDF-1.4 fake").unwrap();
+        path
+    }
+
+    #[test]
+    fn build_empty_pages_returns_descriptive_error() {
+        let dir = TempDir::new().unwrap();
+        let pdf = create_fake_pdf(dir.path(), "scanned.pdf");
+
+        let extractor = EmptyExtractor;
+        let profiles = ProfileRegistry::new();
+        let indexer = Indexer::new(&extractor, &profiles);
+
+        let result = indexer.build(&pdf);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("scanned images without OCR"),
+            "expected OCR hint in error message, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn build_with_pages_creates_index() {
+        let dir = TempDir::new().unwrap();
+        let pdf = create_fake_pdf(dir.path(), "valid.pdf");
+
+        let extractor = FakeExtractor {
+            pages: vec![PageText {
+                page_number: 1,
+                text: "Hello world, this is some test content.".to_string(),
+            }],
+        };
+        let profiles = ProfileRegistry::new();
+        let indexer = Indexer::new(&extractor, &profiles);
+
+        let result = indexer.build(&pdf);
+        assert!(result.is_ok(), "build failed: {:?}", result.unwrap_err());
+
+        // Index file should exist
+        let idx = index_path_for(&pdf);
+        assert!(idx.exists(), "index file not created");
+    }
+
+    #[test]
+    fn index_is_current_false_when_no_index() {
+        let dir = TempDir::new().unwrap();
+        let pdf = create_fake_pdf(dir.path(), "test.pdf");
+
+        let extractor = EmptyExtractor;
+        let profiles = ProfileRegistry::new();
+        let indexer = Indexer::new(&extractor, &profiles);
+
+        assert!(!indexer.index_is_current(&pdf));
+    }
+
+    #[test]
+    fn index_is_current_true_after_build() {
+        let dir = TempDir::new().unwrap();
+        let pdf = create_fake_pdf(dir.path(), "test.pdf");
+
+        let extractor = FakeExtractor {
+            pages: vec![PageText {
+                page_number: 1,
+                text: "Content for indexing.".to_string(),
+            }],
+        };
+        let profiles = ProfileRegistry::new();
+        let indexer = Indexer::new(&extractor, &profiles);
+
+        indexer.build(&pdf).unwrap();
+        assert!(indexer.index_is_current(&pdf));
     }
 }

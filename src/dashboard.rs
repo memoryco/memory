@@ -462,7 +462,8 @@ fn handle_upload_reference(
         Ok(p) => p,
         Err(e) => {
             let _ = std::fs::remove_file(&temp_path);
-            return json_response(400, &format!(r#"{{"error":"{}"}}"#, e));
+            let msg = friendly_error(&e.to_string());
+            return json_response(400, &format!(r#"{{"error":"{}"}}"#, msg));
         }
     };
 
@@ -485,7 +486,10 @@ fn handle_upload_reference(
             }
             json_ok(&json!({"uploaded": name}))
         }
-        Err(e) => json_response(500, &format!(r#"{{"error":"Failed to index: {}"}}"#, e)),
+        Err(e) => {
+            let msg = friendly_error(&e.to_string());
+            json_response(500, &format!(r#"{{"error":"{}"}}"#, msg))
+        }
     }
 }
 
@@ -560,6 +564,22 @@ fn handle_list_engrams(
     if let Some(q) = search_query {
         if q.is_empty() {
             return list_recent_engrams(&brain, limit, offset, include_archived, include_deep, state_filter);
+        }
+
+        // Direct lookup if the query is a UUID
+        if is_uuid(q) {
+            let engrams: Vec<JsonValue> = uuid::Uuid::parse_str(q)
+                .ok()
+                .and_then(|id| brain.get(&id))
+                .into_iter()
+                .map(|e| engram_to_json(e, None))
+                .collect();
+            let engrams = filter_json_engrams_by_state(engrams, state_filter);
+            return json_ok(&json!({
+                "engrams": engrams,
+                "search": q,
+                "method": "id"
+            }));
         }
 
         // Try semantic search first
@@ -789,6 +809,31 @@ fn handle_graph(
 }
 
 // ---------------------------------------------------------------------------
+// Friendly error mapping
+// ---------------------------------------------------------------------------
+
+/// Map technical reference-upload error messages to user-friendly messages.
+fn friendly_error(technical: &str) -> String {
+    if technical.contains("not a PDF file (missing .pdf extension)") {
+        return "This file doesn't appear to be a PDF".to_string();
+    }
+    if technical.contains("invalid PDF: missing %PDF- magic bytes") {
+        return "This file isn't a valid PDF — it may be corrupted or not actually a PDF".to_string();
+    }
+    if technical.contains("panicked") {
+        return "This PDF couldn't be read — it may be damaged or use unsupported features"
+            .to_string();
+    }
+    if technical.contains("encryption scheme that is not supported") {
+        return "This PDF is encrypted and can't be read".to_string();
+    }
+    if technical.contains("No extractable text") {
+        return "This PDF contains only images — text search isn't available for it".to_string();
+    }
+    technical.to_string()
+}
+
+// ---------------------------------------------------------------------------
 // Multipart parsing
 // ---------------------------------------------------------------------------
 
@@ -949,6 +994,29 @@ fn url_decode(input: &str) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+/// Check if a string looks like a UUID (8-4-4-4-12 hex format).
+fn is_uuid(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        match i {
+            8 | 13 | 18 | 23 => {
+                if b != b'-' {
+                    return false;
+                }
+            }
+            _ => {
+                if !b.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 fn hex_val(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
@@ -985,6 +1053,93 @@ fn truncate_content(content: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Friendly error mapping ────────────────────────────────────────────
+
+    #[test]
+    fn friendly_error_not_a_pdf() {
+        let msg = friendly_error("not a PDF file (missing .pdf extension)");
+        assert_eq!(msg, "This file doesn't appear to be a PDF");
+    }
+
+    #[test]
+    fn friendly_error_invalid_magic_bytes() {
+        let msg = friendly_error("invalid PDF: missing %PDF- magic bytes");
+        assert_eq!(
+            msg,
+            "This file isn't a valid PDF — it may be corrupted or not actually a PDF"
+        );
+    }
+
+    #[test]
+    fn friendly_error_panicked() {
+        let msg = friendly_error("pdf-extract panicked: something went wrong");
+        assert_eq!(
+            msg,
+            "This PDF couldn't be read — it may be damaged or use unsupported features"
+        );
+    }
+
+    #[test]
+    fn friendly_error_panicked_sanitize() {
+        let msg = friendly_error("sanitize_filename panicked: unexpected input");
+        assert_eq!(
+            msg,
+            "This PDF couldn't be read — it may be damaged or use unsupported features"
+        );
+    }
+
+    #[test]
+    fn friendly_error_panicked_indexer() {
+        let msg = friendly_error("indexer panicked: thread error");
+        assert_eq!(
+            msg,
+            "This PDF couldn't be read — it may be damaged or use unsupported features"
+        );
+    }
+
+    #[test]
+    fn friendly_error_encryption() {
+        let msg = friendly_error(
+            "pdf-extract: encryption scheme that is not supported by this library",
+        );
+        assert_eq!(msg, "This PDF is encrypted and can't be read");
+    }
+
+    #[test]
+    fn friendly_error_no_extractable_text() {
+        let msg =
+            friendly_error("No extractable text (PDF may be scanned images without OCR)");
+        assert_eq!(
+            msg,
+            "This PDF contains only images — text search isn't available for it"
+        );
+    }
+
+    #[test]
+    fn friendly_error_passthrough_unknown() {
+        let msg = friendly_error("some unknown error happened");
+        assert_eq!(msg, "some unknown error happened");
+    }
+
+    #[test]
+    fn friendly_error_passthrough_io() {
+        let msg = friendly_error("IO error: permission denied");
+        assert_eq!(msg, "IO error: permission denied");
+    }
+
+    #[test]
+    fn friendly_error_not_pdf_embedded_in_longer_message() {
+        // The error might be wrapped in a larger message
+        let msg = friendly_error("Validation failed: not a PDF file (missing .pdf extension)");
+        assert_eq!(msg, "This file doesn't appear to be a PDF");
+    }
+
+    #[test]
+    fn friendly_error_empty_string() {
+        let msg = friendly_error("");
+        assert_eq!(msg, "");
+    }
 
     // ── Multipart parsing ──────────────────────────────────────────────────
 

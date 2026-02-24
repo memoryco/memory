@@ -11,6 +11,7 @@ diesel::table! {
         created_at -> BigInt,
         last_activated -> BigInt,
         co_activation_count -> BigInt,
+        ordinal -> Nullable<Integer>,
     }
 }
 

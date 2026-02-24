@@ -303,14 +303,14 @@ impl Substrate {
     }
     
     /// Manually create an association between two engrams
-    pub fn associate(&mut self, from: EngramId, to: EngramId, weight: f64) {
-        let assoc = Association::with_weight(from, to, weight);
-        
+    pub fn associate(&mut self, from: EngramId, to: EngramId, weight: f64, ordinal: Option<u32>) {
+        let assoc = Association::with_ordinal(from, to, weight, ordinal);
+
         self.associations
             .entry(from)
             .or_insert_with(Vec::new)
             .push(assoc);
-        
+
         self.reverse_associations
             .entry(to)
             .or_insert_with(Vec::new)
@@ -856,8 +856,8 @@ mod tests {
         let a = substrate.create("memory A");
         let b = substrate.create("memory B");
         
-        substrate.associate(a, b, 0.8);
-        
+        substrate.associate(a, b, 0.8, None);
+
         let assocs = substrate.associations_from(&a).unwrap();
         assert_eq!(assocs.len(), 1);
         assert_eq!(assocs[0].to, b);
@@ -874,8 +874,8 @@ mod tests {
         substrate.get_mut(&b).unwrap().energy = 0.5;
         
         // Create strong association A -> B
-        substrate.associate(a, b, 0.8);
-        
+        substrate.associate(a, b, 0.8, None);
+
         // Stimulate A
         let result = substrate.stimulate(a, 1.0);
         
@@ -1144,9 +1144,9 @@ mod tests {
         let b = substrate.create("Memory B");
         let c = substrate.create("Memory C");
         
-        substrate.associate(a, b, 0.8);
-        substrate.associate(a, c, 0.5);
-        
+        substrate.associate(a, b, 0.8, None);
+        substrate.associate(a, c, 0.5, None);
+
         let associated = substrate.find_associated(&a);
         
         assert_eq!(associated.len(), 2);

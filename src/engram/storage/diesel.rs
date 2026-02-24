@@ -151,22 +151,49 @@ impl EngramStorage {
             #[diesel(sql_type = diesel::sql_types::Integer)]
             cnt: i32,
         }
-        
+
         let result: Result<CountResult, _> = diesel::sql_query(
             "SELECT COUNT(*) as cnt FROM pragma_table_info('engrams') WHERE name = 'embedding'"
         )
         .get_result(&mut self.conn);
-        
+
         let has_embedding = match result {
             Ok(r) => r.cnt > 0,
             Err(_) => false,
         };
-        
+
         if !has_embedding {
             self.conn.batch_execute("ALTER TABLE engrams ADD COLUMN embedding BLOB")
                 .map_err(|e| StorageError::Database(e.to_string()))?;
         }
-        
+
+        Ok(())
+    }
+
+    /// Migrate existing database to add ordinal column to associations if missing (SQLite)
+    #[cfg(feature = "sqlite")]
+    fn migrate_association_ordinal(&mut self) -> StorageResult<()> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let result: Result<CountResult, _> = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('associations') WHERE name = 'ordinal'"
+        )
+        .get_result(&mut self.conn);
+
+        let has_ordinal = match result {
+            Ok(r) => r.cnt > 0,
+            Err(_) => false,
+        };
+
+        if !has_ordinal {
+            self.conn.batch_execute("ALTER TABLE associations ADD COLUMN ordinal INTEGER")
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+
         Ok(())
     }
 }
@@ -176,6 +203,7 @@ impl Storage for EngramStorage {
     fn initialize(&mut self) -> StorageResult<()> {
         self.create_schema()?;
         self.migrate_embeddings()?;
+        self.migrate_association_ordinal()?;
         Ok(())
     }
     
@@ -379,7 +407,7 @@ impl Storage for EngramStorage {
     fn save_association(&mut self, assoc: &Association) -> StorageResult<()> {
         let from_str = assoc.from.to_string();
         let to_str = assoc.to.to_string();
-        
+
         diesel::replace_into(associations::table)
             .values(NewAssociation {
                 from_id: &from_str,
@@ -388,18 +416,19 @@ impl Storage for EngramStorage {
                 created_at: assoc.created_at,
                 last_activated: assoc.last_activated,
                 co_activation_count: assoc.co_activation_count as i64,
+                ordinal: assoc.ordinal.map(|v| v as i32),
             })
             .execute(&mut self.conn)?;
-        
+
         Ok(())
     }
-    
+
     fn save_associations(&mut self, assocs: &[&Association]) -> StorageResult<()> {
         self.conn.transaction::<_, diesel::result::Error, _>(|conn| {
             for assoc in assocs {
                 let from_str = assoc.from.to_string();
                 let to_str = assoc.to.to_string();
-                
+
                 diesel::replace_into(associations::table)
                     .values(NewAssociation {
                         from_id: &from_str,
@@ -408,12 +437,13 @@ impl Storage for EngramStorage {
                         created_at: assoc.created_at,
                         last_activated: assoc.last_activated,
                         co_activation_count: assoc.co_activation_count as i64,
+                        ordinal: assoc.ordinal.map(|v| v as i32),
                     })
                     .execute(conn)?;
             }
             Ok(())
         })?;
-        
+
         Ok(())
     }
     
@@ -743,36 +773,200 @@ mod tests {
     #[test]
     fn brain_with_diesel() {
         use crate::engram::Brain;
-        
+
         // Create a brain with Diesel backend
         let storage = EngramStorage::in_memory().unwrap();
         let mut brain = Brain::open(storage).unwrap();
-        
+
         // Create some memories
         let rust_talk = brain.create_with_tags(
             "Discussed Rust FFI patterns",
             vec!["work".into(), "rust".into()]
         ).unwrap();
-        
+
         let ffi_fact = brain.create_with_tags(
             "TwilioDataCore uses opaque handles",
             vec!["work".into(), "technical".into()]
         ).unwrap();
-        
+
         // Create association
         brain.associate(rust_talk, ffi_fact, 0.8).unwrap();
-        
+
         // Recall a memory
         let result = brain.recall(rust_talk).unwrap();
         assert!(result.found());
         assert_eq!(result.content(), Some("Discussed Rust FFI patterns"));
-        
+
         // Find associated
         let associated = brain.find_associated(&rust_talk);
         assert_eq!(associated.len(), 1);
-        
+
         // Stats
         let stats = brain.stats();
         assert_eq!(stats.total_engrams, 2);
+    }
+
+    // ==================
+    // ORDINAL TESTS
+    // ==================
+
+    #[test]
+    fn migration_adds_ordinal_column() {
+        // Fresh DB should have ordinal column after initialize
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Verify by saving an association with ordinal
+        let e1 = Engram::new("Step 1");
+        let e2 = Engram::new("Step 2");
+        let assoc = Association::with_ordinal(e1.id, e2.id, 0.8, Some(1));
+
+        storage.save_association(&assoc).unwrap();
+        let loaded = storage.load_associations_from(&e1.id).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].ordinal, Some(1));
+    }
+
+    #[test]
+    fn ordinal_roundtrip_with_value() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Anchor");
+        let e2 = Engram::new("Step 1");
+        let e3 = Engram::new("Step 2");
+        let e4 = Engram::new("Step 3");
+
+        let a1 = Association::with_ordinal(e1.id, e2.id, 0.9, Some(1));
+        let a2 = Association::with_ordinal(e1.id, e3.id, 0.9, Some(2));
+        let a3 = Association::with_ordinal(e1.id, e4.id, 0.9, Some(3));
+
+        storage.save_association(&a1).unwrap();
+        storage.save_association(&a2).unwrap();
+        storage.save_association(&a3).unwrap();
+
+        let loaded = storage.load_associations_from(&e1.id).unwrap();
+        assert_eq!(loaded.len(), 3);
+
+        // Verify each ordinal value survived roundtrip
+        let ordinals: Vec<Option<u32>> = loaded.iter().map(|a| a.ordinal).collect();
+        assert!(ordinals.contains(&Some(1)));
+        assert!(ordinals.contains(&Some(2)));
+        assert!(ordinals.contains(&Some(3)));
+    }
+
+    #[test]
+    fn ordinal_roundtrip_null() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Memory A");
+        let e2 = Engram::new("Memory B");
+
+        // Legacy association without ordinal
+        let assoc = Association::with_weight(e1.id, e2.id, 0.7);
+        assert_eq!(assoc.ordinal, None);
+
+        storage.save_association(&assoc).unwrap();
+        let loaded = storage.load_associations_from(&e1.id).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].ordinal, None);
+    }
+
+    #[test]
+    fn mixed_ordinal_and_null_associations() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let anchor = Engram::new("Procedure anchor");
+        let step1 = Engram::new("Step 1");
+        let step2 = Engram::new("Step 2");
+        let related = Engram::new("Related note");
+
+        // Ordered chain
+        let a1 = Association::with_ordinal(anchor.id, step1.id, 0.9, Some(1));
+        let a2 = Association::with_ordinal(anchor.id, step2.id, 0.9, Some(2));
+        // Unordered (Hebbian-style)
+        let a3 = Association::with_weight(anchor.id, related.id, 0.4);
+
+        storage.save_association(&a1).unwrap();
+        storage.save_association(&a2).unwrap();
+        storage.save_association(&a3).unwrap();
+
+        let loaded = storage.load_associations_from(&anchor.id).unwrap();
+        assert_eq!(loaded.len(), 3);
+
+        // Check that we have both ordinal and null associations
+        let with_ordinal: Vec<_> = loaded.iter().filter(|a| a.ordinal.is_some()).collect();
+        let without_ordinal: Vec<_> = loaded.iter().filter(|a| a.ordinal.is_none()).collect();
+        assert_eq!(with_ordinal.len(), 2);
+        assert_eq!(without_ordinal.len(), 1);
+        assert_eq!(without_ordinal[0].to, related.id);
+    }
+
+    #[test]
+    fn ordinal_chain_five_steps() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let anchor = Engram::new("Deploy procedure");
+        let steps: Vec<Engram> = (1..=5)
+            .map(|i| Engram::new(format!("Step {}", i)))
+            .collect();
+
+        for (i, step) in steps.iter().enumerate() {
+            let assoc = Association::with_ordinal(
+                anchor.id, step.id, 0.9, Some((i + 1) as u32)
+            );
+            storage.save_association(&assoc).unwrap();
+        }
+
+        let loaded = storage.load_associations_from(&anchor.id).unwrap();
+        assert_eq!(loaded.len(), 5);
+
+        // Verify all ordinals 1-5 are present
+        let mut ordinals: Vec<u32> = loaded.iter()
+            .filter_map(|a| a.ordinal)
+            .collect();
+        ordinals.sort();
+        assert_eq!(ordinals, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn ordinal_survives_batch_save() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("A");
+        let e2 = Engram::new("B");
+        let e3 = Engram::new("C");
+
+        let a1 = Association::with_ordinal(e1.id, e2.id, 0.8, Some(1));
+        let a2 = Association::with_ordinal(e1.id, e3.id, 0.8, Some(2));
+
+        storage.save_associations(&[&a1, &a2]).unwrap();
+
+        let loaded = storage.load_associations_from(&e1.id).unwrap();
+        assert_eq!(loaded.len(), 2);
+
+        let ordinals: Vec<Option<u32>> = loaded.iter().map(|a| a.ordinal).collect();
+        assert!(ordinals.contains(&Some(1)));
+        assert!(ordinals.contains(&Some(2)));
+    }
+
+    #[test]
+    fn load_all_associations_includes_ordinal() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("X");
+        let e2 = Engram::new("Y");
+
+        let assoc = Association::with_ordinal(e1.id, e2.id, 0.7, Some(42));
+        storage.save_association(&assoc).unwrap();
+
+        let all = storage.load_all_associations().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].ordinal, Some(42));
     }
 }

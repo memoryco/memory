@@ -199,15 +199,26 @@ impl Brain {
     
     /// Create an explicit association between memories
     pub fn associate(&mut self, from: EngramId, to: EngramId, weight: f64) -> StorageResult<()> {
-        self.substrate.associate(from, to, weight);
-        
+        self.associate_with_ordinal(from, to, weight, None)
+    }
+
+    /// Create an explicit association with optional ordinal (for ordered chains)
+    pub fn associate_with_ordinal(
+        &mut self,
+        from: EngramId,
+        to: EngramId,
+        weight: f64,
+        ordinal: Option<u32>,
+    ) -> StorageResult<()> {
+        self.substrate.associate(from, to, weight, ordinal);
+
         // Persist the association
         if let Some(assocs) = self.substrate.associations_from(&from) {
             if let Some(assoc) = assocs.iter().find(|a| a.to == to) {
                 self.storage.save_association(assoc)?;
             }
         }
-        
+
         Ok(())
     }
     
@@ -1266,5 +1277,114 @@ mod tests {
         // Depth is capped at 5
         assert!(brain.configure("search_association_depth", 10.0).unwrap());
         assert_eq!(brain.config().search_association_depth, 5);
+    }
+
+    // ==================
+    // ORDINAL TESTS
+    // ==================
+
+    #[test]
+    fn associate_without_ordinal_backward_compat() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        let a = brain.create("Memory A").unwrap();
+        let b = brain.create("Memory B").unwrap();
+
+        // Old-style associate() should still work perfectly
+        brain.associate(a, b, 0.8).unwrap();
+
+        let assocs = brain.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].ordinal, None);
+        assert!((assocs[0].weight - 0.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn associate_with_ordinal() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        let anchor = brain.create("Deploy procedure").unwrap();
+        let step1 = brain.create("Pull latest code").unwrap();
+        let step2 = brain.create("Run tests").unwrap();
+        let step3 = brain.create("Deploy to staging").unwrap();
+
+        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+        brain.associate_with_ordinal(anchor, step2, 0.9, Some(2)).unwrap();
+        brain.associate_with_ordinal(anchor, step3, 0.9, Some(3)).unwrap();
+
+        let assocs = brain.associations_from(&anchor).unwrap();
+        assert_eq!(assocs.len(), 3);
+
+        // Verify ordinals
+        let mut ordinals: Vec<u32> = assocs.iter().filter_map(|a| a.ordinal).collect();
+        ordinals.sort();
+        assert_eq!(ordinals, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn ordinal_persists_through_diesel() {
+        // Test ordinal roundtrip through actual SQLite storage
+        use super::super::storage::EngramStorage;
+
+        let storage = EngramStorage::in_memory().unwrap();
+        let mut brain = Brain::open(storage).unwrap();
+
+        let a = brain.create("Anchor").unwrap();
+        let b = brain.create("Step 1").unwrap();
+
+        brain.associate_with_ordinal(a, b, 0.8, Some(5)).unwrap();
+
+        let assocs = brain.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].ordinal, Some(5));
+    }
+
+    #[test]
+    fn mixed_ordinal_and_hebbian_associations() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        let anchor = brain.create("Procedure anchor").unwrap();
+        let step1 = brain.create("Step 1").unwrap();
+        let related = brain.create("Related note").unwrap();
+
+        // Ordered chain step
+        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+        // Unordered association (like Hebbian would create)
+        brain.associate(anchor, related, 0.4).unwrap();
+
+        let assocs = brain.associations_from(&anchor).unwrap();
+        assert_eq!(assocs.len(), 2);
+
+        let ordered: Vec<_> = assocs.iter().filter(|a| a.ordinal.is_some()).collect();
+        let unordered: Vec<_> = assocs.iter().filter(|a| a.ordinal.is_none()).collect();
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(unordered.len(), 1);
+        assert_eq!(ordered[0].ordinal, Some(1));
+    }
+
+    #[test]
+    fn ordinal_survives_prune_weak_associations() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        let anchor = brain.create("Procedure").unwrap();
+        let step1 = brain.create("Strong step").unwrap();
+        let weak = brain.create("Weak association").unwrap();
+
+        // Strong ordered step
+        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+        // Weak unordered association (below default min_association_weight)
+        brain.associate(anchor, weak, 0.01).unwrap();
+
+        let pruned = brain.prune_weak_associations().unwrap();
+        assert_eq!(pruned, 1); // Only the weak one should be pruned
+
+        let assocs = brain.associations_from(&anchor).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].ordinal, Some(1));
+        assert_eq!(assocs[0].to, step1);
     }
 }

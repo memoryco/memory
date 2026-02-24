@@ -17,22 +17,27 @@ fn now_unix() -> i64 {
 pub struct Association {
     /// Source engram
     pub from: EngramId,
-    
+
     /// Target engram
     pub to: EngramId,
-    
+
     /// Strength of the association (0.0 - 1.0)
     /// Strengthens with co-activation (Hebbian learning)
     pub weight: f64,
-    
+
     /// When this association was formed (unix timestamp)
     pub created_at: i64,
-    
+
     /// When this association was last activated (unix timestamp)
     pub last_activated: i64,
-    
+
     /// Number of times both engrams were co-accessed
     pub co_activation_count: u64,
+
+    /// Position in an ordered chain (e.g., procedure steps).
+    /// None = unordered (legacy/Hebbian association).
+    /// Some(n) = position in a sequence.
+    pub ordinal: Option<u32>,
 }
 
 impl Association {
@@ -46,13 +51,21 @@ impl Association {
             created_at: now,
             last_activated: now,
             co_activation_count: 0,
+            ordinal: None,
         }
     }
-    
+
     /// Create an association with a specific initial weight
     pub fn with_weight(from: EngramId, to: EngramId, weight: f64) -> Self {
         let mut assoc = Self::new(from, to);
         assoc.weight = weight.clamp(0.0, 1.0);
+        assoc
+    }
+
+    /// Create an association with weight and ordinal (for ordered chains)
+    pub fn with_ordinal(from: EngramId, to: EngramId, weight: f64, ordinal: Option<u32>) -> Self {
+        let mut assoc = Self::with_weight(from, to, weight);
+        assoc.ordinal = ordinal;
         assoc
     }
     
@@ -128,10 +141,64 @@ mod tests {
         let a = Uuid::new_v4();
         let b = Uuid::new_v4();
         let assoc = Association::with_weight(a, b, 0.8);
-        
+
         let energy = assoc.propagation_energy(1.0, 0.5);
-        
+
         // 1.0 * 0.8 * 0.5 = 0.4
         assert!((energy - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn new_association_has_no_ordinal() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let assoc = Association::new(a, b);
+        assert_eq!(assoc.ordinal, None);
+    }
+
+    #[test]
+    fn with_weight_has_no_ordinal() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let assoc = Association::with_weight(a, b, 0.7);
+        assert_eq!(assoc.ordinal, None);
+    }
+
+    #[test]
+    fn with_ordinal_sets_position() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let assoc = Association::with_ordinal(a, b, 0.8, Some(3));
+        assert_eq!(assoc.ordinal, Some(3));
+        assert!((assoc.weight - 0.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn with_ordinal_none_is_unordered() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let assoc = Association::with_ordinal(a, b, 0.5, None);
+        assert_eq!(assoc.ordinal, None);
+    }
+
+    #[test]
+    fn strengthen_preserves_ordinal() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let mut assoc = Association::with_ordinal(a, b, 0.5, Some(2));
+        assoc.strengthen(0.2);
+        // Ordinal should not change — it's structural metadata
+        assert_eq!(assoc.ordinal, Some(2));
+        assert!((assoc.weight - 0.7).abs() < 0.001);
+    }
+
+    #[test]
+    fn weaken_preserves_ordinal() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let mut assoc = Association::with_ordinal(a, b, 0.8, Some(5));
+        assoc.weaken(0.3);
+        assert_eq!(assoc.ordinal, Some(5));
+        assert!((assoc.weight - 0.5).abs() < 0.001);
     }
 }

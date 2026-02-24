@@ -16,6 +16,8 @@ struct Args {
     to: String,
     #[serde(default)]
     weight: Option<f64>,
+    #[serde(default)]
+    ordinal: Option<u32>,
 }
 
 impl Tool<Context> for EngramAssociateTool {
@@ -43,6 +45,12 @@ impl Tool<Context> for EngramAssociateTool {
                 "weight": {
                     "type": "number",
                     "description": "Association strength (0.0-1.0). Default: 0.5"
+                },
+                "ordinal": {
+                    "type": "integer",
+                    "description": "Position in an ordered chain (e.g., procedure steps). \
+                     Use ordinal to create ordered chains — step 1, step 2, etc. \
+                     Omit for unordered associations."
                 }
             },
             "required": ["from", "to"]
@@ -64,15 +72,21 @@ impl Tool<Context> for EngramAssociateTool {
             .map_err(|e| McpError::InvalidParams(format!("Invalid 'to' UUID: {}", e)))?;
 
         let weight = args.weight.unwrap_or(0.5);
+        let ordinal = args.ordinal;
 
         let mut brain = context.brain.lock().unwrap();
 
-        brain.associate(from, to, weight)
+        brain.associate_with_ordinal(from, to, weight, ordinal)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
+        let ordinal_str = match ordinal {
+            Some(n) => format!(", ordinal: {}", n),
+            None => String::new(),
+        };
+
         Ok(text_response(format!(
-            "Association created: {} → {} (weight: {:.2})",
-            from, to, weight
+            "Association created: {} → {} (weight: {:.2}{})",
+            from, to, weight, ordinal_str
         )))
     }
 }

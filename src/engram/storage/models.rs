@@ -60,6 +60,7 @@ pub struct AssociationRow {
     pub created_at: i64,
     pub last_activated: i64,
     pub co_activation_count: i64,
+    pub ordinal: Option<i32>,
 }
 
 /// Insertable association (INSERT/REPLACE)
@@ -72,6 +73,7 @@ pub struct NewAssociation<'a> {
     pub created_at: i64,
     pub last_activated: i64,
     pub co_activation_count: i64,
+    pub ordinal: Option<i32>,
 }
 
 // ============================================================================
@@ -194,6 +196,7 @@ impl AssociationRow {
             created_at: self.created_at,
             last_activated: self.last_activated,
             co_activation_count: self.co_activation_count as u64,
+            ordinal: self.ordinal.map(|v| v as u32),
         })
     }
 }

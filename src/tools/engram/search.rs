@@ -87,6 +87,10 @@ impl Tool<Context> for EngramSearchTool {
         let _ = brain.apply_time_decay();
         let _ = brain.sync_from_storage();
 
+        // Read config for association-following
+        let follow_associations = brain.config().search_follow_associations;
+        let association_depth = brain.config().search_association_depth;
+
         // Generate query embedding
         let generator = EmbeddingGenerator::new();
         let query_embedding = generator.generate(&args.query)
@@ -109,7 +113,7 @@ impl Tool<Context> for EngramSearchTool {
 
         let mut scored: Vec<ScoredResult> = vector_results.iter().filter_map(|r| {
             let engram = brain.get_or_load(&r.id)?;
-            
+
             // State filter
             let state_ok = if include_archived {
                 true
@@ -119,9 +123,9 @@ impl Tool<Context> for EngramSearchTool {
                 engram.is_searchable()
             };
             if !state_ok { return None; }
-            
+
             let blended = r.score * 0.7 + (engram.energy as f32) * 0.3;
-            
+
             Some(ScoredResult {
                 id: r.id,
                 content: r.content.clone(),
@@ -134,7 +138,68 @@ impl Tool<Context> for EngramSearchTool {
 
         // Sort by blended score descending
         scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
-        
+
+        // Association-following: discover related memories via associations
+        let mut association_discovery_count: usize = 0;
+        let mut association_merged_count: usize = 0;
+        if follow_associations && association_depth > 0 && !scored.is_empty() {
+            use std::collections::HashSet;
+
+            let seed_ids: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
+            let mut seen_ids: HashSet<uuid::Uuid> = seed_ids.iter().copied().collect();
+
+            let discoveries = brain.discover_associated_memories(
+                &query_embedding,
+                &seed_ids,
+                &mut seen_ids,
+                association_depth,
+            ).map_err(|e| McpError::ToolError(format!("Association discovery failed: {}", e)))?;
+
+            // Cap discoveries to avoid swamping vector results
+            association_discovery_count = discoveries.len();
+            let capped: Vec<_> = {
+                let mut sorted = discoveries;
+                sorted.sort_by(|a, b| b.blended_score.partial_cmp(&a.blended_score).unwrap_or(std::cmp::Ordering::Equal));
+                sorted.into_iter().take(5).collect()
+            };
+
+            // Merge discovered memories into scored results
+            for d in capped {
+                let engram = match brain.get_or_load(&d.id) {
+                    Some(e) => e,
+                    None => continue,
+                };
+
+                // State filter (same as above)
+                let state_ok = if include_archived {
+                    true
+                } else if include_deep {
+                    !engram.is_archived()
+                } else {
+                    engram.is_searchable()
+                };
+                if !state_ok { continue; }
+
+                scored.push(ScoredResult {
+                    id: d.id,
+                    content: engram.content.clone(),
+                    similarity: d.similarity,
+                    energy: d.energy,
+                    blended: d.blended_score,
+                    state_emoji: engram.state.emoji(),
+                });
+            }
+
+            // Re-sort after merging
+            scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
+
+            association_merged_count = association_discovery_count.min(5);
+
+            // Log discovery stats for visibility
+            eprintln!("[search] association-following: {} discovered, {} merged (cap: 5, depth: {})",
+                association_discovery_count, association_merged_count, association_depth);
+        }
+
         // Limit results
         scored.truncate(limit);
 
@@ -154,8 +219,13 @@ impl Tool<Context> for EngramSearchTool {
              💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
              ---\n\n"
         );
-        output.push_str(&format!("Found {} memories:\n\n", scored.len()));
-        
+        if association_merged_count > 0 {
+            output.push_str(&format!("Found {} memories ({} via associations, {} total discovered):\n\n",
+                scored.len(), association_merged_count, association_discovery_count));
+        } else {
+            output.push_str(&format!("Found {} memories:\n\n", scored.len()));
+        }
+
         for r in &scored {
             output.push_str(&format!(
                 "ID: {}\nContent: {}\nScore: {:.2} (sim: {:.2}, energy: {:.2}) | State: {}\n\n",

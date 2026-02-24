@@ -39,13 +39,17 @@ impl Tool<Context> for ConfigGetTool {
              decay_interval_hours: {:.1} (minimum hours between decay checks)\n\
              propagation_damping: {:.2} (signal reduction to neighbors)\n\
              hebbian_learning_rate: {:.2} (association strength on co-access)\n\
-             recall_strength: {:.2} (energy boost when recalling)",
+             recall_strength: {:.2} (energy boost when recalling)\n\
+             search_follow_associations: {} (follow associations during search)\n\
+             search_association_depth: {} (hops to follow)",
             config.decay_rate_per_day,
             config.decay_rate_per_day * 100.0,
             config.decay_interval_hours,
             config.propagation_damping,
             config.hebbian_learning_rate,
-            config.recall_strength
+            config.recall_strength,
+            config.search_follow_associations,
+            config.search_association_depth
         );
 
         Ok(text_response(output))

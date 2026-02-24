@@ -24,7 +24,7 @@ pub use association::Association;
 pub use storage::{Storage, StorageResult, SimilarityResult};
 #[cfg(test)]
 pub use storage::memory::MemoryStorage;
-pub use brain::Brain;
+pub use brain::{Brain, AssociationDiscovery};
 
 // Re-export identity types from the identity module for backwards compatibility
 pub use crate::identity::{Identity};
@@ -74,6 +74,16 @@ pub struct Config {
     /// Associations below this threshold are pruned on startup
     #[serde(default = "default_min_association_weight")]
     pub min_association_weight: f64,
+
+    /// Whether search should follow associations after the initial vector pass
+    /// to discover related memories that vector search alone would miss
+    #[serde(default = "default_search_follow_associations")]
+    pub search_follow_associations: bool,
+
+    /// How many hops to follow when search_follow_associations is true
+    /// 1 = direct associations only, 2 = friends-of-friends, etc.
+    #[serde(default = "default_search_association_depth")]
+    pub search_association_depth: u8,
 }
 
 fn default_max_tag_cardinality() -> usize {
@@ -86,6 +96,14 @@ fn default_association_decay_rate() -> f64 {
 
 fn default_min_association_weight() -> f64 {
     0.05  // Prune associations below 5%
+}
+
+fn default_search_follow_associations() -> bool {
+    true  // Enabled by default
+}
+
+fn default_search_association_depth() -> u8 {
+    1  // Direct associations only
 }
 
 impl Default for Config {
@@ -108,6 +126,8 @@ impl Default for Config {
             max_tag_cardinality: 20,      // Warn if tag on >20 memories
             association_decay_rate: 1.0,  // Same decay rate as memories
             min_association_weight: 0.05, // Prune below 5%
+            search_follow_associations: true, // Enabled by default (depth 1, cap 5)
+            search_association_depth: 1,  // Direct associations only
         }
     }
 }

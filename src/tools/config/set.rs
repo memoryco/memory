@@ -22,7 +22,8 @@ impl Tool<Context> for ConfigSetTool {
 
     fn description(&self) -> &str {
         "Update a configuration value. Keys: decay_rate_per_day, decay_interval_hours, \
-         propagation_damping, hebbian_learning_rate, recall_strength"
+         propagation_damping, hebbian_learning_rate, recall_strength, \
+         search_follow_associations, search_association_depth"
     }
 
     fn schema(&self) -> JsonValue {
@@ -36,7 +37,9 @@ impl Tool<Context> for ConfigSetTool {
                         "decay_interval_hours",
                         "propagation_damping",
                         "hebbian_learning_rate",
-                        "recall_strength"
+                        "recall_strength",
+                        "search_follow_associations",
+                        "search_association_depth"
                     ],
                     "description": "Configuration key to update."
                 },

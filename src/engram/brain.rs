@@ -8,6 +8,8 @@
 
 use std::path::PathBuf;
 
+use std::collections::HashSet;
+
 use super::{
     EngramId, Engram, Config, Association,
     Identity,
@@ -509,6 +511,8 @@ impl Brain {
             "propagation_damping" => { config.propagation_damping = value; true }
             "hebbian_learning_rate" => { config.hebbian_learning_rate = value; true }
             "recall_strength" => { config.recall_strength = value; true }
+            "search_follow_associations" => { config.search_follow_associations = value != 0.0; true }
+            "search_association_depth" => { config.search_association_depth = (value as u8).max(0).min(5); true }
             _ => false,
         };
         
@@ -549,6 +553,89 @@ impl Brain {
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
         self.storage.find_similar_by_embedding(query_embedding, limit, min_score)
+    }
+
+    /// Discover memories reachable via associations from the given seed IDs.
+    ///
+    /// This is a read-only operation: no stimulation, no Hebbian learning, no energy changes.
+    /// For each discovered memory not already in `seen_ids`, looks up its embedding,
+    /// computes cosine similarity against query_embedding, and returns a scored result.
+    ///
+    /// Returns a vec of (id, blended_score, similarity, association_weight) for discovered memories.
+    /// The caller is responsible for merging these into the final result set.
+    pub fn discover_associated_memories(
+        &mut self,
+        query_embedding: &[f32],
+        seed_ids: &[EngramId],
+        seen_ids: &mut HashSet<EngramId>,
+        depth: u8,
+    ) -> StorageResult<Vec<AssociationDiscovery>> {
+        use crate::embedding::cosine_similarity;
+
+        const MIN_ASSOCIATION_WEIGHT: f64 = 0.15;
+        const ASSOCIATION_BONUS_FACTOR: f64 = 0.1;
+
+        if depth == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut all_discoveries: Vec<AssociationDiscovery> = Vec::new();
+        let mut frontier: Vec<EngramId> = seed_ids.to_vec();
+
+        for _hop in 0..depth {
+            let mut next_frontier: Vec<EngramId> = Vec::new();
+
+            // Collect all candidate (target_id, association_weight) pairs from frontier
+            let mut candidates: Vec<(EngramId, f64)> = Vec::new();
+            for seed_id in &frontier {
+                if let Some(assocs) = self.substrate.associations_from(seed_id) {
+                    for assoc in assocs {
+                        if assoc.weight >= MIN_ASSOCIATION_WEIGHT && !seen_ids.contains(&assoc.to) {
+                            candidates.push((assoc.to, assoc.weight));
+                            seen_ids.insert(assoc.to);
+                        }
+                    }
+                }
+            }
+
+            if candidates.is_empty() {
+                break;
+            }
+
+            // For each candidate, look up embedding and score against query
+            for (candidate_id, assoc_weight) in candidates {
+                let embedding = match self.storage.get_embedding(&candidate_id)? {
+                    Some(emb) => emb,
+                    None => continue,
+                };
+
+                let similarity = cosine_similarity(query_embedding, &embedding);
+
+                // Get energy from substrate (or load from storage if cross-process)
+                let energy = match self.get_or_load(&candidate_id) {
+                    Some(engram) => engram.energy,
+                    None => continue,
+                };
+
+                // Blended score: same formula as search + association bonus
+                let blended = (similarity * 0.7) + (energy as f32 * 0.3)
+                    + (assoc_weight as f32 * ASSOCIATION_BONUS_FACTOR as f32);
+
+                all_discoveries.push(AssociationDiscovery {
+                    id: candidate_id,
+                    similarity,
+                    energy,
+                    blended_score: blended,
+                    association_weight: assoc_weight,
+                });
+
+                next_frontier.push(candidate_id);
+            }
+
+            frontier = next_frontier;
+        }
+
+        Ok(all_discoveries)
     }
     
     /// Count engrams that have embeddings
@@ -666,6 +753,16 @@ impl Brain {
     pub fn all_engrams(&self) -> impl Iterator<Item = &Engram> {
         self.substrate.all_engrams()
     }
+}
+
+/// A memory discovered via association-following during search
+#[derive(Debug, Clone)]
+pub struct AssociationDiscovery {
+    pub id: EngramId,
+    pub similarity: f32,
+    pub energy: f64,
+    pub blended_score: f32,
+    pub association_weight: f64,
 }
 
 #[cfg(test)]
@@ -878,20 +975,296 @@ mod tests {
     #[test]
     fn count_engrams_storage() {
         use super::super::storage::EngramStorage;
-        
+
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("brain.db");
-        
+
         let mut storage = EngramStorage::open(&db_path).unwrap();
         storage.initialize().unwrap();
-        
+
         assert_eq!(storage.count_engrams().unwrap(), 0);
-        
+
         let e1 = Engram::new("first");
         let e2 = Engram::new("second");
         storage.save_engram(&e1).unwrap();
         storage.save_engram(&e2).unwrap();
-        
+
         assert_eq!(storage.count_engrams().unwrap(), 2);
+    }
+
+    // ==================
+    // ASSOCIATION-FOLLOWING SEARCH TESTS
+    // ==================
+
+    /// Helper: create a Brain backed by in-memory SQLite (supports embeddings)
+    fn brain_with_sqlite() -> Brain {
+        use super::super::storage::EngramStorage;
+        let storage = EngramStorage::in_memory().unwrap();
+        Brain::new(storage).unwrap()
+    }
+
+    #[test]
+    fn association_following_disabled_returns_no_discoveries() {
+        let mut brain = brain_with_sqlite();
+
+        // Create two engrams with embeddings
+        let id_a = brain.create("Rust programming language").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Rust borrow checker rules").unwrap();
+        brain.set_embedding(&id_b, &[0.1, 0.9, 0.0]).unwrap();
+
+        // Create a strong association A -> B
+        brain.associate(id_a, id_b, 0.8).unwrap();
+
+        // With config disabled (default), discover_associated_memories still works
+        // when called directly, but the search tool won't call it.
+        // Test that depth=0 returns nothing:
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id_a);
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen,
+            0, // depth=0 means no following
+        ).unwrap();
+
+        assert!(discoveries.is_empty(), "depth=0 should return no discoveries");
+    }
+
+    #[test]
+    fn association_following_discovers_related_memory() {
+        let mut brain = brain_with_sqlite();
+
+        // Memory A: very similar to query embedding
+        let id_a = brain.create("Rust programming language").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        // Memory B: NOT similar to query (orthogonal), but associated to A
+        let id_b = brain.create("Cargo package manager details").unwrap();
+        brain.set_embedding(&id_b, &[0.1, 0.9, 0.0]).unwrap();
+
+        // Strong association A -> B
+        brain.associate(id_a, id_b, 0.8).unwrap();
+
+        // Query is close to A but not B
+        let query = [1.0, 0.0, 0.0];
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id_a);
+
+        let discoveries = brain.discover_associated_memories(
+            &query,
+            &[id_a],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        // Should discover B via association from A
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].id, id_b);
+        assert!(discoveries[0].association_weight > 0.0);
+        // Blended score should include association bonus
+        let expected_sim = crate::embedding::cosine_similarity(&query, &[0.1, 0.9, 0.0]);
+        let expected_base = expected_sim * 0.7 + 1.0_f32 * 0.3; // energy=1.0 for new engram
+        assert!(discoveries[0].blended_score > expected_base,
+            "blended score {} should be > base {} due to association bonus",
+            discoveries[0].blended_score, expected_base);
+    }
+
+    #[test]
+    fn association_following_handles_cycles() {
+        let mut brain = brain_with_sqlite();
+
+        let id_a = brain.create("Memory A").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Memory B").unwrap();
+        brain.set_embedding(&id_b, &[0.5, 0.5, 0.0]).unwrap();
+
+        // Create cycle: A -> B -> A
+        brain.associate(id_a, id_b, 0.5).unwrap();
+        brain.associate(id_b, id_a, 0.5).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id_a);
+
+        // Should not infinite loop — A is already in seen_ids
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen,
+            3, // Multiple hops, but cycle should be caught
+        ).unwrap();
+
+        // Should discover B (once) but not re-discover A
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].id, id_b);
+    }
+
+    #[test]
+    fn association_following_respects_weight_threshold() {
+        let mut brain = brain_with_sqlite();
+
+        let id_a = brain.create("Memory A").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Memory B - weak link").unwrap();
+        brain.set_embedding(&id_b, &[0.5, 0.5, 0.0]).unwrap();
+
+        let id_c = brain.create("Memory C - strong link").unwrap();
+        brain.set_embedding(&id_c, &[0.3, 0.7, 0.0]).unwrap();
+
+        // Weak association A -> B (below 0.15 threshold)
+        brain.associate(id_a, id_b, 0.10).unwrap();
+        // Strong association A -> C (above threshold)
+        brain.associate(id_a, id_c, 0.50).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id_a);
+
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        // Should only discover C (strong link), not B (weak link)
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].id, id_c);
+    }
+
+    #[test]
+    fn association_following_no_associations_returns_empty() {
+        let mut brain = brain_with_sqlite();
+
+        let id_a = brain.create("Isolated memory").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        // No associations at all
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id_a);
+
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        assert!(discoveries.is_empty(), "no associations means no discoveries");
+    }
+
+    #[test]
+    fn association_following_multi_hop() {
+        let mut brain = brain_with_sqlite();
+
+        // Chain: A -> B -> C
+        let id_a = brain.create("Memory A").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Memory B").unwrap();
+        brain.set_embedding(&id_b, &[0.5, 0.5, 0.0]).unwrap();
+
+        let id_c = brain.create("Memory C").unwrap();
+        brain.set_embedding(&id_c, &[0.0, 1.0, 0.0]).unwrap();
+
+        brain.associate(id_a, id_b, 0.6).unwrap();
+        brain.associate(id_b, id_c, 0.6).unwrap();
+
+        // depth=1: should only find B (direct from A)
+        let mut seen1 = std::collections::HashSet::new();
+        seen1.insert(id_a);
+        let discoveries_1 = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen1,
+            1,
+        ).unwrap();
+        assert_eq!(discoveries_1.len(), 1);
+        assert_eq!(discoveries_1[0].id, id_b);
+
+        // depth=2: should find both B and C
+        let mut seen2 = std::collections::HashSet::new();
+        seen2.insert(id_a);
+        let discoveries_2 = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen2,
+            2,
+        ).unwrap();
+        assert_eq!(discoveries_2.len(), 2);
+        let ids: std::collections::HashSet<_> = discoveries_2.iter().map(|d| d.id).collect();
+        assert!(ids.contains(&id_b));
+        assert!(ids.contains(&id_c));
+    }
+
+    #[test]
+    fn association_following_is_passive() {
+        let mut brain = brain_with_sqlite();
+
+        let id_a = brain.create("Memory A").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Memory B").unwrap();
+        brain.set_embedding(&id_b, &[0.5, 0.5, 0.0]).unwrap();
+
+        brain.associate(id_a, id_b, 0.5).unwrap();
+
+        // Record energy before
+        let energy_a_before = brain.get(&id_a).unwrap().energy;
+        let energy_b_before = brain.get(&id_b).unwrap().energy;
+        let access_a_before = brain.get(&id_a).unwrap().access_count;
+        let access_b_before = brain.get(&id_b).unwrap().access_count;
+
+        // Run association discovery
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id_a);
+        let _discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[id_a],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        // Energy and access count should be UNCHANGED (passive operation)
+        assert_eq!(brain.get(&id_a).unwrap().energy, energy_a_before);
+        assert_eq!(brain.get(&id_b).unwrap().energy, energy_b_before);
+        assert_eq!(brain.get(&id_a).unwrap().access_count, access_a_before);
+        assert_eq!(brain.get(&id_b).unwrap().access_count, access_b_before);
+    }
+
+    #[test]
+    fn config_defaults_for_search_association() {
+        let config = Config::default();
+        assert!(config.search_follow_associations);
+        assert_eq!(config.search_association_depth, 1);
+    }
+
+    #[test]
+    fn config_search_association_roundtrip() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        // Default: enabled
+        assert!(brain.config().search_follow_associations);
+        assert_eq!(brain.config().search_association_depth, 1);
+
+        // Enable via configure()
+        assert!(brain.configure("search_follow_associations", 1.0).unwrap());
+        assert!(brain.config().search_follow_associations);
+
+        // Disable via configure()
+        assert!(brain.configure("search_follow_associations", 0.0).unwrap());
+        assert!(!brain.config().search_follow_associations);
+
+        // Set depth
+        assert!(brain.configure("search_association_depth", 3.0).unwrap());
+        assert_eq!(brain.config().search_association_depth, 3);
+
+        // Depth is capped at 5
+        assert!(brain.configure("search_association_depth", 10.0).unwrap());
+        assert_eq!(brain.config().search_association_depth, 5);
     }
 }

@@ -22,6 +22,7 @@ Follow this workflow for EVERY user message:
 - Always search BEFORE responding
 - Use keywords from user's message
 - Search results include memory IDs needed for recall
+- If results include a 🔗 procedure chain hint, call engram_associations on the anchor (direction: outbound) to get the full ordered steps before proceeding
 
 **engram_recall:**
 - Takes an array of IDs - batch for efficiency
@@ -34,11 +35,28 @@ Follow this workflow for EVERY user message:
 - Store aggressively - decay handles pruning, missed storage is permanent loss
 - Each memory: atomic (single concept) with good tags
 
+**engram_associate:**
+- Creates weighted connections between engrams
+- Use `ordinal` parameter to create ordered chains (procedure steps)
+- Ordinals define sequence: 1, 2, 3... for step order
+
+---
+
+## Procedure Chains
+
+When the user describes a repeatable multi-step process (3+ steps), create a procedure chain:
+
+1. Create an anchor engram: `"PROCEDURE: [name]"`
+2. Create one engram per step: `"Step: [description]"`
+3. Wire anchor → each step with `engram_associate` using ordinals 1-N and weight 0.8
+
+This makes the procedure discoverable via search and walkable via engram_associations.
+
 ---
 
 ## What to Store
 
-**Store:** Project facts, architectural decisions, gotchas, corrections to your understanding, personal context shared, workflow discoveries, preferences
+**Store:** Project facts, architectural decisions, gotchas, corrections to your understanding, personal context shared, workflow discoveries, preferences, repeatable processes (as procedure chains)
 
 **Skip:** Exact duplicates, ephemeral task state, anything already in Identity
 
@@ -50,6 +68,7 @@ Before finishing ANY response:
 - [ ] Did you search for context? (`engram_search`)
 - [ ] Did you use memories? → Recall them (`engram_recall`)
 - [ ] Did you learn new facts? → Store them (`engram_create`)
+- [ ] Did the user describe a repeatable process? → Create a procedure chain
 
 **Your response is not complete until recall and storage are done.**"#;
 

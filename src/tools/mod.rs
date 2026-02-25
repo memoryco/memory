@@ -13,7 +13,7 @@ pub mod config;
 pub mod lenses;
 pub mod plans;
 pub mod reference;
-pub mod ui_open;
+pub mod open_dashboard;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
@@ -79,7 +79,7 @@ pub use plans::{
     StepCompleteTool,
 };
 
-pub use ui_open::UiOpenTool;
+pub use open_dashboard::OpenDashboardTool;
 
 // =============================================================================
 // Common helpers
@@ -108,9 +108,46 @@ pub fn format_engram(e: &Engram) -> String {
 
 /// Truncate content for display
 pub fn truncate_content(content: &str, max_len: usize) -> String {
+    if max_len == 0 {
+        return String::new();
+    }
+
     if content.len() <= max_len {
         content.to_string()
     } else {
-        format!("{}...", &content[..max_len.saturating_sub(3)])
+        if max_len <= 3 {
+            return ".".repeat(max_len);
+        }
+
+        let prefix_budget = max_len - 3;
+        let mut end = prefix_budget.min(content.len());
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        let prefix = content.get(..end).unwrap_or_default();
+        format!("{}...", prefix)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_content;
+
+    #[test]
+    fn truncate_content_unicode_boundary() {
+        let input =
+            "Step: Run full test suite — cargo test in /work/memoryco/memory, all tests must pass";
+        let result = truncate_content(input, 30);
+        assert_eq!(result, "Step: Run full test suite ...");
+        assert!(result.len() <= 30);
+    }
+
+    #[test]
+    fn truncate_content_tiny_max_len() {
+        assert_eq!(truncate_content("abcdef", 0), "");
+        assert_eq!(truncate_content("abcdef", 1), ".");
+        assert_eq!(truncate_content("abcdef", 2), "..");
+        assert_eq!(truncate_content("abcdef", 3), "...");
     }
 }

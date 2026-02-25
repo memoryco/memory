@@ -229,14 +229,10 @@ impl Tool<Context> for EngramSearchTool {
 
         // Show chain hints before memory listings
         for hint in &chain_hints {
-            let truncated_content = if hint.anchor_content.len() > 40 {
-                format!("{}...", &hint.anchor_content[..40])
-            } else {
-                hint.anchor_content.clone()
-            };
+            let truncated_content = truncate_chain_hint_content(&hint.anchor_content, 40);
             output.push_str(&format!(
-                "🔗 Procedure chain detected: {} has {} ordered steps. Use engram_associations to walk the chain.\n\n",
-                truncated_content, hint.ordered_step_count
+                "🔗 Procedure chain detected: {} [{}] has {} ordered steps. Use engram_associations to walk the chain.\n\n",
+                truncated_content, hint.anchor_id, hint.ordered_step_count
             ));
         }
 
@@ -269,6 +265,21 @@ pub struct ChainHint {
     pub anchor_id: uuid::Uuid,
     pub anchor_content: String,
     pub ordered_step_count: usize,
+}
+
+/// Truncate chain hint content for display while preserving UTF-8 boundaries.
+fn truncate_chain_hint_content(content: &str, max_bytes: usize) -> String {
+    if content.len() <= max_bytes {
+        return content.to_string();
+    }
+
+    let mut end = max_bytes.min(content.len());
+    while end > 0 && !content.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    let prefix = content.get(..end).unwrap_or_default();
+    format!("{}...", prefix)
 }
 
 /// Check seed results for procedure chain anchors.
@@ -411,5 +422,17 @@ mod tests {
 
         let hints = detect_procedure_chains(&brain, &[]);
         assert!(hints.is_empty());
+    }
+
+    #[test]
+    fn truncate_chain_hint_content_handles_unicode_boundary() {
+        let input = format!("{}—XYZ", "a".repeat(39));
+        let result = truncate_chain_hint_content(&input, 40);
+        assert_eq!(result, format!("{}...", "a".repeat(39)));
+    }
+
+    #[test]
+    fn truncate_chain_hint_content_short_string_passthrough() {
+        assert_eq!(truncate_chain_hint_content("short", 40), "short");
     }
 }

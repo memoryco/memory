@@ -37,7 +37,7 @@ pub use citation::{Citation, SourceMeta};
 pub use error::{ReferenceError, Result};
 pub use extractor::PdfExtractor;
 pub use profiles::{DocumentProfile, ProfileRegistry};
-pub use sanitize::{sanitize_and_copy, sanitize_filename, validate_pdf, SanitizeError};
+pub use sanitize::{sanitize_and_copy, validate_pdf};
 pub use searcher::SearchResult;
 pub use source::ReferenceSource;
 

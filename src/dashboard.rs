@@ -1,6 +1,6 @@
 //! Dashboard HTTP server.
 //!
-//! Serves a web dashboard on `127.0.0.1:4243` showing memory, identity,
+//! Serves a web dashboard on `127.0.0.1:4242` showing memory, identity,
 //! references, and the association graph. Runs on a background daemon thread,
 //! completely independent of the MCP stdio transport.
 
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
-const BIND_ADDR: &str = "127.0.0.1:4243";
+const BIND_ADDR: &str = "127.0.0.1:4242";
 
 /// Shared state for the dashboard thread — backed by the same Arcs as the MCP
 /// server so edits in the dashboard are immediately visible via MCP and vice-versa.
@@ -74,9 +74,7 @@ pub fn start_dashboard(
                     continue;
                 }
 
-                let response = route(&method, &url, request, &state);
-                // response already sent inside route()
-                let _ = response;
+                route(&method, &url, request, &state);
             }
         })
         .expect("Failed to spawn dashboard thread");
@@ -93,10 +91,7 @@ fn route(
     state: &Arc<DashboardState>,
 ) {
     // Strip query string for path matching, but keep it for parameter parsing
-    let (path, query) = match url.find('?') {
-        Some(i) => (&url[..i], &url[i + 1..]),
-        None => (url, ""),
-    };
+    let (path, query) = url.split_once('?').unwrap_or((url, ""));
 
     let response = match (method, path) {
         // Static
@@ -1055,7 +1050,8 @@ fn extract_boundary(content_type: &str) -> Option<String> {
         .split(';')
         .map(|s| s.trim())
         .find(|s| s.starts_with("boundary="))
-        .map(|s| s["boundary=".len()..].trim_matches('"').to_string())
+        .and_then(|s| s.strip_prefix("boundary="))
+        .map(|s| s.trim_matches('"').to_string())
 }
 
 /// Parse a multipart/form-data body to extract the first file part.
@@ -1144,12 +1140,10 @@ fn extract_filename(headers: &str) -> Option<String> {
             && line.contains("filename=")
         {
             // Find filename="..." or filename=...
-            let idx = line.find("filename=")?;
-            let rest = &line[idx + "filename=".len()..];
-            let filename = if rest.starts_with('"') {
+            let (_, rest) = line.split_once("filename=")?;
+            let filename = if let Some(stripped) = rest.strip_prefix('"') {
                 // Quoted filename
-                let end = rest[1..].find('"')?;
-                &rest[1..1 + end]
+                stripped.split_once('"').map(|(name, _)| name)?
             } else {
                 // Unquoted — up to next ; or end
                 rest.split(';').next().unwrap_or("").trim()
@@ -1244,10 +1238,25 @@ fn parse_memory_state(s: &str) -> Option<crate::engram::MemoryState> {
 
 /// Truncate content for display.
 fn truncate_content(content: &str, max_len: usize) -> String {
+    if max_len == 0 {
+        return String::new();
+    }
+
     if content.len() <= max_len {
         content.to_string()
     } else {
-        format!("{}...", &content[..max_len.saturating_sub(3)])
+        if max_len <= 3 {
+            return ".".repeat(max_len);
+        }
+
+        let prefix_budget = max_len - 3;
+        let mut end = prefix_budget.min(content.len());
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        let prefix = content.get(..end).unwrap_or_default();
+        format!("{}...", prefix)
     }
 }
 
@@ -1542,6 +1551,23 @@ mod tests {
         let result = truncate_content("this is a long string", 10);
         assert!(result.ends_with("..."));
         assert!(result.len() <= 10);
+    }
+
+    #[test]
+    fn truncate_content_unicode_boundary() {
+        let input =
+            "Step: Run full test suite — cargo test in /work/memoryco/memory, all tests must pass";
+        let result = truncate_content(input, 30);
+        assert_eq!(result, "Step: Run full test suite ...");
+        assert!(result.len() <= 30);
+    }
+
+    #[test]
+    fn truncate_content_tiny_max_len() {
+        assert_eq!(truncate_content("abcdef", 0), "");
+        assert_eq!(truncate_content("abcdef", 1), ".");
+        assert_eq!(truncate_content("abcdef", 2), "..");
+        assert_eq!(truncate_content("abcdef", 3), "...");
     }
 
     // ── Lens name sanitization ────────────────────────────────────────────

@@ -75,13 +75,13 @@ impl Substrate {
         // Add to forward lookup
         self.associations
             .entry(assoc.from)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(assoc.clone());
         
         // Add to reverse lookup
         self.reverse_associations
             .entry(assoc.to)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(assoc.from);
     }
     
@@ -237,11 +237,11 @@ impl Substrate {
             let propagated_energy = assoc.propagation_energy(source_energy, self.config.propagation_damping);
             
             // Only propagate if there's meaningful energy
-            if propagated_energy > 0.01 {
-                if let Some(target) = self.get_mut_unchecked(&assoc.to) {
-                    target.stimulate(propagated_energy);
-                    affected.push(assoc.to);
-                }
+            if propagated_energy > 0.01
+                && let Some(target) = self.get_mut_unchecked(&assoc.to)
+            {
+                target.stimulate(propagated_energy);
+                affected.push(assoc.to);
             }
         }
         
@@ -282,7 +282,7 @@ impl Substrate {
     /// Strengthen an existing association or create a new one
     /// Returns true if an association was created or strengthened
     fn strengthen_or_create_association(&mut self, from: EngramId, to: EngramId, amount: f64) -> bool {
-        let assocs = self.associations.entry(from).or_insert_with(Vec::new);
+        let assocs = self.associations.entry(from).or_default();
         
         if let Some(assoc) = assocs.iter_mut().find(|a| a.to == to) {
             assoc.strengthen(amount);
@@ -296,7 +296,7 @@ impl Substrate {
             // Update reverse lookup
             self.reverse_associations
                 .entry(to)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(from);
             true
         }
@@ -308,12 +308,12 @@ impl Substrate {
 
         self.associations
             .entry(from)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(assoc);
 
         self.reverse_associations
             .entry(to)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(from);
     }
     
@@ -407,7 +407,7 @@ impl Substrate {
             for assoc in assocs {
                 self.reverse_associations
                     .entry(assoc.to)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(*from_id);
             }
         }

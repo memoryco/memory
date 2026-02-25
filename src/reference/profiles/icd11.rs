@@ -158,9 +158,9 @@ impl DocumentProfile for Icd11Profile {
                 .map(|(p, _, _, _)| *p)
                 .unwrap_or(full_text.len());
 
-            let content = &full_text[*pos..end_pos];
-            let page_start = extract_page_number(&full_text[..*pos]);
-            let page_end = extract_page_number(&full_text[..end_pos]);
+            let content = full_text.get(*pos..end_pos)?;
+            let page_start = extract_page_number(full_text.get(..*pos)?);
+            let page_end = extract_page_number(full_text.get(..end_pos)?);
 
             let (parent, section_type) = match elem_type {
                 ElementType::Chapter(_) => {

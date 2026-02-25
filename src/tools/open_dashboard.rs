@@ -1,4 +1,4 @@
-//! ui_open - Open the memoryco dashboard in the user's browser
+//! Tool: open_dashboard — opens the memoryco dashboard in the user's browser.
 
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult};
@@ -6,11 +6,11 @@ use sml_mcps::{Tool, ToolEnv, CallToolResult};
 use crate::Context;
 use crate::tools::text_response;
 
-const DASHBOARD_URL: &str = "http://127.0.0.1:4243";
+const DASHBOARD_URL: &str = "http://127.0.0.1:4242";
 
-pub struct UiOpenTool;
+pub struct OpenDashboardTool;
 
-impl Tool<Context> for UiOpenTool {
+impl Tool<Context> for OpenDashboardTool {
     fn name(&self) -> &str {
         "open_dashboard"
     }
@@ -34,6 +34,8 @@ impl Tool<Context> for UiOpenTool {
     ) -> sml_mcps::Result<CallToolResult> {
         let cmd = if cfg!(target_os = "macos") {
             "open"
+        } else if cfg!(target_os = "windows") {
+            "start"
         } else {
             "xdg-open"
         };

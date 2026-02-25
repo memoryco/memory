@@ -117,12 +117,21 @@ fn replace_between_markers(content: &str) -> String {
         return content.to_string();
     };
 
-    let before = &content[..start];
-    let after = &content[end + MARKER_END.len()..];
+    let Some(before) = content.get(..start) else {
+        return content.to_string();
+    };
+    let after_start = end + MARKER_END.len();
+    let Some(after) = content.get(after_start..) else {
+        return content.to_string();
+    };
 
-    format!("{}{}{}", before.trim_end_matches('\n'),
+    format!(
+        "{}{}{}{}",
+        before.trim_end_matches('\n'),
         if before.is_empty() { "" } else { "\n\n" },
-        format!("{}{}", MEMORYCO_BLOCK, after))
+        MEMORYCO_BLOCK,
+        after
+    )
 }
 
 /// Remove content between markers (inclusive).
@@ -134,8 +143,16 @@ fn remove_between_markers(content: &str) -> String {
         return content.to_string();
     };
 
-    let before = content[..start].trim_end();
-    let after = content[end + MARKER_END.len()..].trim_start();
+    let Some(before_raw) = content.get(..start) else {
+        return content.to_string();
+    };
+    let after_start = end + MARKER_END.len();
+    let Some(after_raw) = content.get(after_start..) else {
+        return content.to_string();
+    };
+
+    let before = before_raw.trim_end();
+    let after = after_raw.trim_start();
 
     if before.is_empty() {
         after.to_string()

@@ -113,11 +113,11 @@ impl DocumentProfile for Dsm5Profile {
                 .map(|m| m.start())
                 .unwrap_or(full_text.len());
 
-            let disorder_text = &full_text[start_pos..end_pos];
+            let disorder_text = full_text.get(start_pos..end_pos)?;
 
             // Find page numbers from our markers
-            let page_start = extract_page_number(&full_text[..start_pos]);
-            let page_end = extract_page_number(&full_text[..end_pos]);
+            let page_start = extract_page_number(full_text.get(..start_pos)?);
+            let page_end = extract_page_number(full_text.get(..end_pos)?);
 
             // Extract ICD codes
             let codes = self.extract_codes(disorder_text);
@@ -142,9 +142,11 @@ impl DocumentProfile for Dsm5Profile {
                     .map(|(p, _, _)| *p)
                     .unwrap_or(disorder_text.len());
 
-                let section_text = &disorder_text[*pos..section_end];
-                let section_page_start = extract_page_number(&full_text[..start_pos + pos]);
-                let section_page_end = extract_page_number(&full_text[..start_pos + section_end]);
+                let section_text = disorder_text.get(*pos..section_end)?;
+                let section_start_abs = start_pos.checked_add(*pos)?;
+                let section_end_abs = start_pos.checked_add(section_end)?;
+                let section_page_start = extract_page_number(full_text.get(..section_start_abs)?);
+                let section_page_end = extract_page_number(full_text.get(..section_end_abs)?);
 
                 sections.push(Section {
                     title: format!("{} - {}", disorder_name, header),

@@ -45,11 +45,9 @@ impl Lens {
 
         // Extract description from first line if it's a heading
         let (description, content) = if content.starts_with('#') {
-            if let Some(first_newline) = content.find('\n') {
-                let first_line = &content[..first_newline];
+            if let Some((first_line, rest)) = content.split_once('\n') {
                 let desc = first_line.trim_start_matches('#').trim().to_string();
-                let rest = content[first_newline..].trim_start().to_string();
-                (Some(desc), rest)
+                (Some(desc), rest.trim_start().to_string())
             } else {
                 (None, content)
             }

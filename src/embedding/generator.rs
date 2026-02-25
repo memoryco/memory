@@ -73,7 +73,7 @@ impl EmbeddingGenerator {
             .map_err(|e| EmbeddingError::Generation(format!("Lock poisoned: {}", e)))?;
 
         let embeddings = model
-            .embed(texts.to_vec(), None)
+            .embed(texts, None)
             .map_err(|e| EmbeddingError::Generation(e.to_string()))?;
 
         Ok(embeddings)

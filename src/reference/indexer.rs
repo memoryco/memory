@@ -44,11 +44,11 @@ impl<'a> Indexer<'a> {
         init_schema(&conn)?;
 
         // Try profile-based section parsing first
-        if let Some(profile) = profile {
-            if let Some(sections) = profile.parse_sections(&pages) {
-                index_sections(&conn, &sections, profile.id())?;
-                return Ok(());
-            }
+        if let Some(profile) = profile
+            && let Some(sections) = profile.parse_sections(&pages)
+        {
+            index_sections(&conn, &sections, profile.id())?;
+            return Ok(());
         }
 
         // Fall back to page-level indexing

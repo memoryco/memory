@@ -82,15 +82,15 @@ impl Tool<Context> for EngramCreateTool {
         // Phase 2: Spawn background embedding tasks (no lock held)
         for (id, content) in created.iter() {
             let brain_clone = context.brain.clone();
-            let id_clone = id.clone();
+            let id_clone = *id;
             let content_clone = content.clone();
 
             std::thread::spawn(move || {
                 let generator = EmbeddingGenerator::new();
-                if let Ok(embedding) = generator.generate(&content_clone) {
-                    if let Ok(mut brain) = brain_clone.lock() {
-                        let _ = brain.set_embedding(&id_clone, &embedding);
-                    }
+                if let Ok(embedding) = generator.generate(&content_clone)
+                    && let Ok(mut brain) = brain_clone.lock()
+                {
+                    let _ = brain.set_embedding(&id_clone, &embedding);
                 }
             });
         }

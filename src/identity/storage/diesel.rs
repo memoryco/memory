@@ -84,7 +84,7 @@ impl DieselIdentityStorage {
     fn generate_short_id() -> String {
         let uuid = uuid::Uuid::new_v4();
         let hex = uuid.simple().to_string();
-        hex[..8].to_string()  // 8 chars gives us plenty of uniqueness for identity items
+        hex.chars().take(8).collect()  // 8 chars gives us plenty of uniqueness for identity items
     }
 }
 

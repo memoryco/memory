@@ -100,7 +100,7 @@ impl PersistenceWorker {
             // Persist energy updates
             if !work.energy_updates.is_empty() {
                 let updates: Vec<_> = work.energy_updates.iter()
-                    .map(|(id, energy, state)| (id, *energy, state.clone()))
+                    .map(|(id, energy, state)| (id, *energy, *state))
                     .collect();
                 
                 if let Err(e) = storage.save_engram_energies(&updates) {

@@ -213,10 +213,10 @@ impl Brain {
         self.substrate.associate(from, to, weight, ordinal);
 
         // Persist the association
-        if let Some(assocs) = self.substrate.associations_from(&from) {
-            if let Some(assoc) = assocs.iter().find(|a| a.to == to) {
-                self.storage.save_association(assoc)?;
-            }
+        if let Some(assocs) = self.substrate.associations_from(&from)
+            && let Some(assoc) = assocs.iter().find(|a| a.to == to)
+        {
+            self.storage.save_association(assoc)?;
         }
 
         Ok(())
@@ -280,16 +280,16 @@ impl Brain {
         // Gather energy updates for affected engrams
         for id in &result.affected_ids {
             if let Some(engram) = self.substrate.get(id) {
-                work.energy_updates.push((*id, engram.energy, engram.state.clone()));
+                work.energy_updates.push((*id, engram.energy, engram.state));
             }
         }
         
         // Gather associations modified by Hebbian learning
         for (from_id, to_id) in &result.modified_associations {
-            if let Some(assocs) = self.substrate.associations_from(from_id) {
-                if let Some(assoc) = assocs.iter().find(|a| a.to == *to_id) {
-                    work.associations.push(assoc.clone());
-                }
+            if let Some(assocs) = self.substrate.associations_from(from_id)
+                && let Some(assoc) = assocs.iter().find(|a| a.to == *to_id)
+            {
+                work.associations.push(assoc.clone());
             }
         }
     }
@@ -454,7 +454,7 @@ impl Brain {
         if applied {
             // Save only energy/state for all engrams (skips FTS rebuild)
             let updates: Vec<_> = self.substrate.all_engrams()
-                .map(|e| (&e.id, e.energy, e.state.clone()))
+                .map(|e| (&e.id, e.energy, e.state))
                 .collect();
             self.storage.save_engram_energies(&updates)?;
             
@@ -490,7 +490,7 @@ impl Brain {
         
         // Save only energy/state for all engrams (skips FTS rebuild)
         let updates: Vec<_> = self.substrate.all_engrams()
-            .map(|e| (&e.id, e.energy, e.state.clone()))
+            .map(|e| (&e.id, e.energy, e.state))
             .collect();
         self.storage.save_engram_energies(&updates)?;
         
@@ -523,7 +523,7 @@ impl Brain {
             "hebbian_learning_rate" => { config.hebbian_learning_rate = value; true }
             "recall_strength" => { config.recall_strength = value; true }
             "search_follow_associations" => { config.search_follow_associations = value != 0.0; true }
-            "search_association_depth" => { config.search_association_depth = (value as u8).max(0).min(5); true }
+            "search_association_depth" => { config.search_association_depth = value.clamp(0.0, 5.0) as u8; true }
             _ => false,
         };
         

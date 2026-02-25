@@ -10,6 +10,7 @@
 //! - **Decay** is organic but never destroys data - memories just become harder to access
 
 
+#[allow(clippy::module_inception)]
 pub mod engram;
 pub mod substrate;
 pub mod association;
@@ -24,7 +25,7 @@ pub use association::Association;
 pub use storage::{Storage, StorageResult, SimilarityResult};
 #[cfg(test)]
 pub use storage::memory::MemoryStorage;
-pub use brain::{Brain, AssociationDiscovery};
+pub use brain::Brain;
 
 // Re-export identity types from the identity module for backwards compatibility
 pub use crate::identity::{Identity};

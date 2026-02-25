@@ -142,10 +142,14 @@ impl Tool<Context> for EngramSearchTool {
         // Association-following: discover related memories via associations
         let mut association_discovery_count: usize = 0;
         let mut association_merged_count: usize = 0;
+
+        // Capture seed IDs (vector search results) before association merge
+        // for chain detection later
+        let seed_ids: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
+
         if follow_associations && association_depth > 0 && !scored.is_empty() {
             use std::collections::HashSet;
 
-            let seed_ids: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
             let mut seen_ids: HashSet<uuid::Uuid> = seed_ids.iter().copied().collect();
 
             let discoveries = brain.discover_associated_memories(
@@ -200,6 +204,9 @@ impl Tool<Context> for EngramSearchTool {
                 association_discovery_count, association_merged_count, association_depth);
         }
 
+        // Chain detection: check if any seed results (vector search hits) are procedure anchors
+        let chain_hints = detect_procedure_chains(&brain, &seed_ids);
+
         // Limit results
         scored.truncate(limit);
 
@@ -219,6 +226,20 @@ impl Tool<Context> for EngramSearchTool {
              💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
              ---\n\n"
         );
+
+        // Show chain hints before memory listings
+        for hint in &chain_hints {
+            let truncated_content = if hint.anchor_content.len() > 40 {
+                format!("{}...", &hint.anchor_content[..40])
+            } else {
+                hint.anchor_content.clone()
+            };
+            output.push_str(&format!(
+                "🔗 Procedure chain detected: {} has {} ordered steps. Use engram_associations to walk the chain.\n\n",
+                truncated_content, hint.ordered_step_count
+            ));
+        }
+
         if association_merged_count > 0 {
             output.push_str(&format!("Found {} memories ({} via associations, {} total discovered):\n\n",
                 scored.len(), association_merged_count, association_discovery_count));
@@ -239,5 +260,156 @@ impl Tool<Context> for EngramSearchTool {
         }
 
         Ok(text_response(output))
+    }
+}
+
+/// A detected procedure chain anchor
+#[derive(Debug, Clone)]
+pub struct ChainHint {
+    pub anchor_id: uuid::Uuid,
+    pub anchor_content: String,
+    pub ordered_step_count: usize,
+}
+
+/// Check seed results for procedure chain anchors.
+///
+/// A procedure anchor is an engram that has outbound associations where
+/// at least one has an ordinal set. Returns hints for each anchor found.
+pub fn detect_procedure_chains(
+    brain: &crate::engram::Brain,
+    seed_ids: &[uuid::Uuid],
+) -> Vec<ChainHint> {
+    let mut hints = Vec::new();
+
+    for id in seed_ids {
+        let assocs = match brain.associations_from(id) {
+            Some(a) => a,
+            None => continue,
+        };
+
+        let ordered_count = assocs.iter().filter(|a| a.ordinal.is_some()).count();
+        if ordered_count == 0 {
+            continue;
+        }
+
+        let content = match brain.get(id) {
+            Some(e) => e.content.clone(),
+            None => continue,
+        };
+
+        hints.push(ChainHint {
+            anchor_id: *id,
+            anchor_content: content,
+            ordered_step_count: ordered_count,
+        });
+    }
+
+    hints
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engram::{Brain, storage::EngramStorage};
+
+    /// Helper: create a Brain backed by in-memory SQLite
+    fn brain_with_sqlite() -> Brain {
+        let storage = EngramStorage::in_memory().unwrap();
+        Brain::new(storage).unwrap()
+    }
+
+    #[test]
+    fn detect_chains_finds_procedure_anchor() {
+        let mut brain = brain_with_sqlite();
+
+        let anchor = brain.create("Deploy procedure").unwrap();
+        let step1 = brain.create("Pull code").unwrap();
+        let step2 = brain.create("Run tests").unwrap();
+        let step3 = brain.create("Deploy").unwrap();
+
+        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+        brain.associate_with_ordinal(anchor, step2, 0.9, Some(2)).unwrap();
+        brain.associate_with_ordinal(anchor, step3, 0.9, Some(3)).unwrap();
+
+        let hints = detect_procedure_chains(&brain, &[anchor]);
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints[0].anchor_id, anchor);
+        assert_eq!(hints[0].ordered_step_count, 3);
+        assert!(hints[0].anchor_content.contains("Deploy procedure"));
+    }
+
+    #[test]
+    fn detect_chains_ignores_unordered_associations() {
+        let mut brain = brain_with_sqlite();
+
+        let memory = brain.create("Just a memory").unwrap();
+        let related = brain.create("Related memory").unwrap();
+
+        // No ordinal
+        brain.associate(memory, related, 0.8).unwrap();
+
+        let hints = detect_procedure_chains(&brain, &[memory]);
+        assert!(hints.is_empty(), "Unordered associations should not trigger chain detection");
+    }
+
+    #[test]
+    fn detect_chains_mixed_ordered_and_unordered() {
+        let mut brain = brain_with_sqlite();
+
+        let anchor = brain.create("Mixed anchor").unwrap();
+        let step1 = brain.create("Step 1").unwrap();
+        let related = brain.create("Related but unordered").unwrap();
+
+        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+        brain.associate(anchor, related, 0.5).unwrap();
+
+        let hints = detect_procedure_chains(&brain, &[anchor]);
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints[0].ordered_step_count, 1, "Only count ordered associations");
+    }
+
+    #[test]
+    fn detect_chains_multiple_anchors() {
+        let mut brain = brain_with_sqlite();
+
+        let anchor1 = brain.create("Procedure A").unwrap();
+        let a_step = brain.create("A step 1").unwrap();
+        brain.associate_with_ordinal(anchor1, a_step, 0.9, Some(1)).unwrap();
+
+        let anchor2 = brain.create("Procedure B").unwrap();
+        let b_step1 = brain.create("B step 1").unwrap();
+        let b_step2 = brain.create("B step 2").unwrap();
+        brain.associate_with_ordinal(anchor2, b_step1, 0.9, Some(1)).unwrap();
+        brain.associate_with_ordinal(anchor2, b_step2, 0.9, Some(2)).unwrap();
+
+        let non_anchor = brain.create("Not a procedure").unwrap();
+
+        let hints = detect_procedure_chains(&brain, &[anchor1, non_anchor, anchor2]);
+        assert_eq!(hints.len(), 2);
+
+        // Verify both anchors detected with correct step counts
+        let hint_map: std::collections::HashMap<_, _> = hints.iter()
+            .map(|h| (h.anchor_id, h.ordered_step_count))
+            .collect();
+        assert_eq!(hint_map[&anchor1], 1);
+        assert_eq!(hint_map[&anchor2], 2);
+    }
+
+    #[test]
+    fn detect_chains_no_associations_returns_empty() {
+        let mut brain = brain_with_sqlite();
+
+        let isolated = brain.create("Isolated memory").unwrap();
+
+        let hints = detect_procedure_chains(&brain, &[isolated]);
+        assert!(hints.is_empty());
+    }
+
+    #[test]
+    fn detect_chains_empty_seed_ids_returns_empty() {
+        let brain = brain_with_sqlite();
+
+        let hints = detect_procedure_chains(&brain, &[]);
+        assert!(hints.is_empty());
     }
 }

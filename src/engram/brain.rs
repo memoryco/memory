@@ -596,13 +596,13 @@ impl Brain {
         for _hop in 0..depth {
             let mut next_frontier: Vec<EngramId> = Vec::new();
 
-            // Collect all candidate (target_id, association_weight) pairs from frontier
-            let mut candidates: Vec<(EngramId, f64)> = Vec::new();
+            // Collect all candidate (target_id, association_weight, ordinal) tuples from frontier
+            let mut candidates: Vec<(EngramId, f64, Option<u32>)> = Vec::new();
             for seed_id in &frontier {
                 if let Some(assocs) = self.substrate.associations_from(seed_id) {
                     for assoc in assocs {
                         if assoc.weight >= MIN_ASSOCIATION_WEIGHT && !seen_ids.contains(&assoc.to) {
-                            candidates.push((assoc.to, assoc.weight));
+                            candidates.push((assoc.to, assoc.weight, assoc.ordinal));
                             seen_ids.insert(assoc.to);
                         }
                     }
@@ -613,8 +613,17 @@ impl Brain {
                 break;
             }
 
+            // Sort by ordinal ascending (None/null sorts last) so procedure chains
+            // are traversed step-by-step
+            candidates.sort_by(|a, b| match (a.2, b.2) {
+                (Some(oa), Some(ob)) => oa.cmp(&ob),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            });
+
             // For each candidate, look up embedding and score against query
-            for (candidate_id, assoc_weight) in candidates {
+            for (candidate_id, assoc_weight, _ordinal) in candidates {
                 let embedding = match self.storage.get_embedding(&candidate_id)? {
                     Some(emb) => emb,
                     None => continue,
@@ -1386,5 +1395,167 @@ mod tests {
         assert_eq!(assocs.len(), 1);
         assert_eq!(assocs[0].ordinal, Some(1));
         assert_eq!(assocs[0].to, step1);
+    }
+
+    // ==================
+    // ORDERED TRAVERSAL TESTS (Step 6)
+    // ==================
+
+    #[test]
+    fn discover_ordered_traversal_respects_ordinal_order() {
+        // Chain: anchor → B(ord:1) → C(ord:2) → D(ord:3)
+        // All associations are from anchor, so discoveries should come back in ordinal order
+        let mut brain = brain_with_sqlite();
+
+        let anchor = brain.create("Deploy procedure").unwrap();
+        brain.set_embedding(&anchor, &[1.0, 0.0, 0.0]).unwrap();
+
+        let step_b = brain.create("Pull latest code").unwrap();
+        brain.set_embedding(&step_b, &[0.3, 0.7, 0.0]).unwrap();
+
+        let step_c = brain.create("Run tests").unwrap();
+        brain.set_embedding(&step_c, &[0.2, 0.5, 0.3]).unwrap();
+
+        let step_d = brain.create("Deploy to staging").unwrap();
+        brain.set_embedding(&step_d, &[0.1, 0.3, 0.6]).unwrap();
+
+        // Create ordered associations from anchor — intentionally out of order
+        brain.associate_with_ordinal(anchor, step_d, 0.9, Some(3)).unwrap();
+        brain.associate_with_ordinal(anchor, step_b, 0.9, Some(1)).unwrap();
+        brain.associate_with_ordinal(anchor, step_c, 0.9, Some(2)).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(anchor);
+
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[anchor],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        // Should discover all 3 steps, in ordinal order
+        assert_eq!(discoveries.len(), 3);
+        assert_eq!(discoveries[0].id, step_b, "First discovery should be step B (ord:1)");
+        assert_eq!(discoveries[1].id, step_c, "Second discovery should be step C (ord:2)");
+        assert_eq!(discoveries[2].id, step_d, "Third discovery should be step D (ord:3)");
+    }
+
+    #[test]
+    fn discover_mixed_ordinal_and_null_ordinal_first() {
+        // Some associations have ordinals, some don't
+        // Ordinal ones should be processed first (ascending), then null
+        let mut brain = brain_with_sqlite();
+
+        let anchor = brain.create("Mixed procedure").unwrap();
+        brain.set_embedding(&anchor, &[1.0, 0.0, 0.0]).unwrap();
+
+        let step1 = brain.create("Ordered step 1").unwrap();
+        brain.set_embedding(&step1, &[0.3, 0.7, 0.0]).unwrap();
+
+        let step2 = brain.create("Ordered step 2").unwrap();
+        brain.set_embedding(&step2, &[0.2, 0.5, 0.3]).unwrap();
+
+        let unordered_a = brain.create("Related note A").unwrap();
+        brain.set_embedding(&unordered_a, &[0.1, 0.3, 0.6]).unwrap();
+
+        let unordered_b = brain.create("Related note B").unwrap();
+        brain.set_embedding(&unordered_b, &[0.0, 0.1, 0.9]).unwrap();
+
+        // Mix of ordered and unordered — create in scrambled order
+        brain.associate(anchor, unordered_a, 0.5).unwrap(); // no ordinal
+        brain.associate_with_ordinal(anchor, step2, 0.9, Some(2)).unwrap();
+        brain.associate(anchor, unordered_b, 0.5).unwrap(); // no ordinal
+        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(anchor);
+
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[anchor],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        assert_eq!(discoveries.len(), 4);
+
+        // First two should be the ordered steps (1, 2)
+        assert_eq!(discoveries[0].id, step1, "First should be ordered step 1");
+        assert_eq!(discoveries[1].id, step2, "Second should be ordered step 2");
+
+        // Last two are unordered — their relative order doesn't matter,
+        // just verify they're both there
+        let unordered_ids: std::collections::HashSet<_> = discoveries[2..].iter().map(|d| d.id).collect();
+        assert!(unordered_ids.contains(&unordered_a), "Should contain unordered A");
+        assert!(unordered_ids.contains(&unordered_b), "Should contain unordered B");
+    }
+
+    #[test]
+    fn discover_no_ordinals_unchanged_behavior() {
+        // When no associations have ordinals, behavior should be exactly as before
+        let mut brain = brain_with_sqlite();
+
+        let anchor = brain.create("Root memory").unwrap();
+        brain.set_embedding(&anchor, &[1.0, 0.0, 0.0]).unwrap();
+
+        let target_a = brain.create("Related A").unwrap();
+        brain.set_embedding(&target_a, &[0.5, 0.5, 0.0]).unwrap();
+
+        let target_b = brain.create("Related B").unwrap();
+        brain.set_embedding(&target_b, &[0.3, 0.7, 0.0]).unwrap();
+
+        // No ordinals
+        brain.associate(anchor, target_a, 0.7).unwrap();
+        brain.associate(anchor, target_b, 0.6).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(anchor);
+
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[anchor],
+            &mut seen,
+            1,
+        ).unwrap();
+
+        // Both should be discovered
+        assert_eq!(discoveries.len(), 2);
+        let ids: std::collections::HashSet<_> = discoveries.iter().map(|d| d.id).collect();
+        assert!(ids.contains(&target_a));
+        assert!(ids.contains(&target_b));
+    }
+
+    #[test]
+    fn discover_ordinal_traversal_multi_hop_chain() {
+        // Test multi-hop with ordinals: anchor → B(ord:1) → C(ord:1)
+        // At depth=2, should discover B first, then C
+        let mut brain = brain_with_sqlite();
+
+        let anchor = brain.create("Root").unwrap();
+        brain.set_embedding(&anchor, &[1.0, 0.0, 0.0]).unwrap();
+
+        let step_b = brain.create("Step B").unwrap();
+        brain.set_embedding(&step_b, &[0.5, 0.5, 0.0]).unwrap();
+
+        let step_c = brain.create("Step C").unwrap();
+        brain.set_embedding(&step_c, &[0.0, 1.0, 0.0]).unwrap();
+
+        brain.associate_with_ordinal(anchor, step_b, 0.9, Some(1)).unwrap();
+        brain.associate_with_ordinal(step_b, step_c, 0.9, Some(1)).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(anchor);
+
+        let discoveries = brain.discover_associated_memories(
+            &[1.0, 0.0, 0.0],
+            &[anchor],
+            &mut seen,
+            2,
+        ).unwrap();
+
+        assert_eq!(discoveries.len(), 2);
+        assert_eq!(discoveries[0].id, step_b, "First hop should discover B");
+        assert_eq!(discoveries[1].id, step_c, "Second hop should discover C");
     }
 }

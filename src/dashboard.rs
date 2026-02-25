@@ -1,8 +1,9 @@
 //! Dashboard HTTP server.
 //!
-//! Serves a web dashboard on `127.0.0.1:4242` showing memory, identity,
-//! references, and the association graph. Runs on a background daemon thread,
-//! completely independent of the MCP stdio transport.
+//! Serves a web dashboard on `127.0.0.1:4242` (or the port set via
+//! `MEMORYCO_DASHBOARD_PORT`) showing memory, identity, references, and
+//! the association graph. Runs on a background daemon thread, completely
+//! independent of the MCP stdio transport.
 
 use crate::engram::Brain;
 use crate::identity::IdentityStore;
@@ -13,7 +14,21 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
-const BIND_ADDR: &str = "127.0.0.1:4242";
+pub(crate) const BIND_HOST: &str = "127.0.0.1";
+pub(crate) const BIND_PORT: u16 = 4242;
+
+/// Parse a port string, returning `None` on invalid or out-of-range values.
+fn parse_port(s: &str) -> Option<u16> {
+    s.parse().ok()
+}
+
+/// Resolve the dashboard port: `MEMORYCO_DASHBOARD_PORT` env var, or [`BIND_PORT`].
+pub(crate) fn resolve_dashboard_port() -> u16 {
+    std::env::var("MEMORYCO_DASHBOARD_PORT")
+        .ok()
+        .and_then(|p| parse_port(&p))
+        .unwrap_or(BIND_PORT)
+}
 
 /// Shared state for the dashboard thread — backed by the same Arcs as the MCP
 /// server so edits in the dashboard are immediately visible via MCP and vice-versa.
@@ -39,15 +54,17 @@ pub fn start_dashboard(
     let memory_home = memory_home.to_path_buf();
     let references_dir = memory_home.join("references");
 
-    let server = match tiny_http::Server::http(BIND_ADDR) {
+    let port = resolve_dashboard_port();
+    let addr = format!("{}:{}", BIND_HOST, port);
+    let server = match tiny_http::Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Dashboard: Failed to bind {}: {}", BIND_ADDR, e);
+            eprintln!("Dashboard: Failed to bind {}: {}", addr, e);
             return;
         }
     };
 
-    eprintln!("Dashboard: http://{}/", BIND_ADDR);
+    eprintln!("Dashboard: http://{}:{}/", BIND_HOST, port);
 
     std::thread::Builder::new()
         .name("dashboard".into())
@@ -1608,5 +1625,30 @@ mod tests {
             ["api", "lenses", name] => assert_eq!(*name, "humanizer"),
             _ => panic!("Should match lens delete"),
         }
+    }
+
+    // ── Port resolution ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_port_valid() {
+        assert_eq!(parse_port("4242"), Some(4242));
+        assert_eq!(parse_port("9999"), Some(9999));
+        assert_eq!(parse_port("0"), Some(0));
+        assert_eq!(parse_port("65535"), Some(65535));
+    }
+
+    #[test]
+    fn parse_port_invalid() {
+        assert_eq!(parse_port("not_a_number"), None);
+        assert_eq!(parse_port(""), None);
+        assert_eq!(parse_port("-1"), None);
+        // 99999 exceeds u16::MAX (65535)
+        assert_eq!(parse_port("99999"), None);
+    }
+
+    #[test]
+    fn bind_port_constant() {
+        assert_eq!(BIND_PORT, 4242);
+        assert_eq!(BIND_HOST, "127.0.0.1");
     }
 }

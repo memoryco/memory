@@ -4,9 +4,13 @@ use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult};
 
 use crate::Context;
+use crate::dashboard::{BIND_HOST, resolve_dashboard_port};
 use crate::tools::text_response;
 
-const DASHBOARD_URL: &str = "http://127.0.0.1:4242";
+/// Resolve the dashboard URL, honoring `MEMORYCO_DASHBOARD_PORT` if set.
+fn dashboard_url() -> String {
+    format!("http://{}:{}", BIND_HOST, resolve_dashboard_port())
+}
 
 pub struct OpenDashboardTool;
 
@@ -32,6 +36,7 @@ impl Tool<Context> for OpenDashboardTool {
         _context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
+        let url = dashboard_url();
         let cmd = if cfg!(target_os = "macos") {
             "open"
         } else if cfg!(target_os = "windows") {
@@ -40,14 +45,14 @@ impl Tool<Context> for OpenDashboardTool {
             "xdg-open"
         };
 
-        match std::process::Command::new(cmd).arg(DASHBOARD_URL).spawn() {
+        match std::process::Command::new(cmd).arg(&url).spawn() {
             Ok(_) => Ok(text_response(format!(
                 "Opened dashboard in your browser: {}",
-                DASHBOARD_URL
+                &url
             ))),
             Err(_) => Ok(text_response(format!(
                 "Could not open browser automatically. Open this URL manually: {}",
-                DASHBOARD_URL
+                &url
             ))),
         }
     }

@@ -5,6 +5,10 @@
 //!
 //! Documents appearing in multiple lists get higher scores, but documents
 //! appearing in only one list are still included.
+//!
+//! Output scores are normalized to 0..1 for downstream blending with other
+//! signals (for example semantic similarity and energy). Without this,
+//! raw RRF magnitudes (~0.01-0.03 with k=60) get swamped by other terms.
 
 use std::collections::HashMap;
 use super::SimilarityResult;
@@ -20,6 +24,10 @@ pub const DEFAULT_K: f64 = 60.0;
 ///
 /// Documents appearing in only one list still receive a score.
 /// Results are returned sorted by RRF score descending.
+///
+/// Returned `SimilarityResult.score` values are normalized to 0..1, where:
+/// - 1.0 = theoretical best case (document ranked #1 in every list)
+/// - Lower values preserve relative RRF ordering.
 pub fn reciprocal_rank_fusion(
     result_lists: &[&[SimilarityResult]],
     k: f64,
@@ -44,11 +52,24 @@ pub fn reciprocal_rank_fusion(
     let mut merged: Vec<(f64, SimilarityResult)> = scores.into_values().collect();
     merged.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Set the score field to the RRF score for downstream use
+    // Normalize to 0..1 using the theoretical max:
+    // max_rrf = num_lists * (1 / (k + 1)) when doc is rank 0 in every list.
+    let max_rrf = if result_lists.is_empty() {
+        1.0
+    } else {
+        (result_lists.len() as f64) / (k + 1.0)
+    };
+
+    // Set the score field to normalized RRF score for downstream use
     merged
         .into_iter()
         .map(|(rrf_score, mut result)| {
-            result.score = rrf_score as f32;
+            let normalized = if max_rrf > 0.0 {
+                (rrf_score / max_rrf).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            result.score = normalized as f32;
             result
         })
         .collect()
@@ -147,15 +168,38 @@ mod tests {
 
     #[test]
     fn rrf_overlapping_item_gets_double_score() {
-        // Verify the math: item at rank 0 in both lists should get 2/(k+1)
+        // In normalized mode, item at rank 0 in both lists is the theoretical max: 1.0
         let list_a = vec![make_result(1, 0.9, "Shared")];
         let list_b = vec![make_result(1, 0.95, "Shared")];
 
         let merged = reciprocal_rank_fusion(&[&list_a, &list_b], DEFAULT_K);
 
         assert_eq!(merged.len(), 1);
-        let expected = 2.0 / (DEFAULT_K + 1.0);
-        assert!((merged[0].score as f64 - expected).abs() < 1e-6,
-            "Expected score ~{}, got {}", expected, merged[0].score);
+        assert!((merged[0].score - 1.0).abs() < 1e-6,
+            "Expected normalized score 1.0, got {}", merged[0].score);
+    }
+
+    #[test]
+    fn rrf_scores_are_normalized_to_unit_interval() {
+        let list_a = vec![
+            make_result(1, 0.9, "A1"),
+            make_result(2, 0.8, "A2"),
+            make_result(3, 0.7, "A3"),
+        ];
+        let list_b = vec![
+            make_result(1, 0.95, "Shared top"),
+            make_result(4, 0.85, "B2"),
+        ];
+
+        let merged = reciprocal_rank_fusion(&[&list_a, &list_b], DEFAULT_K);
+        assert!(!merged.is_empty());
+
+        for result in &merged {
+            assert!(
+                (0.0..=1.0).contains(&result.score),
+                "score out of range: {}",
+                result.score
+            );
+        }
     }
 }

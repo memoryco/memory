@@ -19,6 +19,26 @@ const STOP_WORDS: &[&str] = &[
 /// Maximum number of query variants to generate (including original).
 const MAX_VARIANTS: usize = 5;
 
+/// Clean punctuation/possessive noise from query tokens while preserving case.
+fn clean_token(raw: &str) -> Option<String> {
+    let mut t = raw
+        .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’' && c != '`')
+        .replace('’', "'")
+        .replace('`', "");
+
+    if t.ends_with("'s") || t.ends_with("'S") {
+        let new_len = t.len().saturating_sub(2);
+        t.truncate(new_len);
+    }
+
+    let trimmed = t.trim_matches(|c: char| !c.is_alphanumeric());
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 /// Generate query variants for expansion (Level 1 only).
 /// Returns the original query plus a stop-word-stripped variant.
 /// The original query is ALWAYS first in the returned vec.
@@ -31,14 +51,13 @@ pub fn expand_query(query: &str) -> Vec<String> {
     }
 
     // Level 1: Stop words removed
-    let significant: Vec<&str> = words
+    let significant: Vec<String> = words
         .iter()
-        .filter(|w| {
-            let lower = w.to_lowercase();
-            let cleaned = lower.trim_matches(|c: char| !c.is_alphanumeric());
-            !cleaned.is_empty() && !STOP_WORDS.contains(&cleaned.as_ref())
+        .filter_map(|w| clean_token(w))
+        .filter(|cleaned| {
+            let lower = cleaned.to_lowercase();
+            !STOP_WORDS.contains(&lower.as_str())
         })
-        .copied()
         .collect();
 
     if !significant.is_empty() && significant.len() < words.len() {
@@ -57,14 +76,13 @@ pub fn expand_query(query: &str) -> Vec<String> {
 pub fn fallback_terms(query: &str) -> Vec<String> {
     let words: Vec<&str> = query.split_whitespace().collect();
 
-    let significant: Vec<&str> = words
+    let significant: Vec<String> = words
         .iter()
-        .filter(|w| {
-            let lower = w.to_lowercase();
-            let cleaned = lower.trim_matches(|c: char| !c.is_alphanumeric());
-            !cleaned.is_empty() && !STOP_WORDS.contains(&cleaned.as_ref())
+        .filter_map(|w| clean_token(w))
+        .filter(|cleaned| {
+            let lower = cleaned.to_lowercase();
+            !STOP_WORDS.contains(&lower.as_str())
         })
-        .copied()
         .collect();
 
     if significant.len() < 2 {
@@ -76,10 +94,9 @@ pub fn fallback_terms(query: &str) -> Vec<String> {
         if terms.len() >= MAX_VARIANTS {
             break;
         }
-        let t = term.trim_matches(|c: char| !c.is_alphanumeric());
-        let first_char = t.chars().next().unwrap_or('a');
-        if first_char.is_uppercase() || t.len() >= 4 {
-            let t_str = t.to_string();
+        let first_char = term.chars().next().unwrap_or('a');
+        if first_char.is_uppercase() || term.len() >= 4 {
+            let t_str = term.to_string();
             if !terms.contains(&t_str) {
                 terms.push(t_str);
             }
@@ -176,5 +193,16 @@ mod tests {
             "Stop-word-stripped variant should be present: {:?}", result);
         // Level 2 terms should NOT be here
         assert_eq!(result.len(), 2, "Should only have original + stripped: {:?}", result);
+    }
+
+    #[test]
+    fn possessive_tokens_are_cleaned() {
+        let result = expand_query("What is Caroline's relationship status?");
+        assert!(result.contains(&"Caroline relationship status".to_string()),
+            "Possessive should be cleaned in stripped variant: {:?}", result);
+
+        let fallback = fallback_terms("What is Caroline's relationship status?");
+        assert!(fallback.contains(&"Caroline".to_string()));
+        assert!(fallback.contains(&"relationship".to_string()));
     }
 }

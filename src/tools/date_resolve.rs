@@ -109,7 +109,105 @@ fn parse_reference_date(input: &str) -> Result<NaiveDate, String> {
 
 /// Parse an inline date from an expression (e.g. "2023-05-25" within "the sunday before 2023-05-25").
 fn parse_inline_date(s: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()
+    let normalized = normalize_date_text(s);
+
+    // ISO first (fast path)
+    if let Ok(date) = NaiveDate::parse_from_str(&normalized, "%Y-%m-%d") {
+        return Some(date);
+    }
+
+    // Day-Month-Year: "17 July 2023", "15 June, 2023", "1st September 2023"
+    let tokens: Vec<&str> = normalized.split_whitespace().collect();
+    if tokens.len() >= 3 {
+        let first = parse_day_number(tokens[0]);
+        let second = parse_month(tokens[1]);
+        let third = parse_year(tokens[2]);
+        if let (Some(day), Some(month), Some(year)) = (first, second, third) {
+            if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
+                return Some(date);
+            }
+        }
+
+        // Month-Day-Year: "July 17 2023"
+        let first_m = parse_month(tokens[0]);
+        let second_d = parse_day_number(tokens[1]);
+        let third_y = parse_year(tokens[2]);
+        if let (Some(month), Some(day), Some(year)) = (first_m, second_d, third_y) {
+            if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
+                return Some(date);
+            }
+        }
+    }
+
+    None
+}
+
+/// Normalize free-form date text for parsing.
+fn normalize_date_text(input: &str) -> String {
+    // Keep alnum, whitespace, and dashes. Drop punctuation that often appears
+    // in natural-language dates (commas, backticks, periods).
+    let cleaned: String = input
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Parse a day number token, supporting ordinal suffixes (1st, 2nd, 3rd, 4th).
+fn parse_day_number(token: &str) -> Option<u32> {
+    let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    let lower = cleaned.as_str();
+    let stripped = lower
+        .trim_end_matches("st")
+        .trim_end_matches("nd")
+        .trim_end_matches("rd")
+        .trim_end_matches("th");
+    let day = stripped.parse::<u32>().ok()?;
+    if (1..=31).contains(&day) {
+        Some(day)
+    } else {
+        None
+    }
+}
+
+/// Parse a year token.
+fn parse_year(token: &str) -> Option<i32> {
+    let cleaned = token.trim_matches(|c: char| !c.is_ascii_digit());
+    let year = cleaned.parse::<i32>().ok()?;
+    if (1000..=9999).contains(&year) {
+        Some(year)
+    } else {
+        None
+    }
+}
+
+/// Parse month names and common abbreviations.
+fn parse_month(token: &str) -> Option<u32> {
+    let cleaned = token
+        .trim_matches(|c: char| !c.is_alphabetic())
+        .to_lowercase();
+    match cleaned.as_str() {
+        "january" | "jan" => Some(1),
+        "february" | "feb" => Some(2),
+        "march" | "mar" => Some(3),
+        "april" | "apr" => Some(4),
+        "may" => Some(5),
+        "june" | "jun" => Some(6),
+        "july" | "jul" => Some(7),
+        "august" | "aug" => Some(8),
+        "september" | "sep" | "sept" => Some(9),
+        "october" | "oct" => Some(10),
+        "november" | "nov" => Some(11),
+        "december" | "dec" => Some(12),
+        _ => None,
+    }
 }
 
 // =============================================================================
@@ -159,8 +257,19 @@ fn resolve_expression(expression: &str, reference: NaiveDate) -> Result<DateResu
         return result;
     }
 
+    // "the weekend before/after [date]", "two weekends before [date]",
+    // "first weekend of August 2023"
+    if let Some(result) = try_weekend_patterns(&expr, reference) {
+        return result;
+    }
+
     // "the week/month before/after [date]"
     if let Some(result) = try_period_before_after(&expr, reference) {
+        return result;
+    }
+
+    // "summer of 2022", "winter 2023", etc.
+    if let Some(result) = try_season_of_year(&expr) {
         return result;
     }
 
@@ -172,7 +281,11 @@ fn resolve_expression(expression: &str, reference: NaiveDate) -> Result<DateResu
          - last/next/this [weekday]\n\
          - last/next/this week/month/year\n\
          - the [weekday] before/after [date]\n\
-         - the week/month before/after [date]",
+         - the weekend before/after [date]\n\
+         - X weekends before/after [date]\n\
+         - first/second/third/fourth/last weekend of [month] [year]\n\
+         - the week/month before/after [date]\n\
+         - season of year (e.g. 'summer of 2022')",
         expression.trim()
     ))
 }
@@ -432,6 +545,136 @@ fn try_period_before_after(expr: &str, reference: NaiveDate) -> Option<Result<Da
     }
 }
 
+/// Match weekend-oriented patterns:
+/// - "the weekend before/after [date]"
+/// - "two weekends before/after [date]"
+/// - "first/second/third/fourth/last weekend of [month] [year]"
+fn try_weekend_patterns(expr: &str, reference: NaiveDate) -> Option<Result<DateResult, String>> {
+    if let Some(result) = try_n_weekends_before_after(expr, reference) {
+        return Some(result);
+    }
+    if let Some(result) = try_nth_weekend_of_month(expr) {
+        return Some(result);
+    }
+    None
+}
+
+/// Match "weekend before/after [date]" and "X weekends before/after [date]".
+fn try_n_weekends_before_after(expr: &str, reference: NaiveDate) -> Option<Result<DateResult, String>> {
+    let rest = expr.strip_prefix("the ").unwrap_or(expr);
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    let dir_idx = parts.iter().position(|p| *p == "before" || *p == "after")?;
+    if dir_idx == 0 {
+        return None;
+    }
+
+    let direction = parts[dir_idx];
+    let left = &parts[..dir_idx];
+    let right = parts[dir_idx + 1..].join(" ");
+
+    let n = match left {
+        ["weekend"] | ["weekends"] => 1,
+        [count, unit] if *unit == "weekend" || *unit == "weekends" => parse_number(count)?,
+        _ => return None,
+    };
+
+    let anchor = if right.is_empty() {
+        reference
+    } else {
+        parse_inline_date(&right)?
+    };
+
+    let (start, end) = match direction {
+        "before" => nth_weekend_before(anchor, n),
+        "after" => nth_weekend_after(anchor, n),
+        _ => return None,
+    };
+
+    Some(Ok(DateResult::DateRange(
+        start,
+        end,
+        Some(format!("{} weekend{}", n, if n == 1 { "" } else { "s" })),
+    )))
+}
+
+/// Match "first/second/third/fourth/last weekend of [month] [year]".
+fn try_nth_weekend_of_month(expr: &str) -> Option<Result<DateResult, String>> {
+    let rest = expr.strip_prefix("the ").unwrap_or(expr);
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    if parts[1] != "weekend" || parts[2] != "of" {
+        return None;
+    }
+
+    let ordinal = parts[0];
+    let month = parse_month(parts[3])?;
+    let year = parse_year(parts[4])?;
+
+    let (start, end) = match ordinal {
+        "first" => nth_weekend_in_month(year, month, 1)?,
+        "second" => nth_weekend_in_month(year, month, 2)?,
+        "third" => nth_weekend_in_month(year, month, 3)?,
+        "fourth" => nth_weekend_in_month(year, month, 4)?,
+        "last" => last_weekend_in_month(year, month)?,
+        _ => return None,
+    };
+
+    Some(Ok(DateResult::DateRange(
+        start,
+        end,
+        Some(format!("{} weekend of {} {}", ordinal, month_name(month), year)),
+    )))
+}
+
+/// Match season expressions like "summer of 2022" or "winter 2023".
+fn try_season_of_year(expr: &str) -> Option<Result<DateResult, String>> {
+    let rest = expr.strip_prefix("the ").unwrap_or(expr);
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
+    if tokens.len() < 2 {
+        return None;
+    }
+
+    let (season, year_token) = if tokens.len() >= 3 && tokens[1] == "of" {
+        (tokens[0], tokens[2])
+    } else {
+        (tokens[0], tokens[1])
+    };
+
+    let year = parse_year(year_token)?;
+
+    let result = match season {
+        "spring" => DateResult::DateRange(
+            NaiveDate::from_ymd_opt(year, 3, 1)?,
+            NaiveDate::from_ymd_opt(year, 5, 31)?,
+            Some(format!("Spring {}", year)),
+        ),
+        "summer" => DateResult::DateRange(
+            NaiveDate::from_ymd_opt(year, 6, 1)?,
+            NaiveDate::from_ymd_opt(year, 8, 31)?,
+            Some(format!("Summer {}", year)),
+        ),
+        "fall" | "autumn" => DateResult::DateRange(
+            NaiveDate::from_ymd_opt(year, 9, 1)?,
+            NaiveDate::from_ymd_opt(year, 11, 30)?,
+            Some(format!("Fall {}", year)),
+        ),
+        "winter" => {
+            let next_year = year + 1;
+            let end_day = days_in_month(next_year, 2);
+            DateResult::DateRange(
+                NaiveDate::from_ymd_opt(year, 12, 1)?,
+                NaiveDate::from_ymd_opt(next_year, 2, end_day)?,
+                Some(format!("Winter {}-{}", year, next_year)),
+            )
+        }
+        _ => return None,
+    };
+
+    Some(Ok(result))
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -492,6 +735,72 @@ fn week_range(date: NaiveDate) -> (NaiveDate, NaiveDate) {
     let monday = date - Duration::days(days_since_monday);
     let sunday = monday + Duration::days(6);
     (monday, sunday)
+}
+
+/// Get the nth weekend strictly before an anchor date.
+/// Weekend is Saturday-Sunday.
+fn nth_weekend_before(anchor: NaiveDate, n: u32) -> (NaiveDate, NaiveDate) {
+    let mut sunday = anchor - Duration::days(1);
+    while sunday.weekday() != Weekday::Sun {
+        sunday = sunday - Duration::days(1);
+    }
+    if n > 1 {
+        sunday = sunday - Duration::weeks((n - 1) as i64);
+    }
+    let saturday = sunday - Duration::days(1);
+    (saturday, sunday)
+}
+
+/// Get the nth weekend strictly after an anchor date.
+/// Weekend is Saturday-Sunday.
+fn nth_weekend_after(anchor: NaiveDate, n: u32) -> (NaiveDate, NaiveDate) {
+    let mut saturday = anchor + Duration::days(1);
+    while saturday.weekday() != Weekday::Sat {
+        saturday = saturday + Duration::days(1);
+    }
+    if n > 1 {
+        saturday = saturday + Duration::weeks((n - 1) as i64);
+    }
+    let sunday = saturday + Duration::days(1);
+    (saturday, sunday)
+}
+
+/// Get the nth weekend in a month (1-based). Returns None if that weekend does not exist.
+fn nth_weekend_in_month(year: i32, month: u32, n: u32) -> Option<(NaiveDate, NaiveDate)> {
+    if n == 0 {
+        return None;
+    }
+    let first_day = NaiveDate::from_ymd_opt(year, month, 1)?;
+    let mut first_saturday = first_day;
+    while first_saturday.weekday() != Weekday::Sat {
+        first_saturday = first_saturday + Duration::days(1);
+    }
+
+    let saturday = first_saturday + Duration::weeks((n - 1) as i64);
+    let sunday = saturday + Duration::days(1);
+    if saturday.month() != month || sunday.month() != month {
+        return None;
+    }
+    Some((saturday, sunday))
+}
+
+/// Get the last full weekend in a month.
+fn last_weekend_in_month(year: i32, month: u32) -> Option<(NaiveDate, NaiveDate)> {
+    let (_, month_end) = month_range(year, month);
+    let mut saturday = month_end;
+    while saturday.weekday() != Weekday::Sat {
+        saturday = saturday - Duration::days(1);
+    }
+    let sunday = saturday + Duration::days(1);
+    if sunday.month() != month {
+        let saturday_prev = saturday - Duration::weeks(1);
+        let sunday_prev = saturday_prev + Duration::days(1);
+        if saturday_prev.month() == month && sunday_prev.month() == month {
+            return Some((saturday_prev, sunday_prev));
+        }
+        return None;
+    }
+    Some((saturday, sunday))
 }
 
 /// Get the first and last day of a given month.
@@ -622,6 +931,38 @@ mod tests {
     fn parse_invalid_date() {
         assert!(parse_reference_date("not-a-date").is_err());
         assert!(parse_reference_date("").is_err());
+    }
+
+    #[test]
+    fn parse_inline_dmy_month_name() {
+        assert_eq!(
+            parse_inline_date("17 July 2023").unwrap(),
+            date(2023, 7, 17)
+        );
+    }
+
+    #[test]
+    fn parse_inline_dmy_with_comma() {
+        assert_eq!(
+            parse_inline_date("15 June, 2023").unwrap(),
+            date(2023, 6, 15)
+        );
+    }
+
+    #[test]
+    fn parse_inline_dmy_with_ordinal_suffix() {
+        assert_eq!(
+            parse_inline_date("1st September 2023").unwrap(),
+            date(2023, 9, 1)
+        );
+    }
+
+    #[test]
+    fn parse_inline_dmy_with_backtick_noise() {
+        assert_eq!(
+            parse_inline_date("3` July 2023").unwrap(),
+            date(2023, 7, 3)
+        );
     }
 
     // --- Relative days ---
@@ -835,6 +1176,42 @@ mod tests {
         let result =
             resolve_expression("the month after 2023-05-25", date(2023, 5, 25)).unwrap();
         assert_date_range(&result, date(2023, 6, 1), date(2023, 6, 30));
+    }
+
+    #[test]
+    fn the_sunday_before_natural_language_date() {
+        // 3 July 2023 is Monday → Sunday before = 2023-07-02
+        let result =
+            resolve_expression("the sunday before 3 July 2023", date(2023, 7, 10)).unwrap();
+        assert_single_date(&result, date(2023, 7, 2));
+    }
+
+    #[test]
+    fn weekend_before_natural_language_date() {
+        // Weekend before Friday 2023-10-20 = 2023-10-14 to 2023-10-15
+        let result =
+            resolve_expression("the weekend before 20 October 2023", date(2023, 10, 25)).unwrap();
+        assert_date_range(&result, date(2023, 10, 14), date(2023, 10, 15));
+    }
+
+    #[test]
+    fn two_weekends_before_anchor() {
+        // Anchor Monday 2023-07-17 -> two weekends before = 2023-07-08 to 2023-07-09
+        let result =
+            resolve_expression("two weekends before 17 July 2023", date(2023, 7, 20)).unwrap();
+        assert_date_range(&result, date(2023, 7, 8), date(2023, 7, 9));
+    }
+
+    #[test]
+    fn first_weekend_of_month() {
+        let result = resolve_expression("first weekend of August 2023", date(2023, 8, 10)).unwrap();
+        assert_date_range(&result, date(2023, 8, 5), date(2023, 8, 6));
+    }
+
+    #[test]
+    fn season_of_year_summer() {
+        let result = resolve_expression("summer of 2022", date(2023, 8, 10)).unwrap();
+        assert_date_range(&result, date(2022, 6, 1), date(2022, 8, 31));
     }
 
     #[test]

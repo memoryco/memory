@@ -28,6 +28,27 @@ struct Args {
     include_archived: Option<bool>,
 }
 
+/// Heuristic: list/multi-hop style queries often need broader recall.
+fn is_composite_query(query: &str) -> bool {
+    let q = query.to_lowercase();
+    let conjunction = q.contains(" and ") || q.contains(" both ");
+    let list_cues = [
+        "activities", "events", "books", "states", "cities", "names", "causes",
+        "traits", "attributes", "both have", "in common", "all ",
+    ];
+    conjunction || list_cues.iter().any(|cue| q.contains(cue))
+}
+
+/// Heuristic: inferential/open-domain questions benefit from weaker-signal recall.
+fn is_inferential_query(query: &str) -> bool {
+    let q = query.to_lowercase();
+    let cues = [
+        "might", "likely", "considered", "would", "could", "personality",
+        "attributes", "traits", "describe", "what job",
+    ];
+    cues.iter().any(|cue| q.contains(cue))
+}
+
 impl Tool<Context> for EngramSearchTool {
     fn name(&self) -> &str {
         "engram_search"
@@ -84,6 +105,15 @@ impl Tool<Context> for EngramSearchTool {
         let min_score = args.min_score.unwrap_or(0.4);
         let include_deep = args.include_deep.unwrap_or(false);
         let include_archived = args.include_archived.unwrap_or(false);
+        let composite_query = is_composite_query(&args.query);
+        let inferential_query = is_inferential_query(&args.query);
+
+        // List/composite questions often need more context than the nominal limit.
+        let effective_limit = if composite_query {
+            limit.max(15).min(30)
+        } else {
+            limit
+        };
 
         let mut brain = context.brain.lock().unwrap();
 
@@ -116,9 +146,9 @@ impl Tool<Context> for EngramSearchTool {
         // Find similar memories (fetch extra to allow for filtering)
         // When reranking is enabled, fetch more candidates for the reranker to work with
         let fetch_count = if rerank_enabled {
-            rerank_candidates.max(limit * 3)
+            rerank_candidates.max(effective_limit * 3)
         } else {
-            limit * 3
+            effective_limit * 3
         };
 
         // Run retrieval for each variant, merging results (keep highest score per engram).
@@ -197,15 +227,55 @@ impl Tool<Context> for EngramSearchTool {
                        &mut original_query_embedding, variants.len() > 1)?;
         }
 
-        // Phase 2 (fallback): If results are sparse, try individual term queries
+        // Phase 2 (fallback): run individual term queries when sparse OR
+        // when the question looks list/multi-hop style.
         const SPARSE_THRESHOLD: usize = 3;
-        if query_expansion_enabled && all_results.len() < SPARSE_THRESHOLD {
+        let sparse_results = all_results.len() < SPARSE_THRESHOLD;
+
+        if query_expansion_enabled && (sparse_results || composite_query) {
             let fallback = super::query_expansion::fallback_terms(&args.query);
             if !fallback.is_empty() {
-                eprintln!("[search] sparse results ({}), running {} fallback term queries",
-                    all_results.len(), fallback.len());
-                for term in &fallback {
+                let max_fallback_terms = if sparse_results {
+                    fallback.len()
+                } else {
+                    // Composite queries already have some signal; limit expansion fan-out.
+                    fallback.len().min(3)
+                };
+                eprintln!(
+                    "[search] {} results (composite={}), running {} fallback term queries",
+                    all_results.len(),
+                    composite_query,
+                    max_fallback_terms
+                );
+                for term in fallback.iter().take(max_fallback_terms) {
                     run_variant(term, &mut brain, &generator, fetch_count, min_score,
+                               hybrid_search_enabled, &mut all_results,
+                               &mut original_query_embedding, true)?;
+                }
+            }
+        }
+
+        // Phase 3 (inferential questions): if still under-filled, run a relaxed
+        // similarity pass so weak but relevant clues can surface.
+        if query_expansion_enabled && inferential_query && all_results.len() < effective_limit {
+            let relaxed_min_score = (min_score * 0.6).max(0.15);
+            if relaxed_min_score < min_score {
+                let mut relaxed_queries = vec![args.query.clone()];
+                for term in super::query_expansion::fallback_terms(&args.query).into_iter().take(2) {
+                    if !relaxed_queries.iter().any(|q| q == &term) {
+                        relaxed_queries.push(term);
+                    }
+                }
+                eprintln!(
+                    "[search] inferential query under-filled ({}<{}), relaxed min_score {:.2}->{:.2} across {} queries",
+                    all_results.len(),
+                    effective_limit,
+                    min_score,
+                    relaxed_min_score,
+                    relaxed_queries.len()
+                );
+                for rq in &relaxed_queries {
+                    run_variant(rq, &mut brain, &generator, fetch_count, relaxed_min_score,
                                hybrid_search_enabled, &mut all_results,
                                &mut original_query_embedding, true)?;
                 }
@@ -314,12 +384,15 @@ impl Tool<Context> for EngramSearchTool {
                 association_depth,
             ).map_err(|e| McpError::ToolError(format!("Association discovery failed: {}", e)))?;
 
-            // Cap discoveries to avoid swamping vector results
+            // Cap discoveries to avoid swamping vector results.
+            // Scale the cap with requested limit so list/multi-hop questions
+            // can merge more associated clues.
             association_discovery_count = discoveries.len();
+            let association_cap = effective_limit.clamp(5, 12);
             let capped: Vec<_> = {
                 let mut sorted = discoveries;
                 sorted.sort_by(|a, b| b.blended_score.partial_cmp(&a.blended_score).unwrap_or(std::cmp::Ordering::Equal));
-                sorted.into_iter().take(5).collect()
+                sorted.into_iter().take(association_cap).collect()
             };
 
             // Merge discovered memories into scored results
@@ -353,18 +426,18 @@ impl Tool<Context> for EngramSearchTool {
             // Re-sort after merging
             scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
 
-            association_merged_count = association_discovery_count.min(5);
+            association_merged_count = association_discovery_count.min(association_cap);
 
             // Log discovery stats for visibility
-            eprintln!("[search] association-following: {} discovered, {} merged (cap: 5, depth: {})",
-                association_discovery_count, association_merged_count, association_depth);
+            eprintln!("[search] association-following: {} discovered, {} merged (cap: {}, depth: {})",
+                association_discovery_count, association_merged_count, association_cap, association_depth);
         }
 
         // Chain detection: check if any seed results (vector search hits) are procedure anchors
         let chain_hints = detect_procedure_chains(&brain, &seed_ids);
 
         // Limit results
-        scored.truncate(limit);
+        scored.truncate(effective_limit);
 
         if scored.is_empty() {
             let mut output = String::from(
@@ -406,7 +479,7 @@ impl Tool<Context> for EngramSearchTool {
                 .unwrap_or_else(|| "unknown".to_string());
 
             output.push_str(&format!(
-                "ID: {}\nContent: {}\nCreated: {}\nScore: {:.2} (sim: {:.2}, energy: {:.2}) | State: {}\n\n",
+                "ID: {}\nContent: {}\nCreated: {}\nScore: {:.4} (sim: {:.4}, energy: {:.4}) | State: {}\n\n",
                 r.id,
                 r.content,
                 created_date,
@@ -609,5 +682,19 @@ mod tests {
     #[test]
     fn truncate_chain_hint_content_short_string_passthrough() {
         assert_eq!(truncate_chain_hint_content("short", 40), "short");
+    }
+
+    #[test]
+    fn composite_query_heuristic_detects_list_style_questions() {
+        assert!(is_composite_query("What activities does Melanie partake in?"));
+        assert!(is_composite_query("What do Jon and Gina both have in common?"));
+        assert!(!is_composite_query("Where did Caroline move from?"));
+    }
+
+    #[test]
+    fn inferential_query_heuristic_detects_open_domain_style_questions() {
+        assert!(is_inferential_query("What might John's degree be in?"));
+        assert!(is_inferential_query("Would Caroline be considered religious?"));
+        assert!(!is_inferential_query("When did Caroline attend the support group?"));
     }
 }

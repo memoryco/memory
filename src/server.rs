@@ -263,6 +263,9 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::StepAddTool).expect("step_add");
     server.add_tool(tools::StepCompleteTool).expect("step_complete");
 
+    // Date tools
+    server.add_tool(tools::DateResolveTool).expect("date_resolve");
+
     // UI tools
     server.add_tool(tools::OpenDashboardTool).expect("open_dashboard");
 

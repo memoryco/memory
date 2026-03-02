@@ -85,6 +85,40 @@ pub struct Config {
     /// 1 = direct associations only, 2 = friends-of-friends, etc.
     #[serde(default = "default_search_association_depth")]
     pub search_association_depth: u8,
+
+    /// The desired embedding model name (e.g. "SnowflakeArcticEmbedL")
+    /// Changing this triggers re-embedding on next Brain startup.
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+
+    /// Which model was actually used to generate current embeddings.
+    /// When this differs from `embedding_model`, migration is triggered.
+    /// None means no embeddings have been generated yet (or pre-config era).
+    #[serde(default)]
+    pub embedding_model_active: Option<String>,
+
+    /// Whether to use cross-encoder re-ranking on search results.
+    /// When enabled, cosine similarity results are re-scored by a cross-encoder
+    /// model for significantly better relevance ordering.
+    #[serde(default = "default_rerank_enabled")]
+    pub rerank_enabled: bool,
+
+    /// How many candidates to pull from cosine similarity before re-ranking.
+    /// Higher = better recall but slower. Only used when rerank_enabled is true.
+    #[serde(default = "default_rerank_candidates")]
+    pub rerank_candidates: usize,
+
+    /// Whether to use hybrid BM25+vector search with RRF fusion.
+    /// When enabled, searches both FTS5 (keyword/BM25) and vector (cosine similarity)
+    /// in parallel, then merges results using Reciprocal Rank Fusion.
+    #[serde(default = "default_hybrid_search_enabled")]
+    pub hybrid_search_enabled: bool,
+
+    /// Whether to use query expansion before retrieval.
+    /// When enabled, generates variant queries (stop-word-stripped, key terms)
+    /// and runs each through the full retrieval pipeline before merging.
+    #[serde(default = "default_query_expansion_enabled")]
+    pub query_expansion_enabled: bool,
 }
 
 fn default_max_tag_cardinality() -> usize {
@@ -105,6 +139,26 @@ fn default_search_follow_associations() -> bool {
 
 fn default_search_association_depth() -> u8 {
     1  // Direct associations only
+}
+
+fn default_embedding_model() -> String {
+    crate::embedding::default_embedding_model()
+}
+
+fn default_rerank_enabled() -> bool {
+    true
+}
+
+fn default_rerank_candidates() -> usize {
+    30
+}
+
+fn default_hybrid_search_enabled() -> bool {
+    true
+}
+
+fn default_query_expansion_enabled() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -129,6 +183,12 @@ impl Default for Config {
             min_association_weight: 0.05, // Prune below 5%
             search_follow_associations: true, // Enabled by default (depth 1, cap 5)
             search_association_depth: 1,  // Direct associations only
+            embedding_model: crate::embedding::default_embedding_model(),
+            embedding_model_active: None,
+            rerank_enabled: true,
+            rerank_candidates: 30,
+            hybrid_search_enabled: true,
+            query_expansion_enabled: true,
         }
     }
 }

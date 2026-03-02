@@ -124,6 +124,22 @@ impl Engram {
         }
     }
     
+    /// Create a new engram with an explicit creation timestamp
+    pub fn new_with_timestamp(content: impl Into<String>, created_at: i64) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4(),
+            content: content.into(),
+            energy: 1.0,
+            state: MemoryState::Active,
+            confidence: 1.0,
+            created_at,
+            last_accessed: created_at,
+            access_count: 0,
+            tags: Vec::new(),
+            embedding: None,
+        }
+    }
+
     /// Create an engram with specific tags
     pub fn with_tags(content: impl Into<String>, tags: Vec<String>) -> Self {
         let mut engram = Self::new(content);

@@ -8,6 +8,7 @@
 pub(crate) mod memory;
 mod diesel;
 mod vector;
+pub mod rrf;
 pub mod schema;
 pub mod models;
 
@@ -191,5 +192,28 @@ pub trait Storage: Send {
     fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
         let _ = id;
         Ok(None)
+    }
+
+    /// Clear all embeddings (set to NULL) for migration purposes.
+    /// Returns the number of affected rows.
+    fn clear_all_embeddings(&mut self) -> StorageResult<usize> {
+        Ok(0)
+    }
+
+    // ==================
+    // KEYWORD SEARCH (FTS5)
+    // ==================
+
+    /// Search engrams by keyword using FTS5/BM25.
+    /// Returns results sorted by BM25 relevance score (higher = more relevant).
+    fn keyword_search(&mut self, query: &str, limit: usize) -> StorageResult<Vec<SimilarityResult>> {
+        let _ = (query, limit);
+        Ok(Vec::new())
+    }
+
+    /// Ensure the FTS5 index is populated from existing engrams.
+    /// Returns the number of engrams backfilled.
+    fn ensure_fts_populated(&mut self) -> StorageResult<usize> {
+        Ok(0)
     }
 }

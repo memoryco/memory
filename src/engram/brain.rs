@@ -40,13 +40,19 @@ impl Brain {
         storage.initialize()?;
 
         let config = storage.load_config()?.unwrap_or_default();
+        Self::apply_embedding_model_config(&config);
 
-        Ok(Self {
+        let mut brain = Self {
             identity: Identity::new(),
             substrate: Substrate::with_config(config),
             storage: Box::new(storage),
             persistence_worker: None,
-        })
+        };
+
+        brain.migrate_embeddings()?;
+        brain.ensure_fts_index()?;
+
+        Ok(brain)
     }
     
     /// Open an existing Brain from storage, or create new if empty
@@ -54,16 +60,17 @@ impl Brain {
     /// we don't have a db path. Use `open_path` for full persistence support.
     pub fn open<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
         storage.initialize()?;
-        
+
         // Load config
         let config = storage.load_config()?.unwrap_or_default();
-        
+        Self::apply_embedding_model_config(&config);
+
         // Load identity
         let identity = storage.load_identity()?.unwrap_or_default();
-        
+
         // Load substrate
         let mut substrate = Substrate::with_config(config);
-        
+
         // Load last decay timestamp
         // If never set, default to 24 hours ago so first run applies ~1 day of decay
         let default_decay_at = std::time::SystemTime::now()
@@ -72,45 +79,51 @@ impl Brain {
             .as_secs() as i64 - 86400; // 24 hours ago
         let last_decay = storage.load_last_decay_at()?.unwrap_or(default_decay_at);
         substrate.set_last_decay_at(last_decay);
-        
+
         // Load all engrams
         let engrams = storage.load_all_engrams()?;
         for engram in engrams {
             substrate.insert_engram(engram);
         }
-        
+
         // Load all associations
         let associations = storage.load_all_associations()?;
         for assoc in associations {
             substrate.insert_association(assoc);
         }
-        
-        Ok(Self {
+
+        let mut brain = Self {
             identity,
             substrate,
             storage: Box::new(storage),
             persistence_worker: None,
-        })
+        };
+
+        brain.migrate_embeddings()?;
+        brain.ensure_fts_index()?;
+
+        Ok(brain)
     }
 
     /// Open a Brain from a database path with full async persistence support
     /// This is the preferred way to open a Brain for production use.
     pub fn open_path(db_path: impl Into<PathBuf>) -> StorageResult<Self> {
         use super::storage::EngramStorage;
-        
+
         let path = db_path.into();
         let mut storage = EngramStorage::open(&path)?;
         storage.initialize()?;
-        
+
         // Load config
         let config = storage.load_config()?.unwrap_or_default();
-        
+        Self::apply_embedding_model_config(&config);
+
         // Load identity
         let identity = storage.load_identity()?.unwrap_or_default();
-        
+
         // Load substrate
         let mut substrate = Substrate::with_config(config);
-        
+
         // Load last decay timestamp
         let default_decay_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -118,29 +131,34 @@ impl Brain {
             .as_secs() as i64 - 86400;
         let last_decay = storage.load_last_decay_at()?.unwrap_or(default_decay_at);
         substrate.set_last_decay_at(last_decay);
-        
+
         // Load all engrams
         let engrams = storage.load_all_engrams()?;
         for engram in engrams {
             substrate.insert_engram(engram);
         }
-        
+
         // Load all associations
         let associations = storage.load_all_associations()?;
         for assoc in associations {
             substrate.insert_association(assoc);
         }
-        
+
         // Create persistence worker with its own connection
         let persistence_worker = PersistenceWorker::new(&path);
         eprintln!("[brain] Persistence worker started for {:?}", path);
-        
-        Ok(Self {
+
+        let mut brain = Self {
             identity,
             substrate,
             storage: Box::new(storage),
             persistence_worker: Some(persistence_worker),
-        })
+        };
+
+        brain.migrate_embeddings()?;
+        brain.ensure_fts_index()?;
+
+        Ok(brain)
     }
     
     // ==================
@@ -185,6 +203,18 @@ impl Brain {
         Ok(id)
     }
     
+    /// Create a new memory with an explicit creation timestamp
+    pub fn create_with_timestamp(&mut self, content: &str, created_at: i64) -> StorageResult<EngramId> {
+        let id = self.substrate.create_with_timestamp(content, created_at);
+        
+        // Persist immediately
+        if let Some(engram) = self.substrate.get(&id) {
+            self.storage.save_engram(engram)?;
+        }
+        
+        Ok(id)
+    }
+
     /// Create a new memory with tags
     pub fn create_with_tags(&mut self, content: &str, tags: Vec<String>) -> StorageResult<EngramId> {
         let id = self.substrate.create_with_tags(content, tags);
@@ -524,6 +554,10 @@ impl Brain {
             "recall_strength" => { config.recall_strength = value; true }
             "search_follow_associations" => { config.search_follow_associations = value != 0.0; true }
             "search_association_depth" => { config.search_association_depth = value.clamp(0.0, 5.0) as u8; true }
+            "rerank_enabled" => { config.rerank_enabled = value != 0.0; true }
+            "rerank_candidates" => { config.rerank_candidates = value.clamp(5.0, 200.0) as usize; true }
+            "hybrid_search_enabled" => { config.hybrid_search_enabled = value != 0.0; true }
+            "query_expansion_enabled" => { config.query_expansion_enabled = value != 0.0; true }
             _ => false,
         };
         
@@ -772,6 +806,96 @@ impl Brain {
     /// Iterate over all engrams
     pub fn all_engrams(&self) -> impl Iterator<Item = &Engram> {
         self.substrate.all_engrams()
+    }
+
+    /// Check if embeddings need migration and perform it if so.
+    ///
+    /// Migration triggers when `embedding_model` != `embedding_model_active` in config.
+    /// Steps: NULL all embeddings → re-embed in batch → update config.
+    pub fn migrate_embeddings(&mut self) -> StorageResult<()> {
+        let config = self.substrate.config();
+        let desired = &config.embedding_model;
+        let active = config.embedding_model_active.as_deref();
+
+        // If active matches desired, no migration needed
+        if active == Some(desired.as_str()) {
+            return Ok(());
+        }
+
+        eprintln!(
+            "[brain] Embedding model migration: {:?} → {}",
+            active.unwrap_or("(none)"),
+            desired
+        );
+
+        // Step 1: Clear all existing embeddings
+        let cleared = self.storage.clear_all_embeddings()?;
+        eprintln!("[brain] Cleared {} embeddings", cleared);
+
+        // Step 2: Re-embed all engrams
+        let all_ids: Vec<super::EngramId> = self.substrate.all_engrams()
+            .map(|e| e.id)
+            .collect();
+
+        if !all_ids.is_empty() {
+            let contents: Vec<String> = all_ids.iter()
+                .filter_map(|id| self.substrate.get(id))
+                .map(|e| e.content.clone())
+                .collect();
+
+            let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+
+            let generator = crate::embedding::EmbeddingGenerator::new();
+            match generator.generate_batch(&content_refs) {
+                Ok(embeddings) => {
+                    for (id, embedding) in all_ids.iter().zip(embeddings.iter()) {
+                        if let Err(e) = self.storage.set_embedding(id, embedding) {
+                            eprintln!("[brain] Failed to set embedding for {}: {}", id, e);
+                        }
+                    }
+                    eprintln!("[brain] Re-embedded {} engrams with {}", all_ids.len(), desired);
+                }
+                Err(e) => {
+                    eprintln!("[brain] Batch embedding failed: {}. Embeddings cleared but not regenerated.", e);
+                    eprintln!("[brain] They will be regenerated on next search/create.");
+                }
+            }
+        }
+
+        // Step 3: Update config to record the active model
+        let mut new_config = self.substrate.config().clone();
+        new_config.embedding_model_active = Some(desired.clone());
+        self.substrate.config = new_config;
+        self.storage.save_config(self.substrate.config())?;
+
+        eprintln!("[brain] Embedding migration complete");
+        Ok(())
+    }
+
+    /// Set the active embedding model name in the global state.
+    /// Called during initialization so the EmbeddingGenerator knows which model to load.
+    fn apply_embedding_model_config(config: &Config) {
+        crate::embedding::set_active_model(&config.embedding_model);
+    }
+
+    // ==================
+    // FTS5 KEYWORD SEARCH
+    // ==================
+
+    /// Ensure the FTS5 index is populated from existing engrams.
+    /// Called during Brain initialization. If the FTS5 table is empty but
+    /// engrams exist, backfills the index from the engrams table.
+    fn ensure_fts_index(&mut self) -> StorageResult<()> {
+        let backfilled = self.storage.ensure_fts_populated()?;
+        if backfilled > 0 {
+            eprintln!("[brain] Backfilled {} engrams into FTS5 index", backfilled);
+        }
+        Ok(())
+    }
+
+    /// Search engrams by keyword using FTS5/BM25.
+    pub fn keyword_search(&mut self, query: &str, limit: usize) -> StorageResult<Vec<SimilarityResult>> {
+        self.storage.keyword_search(query, limit)
     }
 }
 
@@ -1557,5 +1681,296 @@ mod tests {
         assert_eq!(discoveries.len(), 2);
         assert_eq!(discoveries[0].id, step_b, "First hop should discover B");
         assert_eq!(discoveries[1].id, step_c, "Second hop should discover C");
+    }
+
+    // ==================
+    // EMBEDDING MODEL MIGRATION TESTS
+    // ==================
+
+    #[test]
+    fn config_defaults_embedding_model_for_fresh_install() {
+        let config = Config::default();
+        assert_eq!(config.embedding_model, crate::embedding::default_embedding_model());
+        assert!(config.embedding_model_active.is_none());
+    }
+
+    #[test]
+    fn config_embedding_model_backwards_compat_deserialization() {
+        // Simulate loading a config from an old database that doesn't have
+        // embedding_model fields. Serde defaults should fill them in.
+        let old_json = r#"{
+            "decay_rate_per_day": 0.05,
+            "decay_interval_hours": 1.0,
+            "propagation_damping": 0.5,
+            "hebbian_learning_rate": 0.1,
+            "recall_strength": 0.2,
+            "blocked_tags": [],
+            "max_tag_cardinality": 20,
+            "association_decay_rate": 1.0,
+            "min_association_weight": 0.05,
+            "search_follow_associations": true,
+            "search_association_depth": 1
+        }"#;
+
+        let config: Config = serde_json::from_str(old_json).unwrap();
+        assert_eq!(config.embedding_model, crate::embedding::default_embedding_model());
+        assert!(config.embedding_model_active.is_none(),
+            "Old configs should have embedding_model_active=None");
+    }
+
+    #[test]
+    fn migration_triggers_when_active_is_none() {
+        // Fresh database: embedding_model_active is None, embedding_model is set
+        // This should trigger migration (no-op since there are no engrams to re-embed)
+        let brain = brain_with_sqlite();
+
+        // Config should now have active set after Brain::new migration
+        assert!(brain.config().embedding_model_active.is_some(),
+            "After Brain init, embedding_model_active should be set");
+        assert_eq!(
+            brain.config().embedding_model_active.as_deref(),
+            Some(brain.config().embedding_model.as_str()),
+            "Active should match desired after migration"
+        );
+    }
+
+    #[test]
+    fn migration_triggers_on_model_change() {
+        // Create brain with one model, then change config and verify migration detects it
+        let mut brain = brain_with_sqlite();
+
+        // Create some engrams with embeddings
+        let id_a = brain.create("Rust programming").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Python scripting").unwrap();
+        brain.set_embedding(&id_b, &[0.0, 1.0, 0.0]).unwrap();
+
+        // Verify embeddings exist
+        assert_eq!(brain.count_with_embeddings().unwrap(), 2);
+
+        // Simulate changing the model by directly updating config
+        let mut config = brain.config().clone();
+        config.embedding_model = "BGESmallENV15".to_string();
+        // Keep active as the old model — this mismatch triggers migration
+        brain.set_config(config).unwrap();
+
+        // Verify mismatch
+        assert_ne!(
+            brain.config().embedding_model,
+            brain.config().embedding_model_active.as_deref().unwrap_or(""),
+        );
+
+        // Run migration manually
+        // Note: this will try to load the actual model which we don't want in tests,
+        // but the clear step should work. The re-embed may fail (model not cached)
+        // which is fine — the cleared state is what we're testing.
+        let _ = brain.migrate_embeddings();
+
+        // After migration, active should match desired
+        assert_eq!(
+            brain.config().embedding_model_active.as_deref(),
+            Some("BGESmallENV15"),
+            "After migration, active model should match desired"
+        );
+    }
+
+    #[test]
+    fn migration_skips_when_models_match() {
+        let mut brain = brain_with_sqlite();
+
+        // After init, active should already match desired
+        let config = brain.config().clone();
+        assert_eq!(
+            config.embedding_model_active.as_deref(),
+            Some(config.embedding_model.as_str())
+        );
+
+        // Create an engram with embedding
+        let id = brain.create("Test memory").unwrap();
+        brain.set_embedding(&id, &[1.0, 0.0, 0.0]).unwrap();
+
+        // Migration should be a no-op
+        brain.migrate_embeddings().unwrap();
+
+        // Embedding should still exist (not cleared)
+        assert_eq!(brain.count_with_embeddings().unwrap(), 1);
+    }
+
+    #[test]
+    fn clear_all_embeddings_works() {
+        let mut brain = brain_with_sqlite();
+
+        let id_a = brain.create("Memory A").unwrap();
+        brain.set_embedding(&id_a, &[1.0, 0.0, 0.0]).unwrap();
+
+        let id_b = brain.create("Memory B").unwrap();
+        brain.set_embedding(&id_b, &[0.0, 1.0, 0.0]).unwrap();
+
+        let id_c = brain.create("Memory C (no embedding)").unwrap();
+
+        assert_eq!(brain.count_with_embeddings().unwrap(), 2);
+        assert_eq!(brain.count_without_embeddings().unwrap(), 1);
+
+        // Clear all embeddings
+        let cleared = brain.storage.clear_all_embeddings().unwrap();
+        assert_eq!(cleared, 2, "Should have cleared 2 embeddings");
+
+        // All should now be without embeddings
+        assert_eq!(brain.count_with_embeddings().unwrap(), 0);
+        assert_eq!(brain.count_without_embeddings().unwrap(), 3);
+
+        // Engrams themselves should still exist (no data loss)
+        assert!(brain.get(&id_a).is_some());
+        assert!(brain.get(&id_b).is_some());
+        assert!(brain.get(&id_c).is_some());
+    }
+
+    #[test]
+    fn clear_all_embeddings_returns_zero_when_none_exist() {
+        let mut brain = brain_with_sqlite();
+
+        brain.create("No embedding memory").unwrap();
+
+        let cleared = brain.storage.clear_all_embeddings().unwrap();
+        assert_eq!(cleared, 0);
+    }
+
+    // ==================
+    // RERANK CONFIG TESTS
+    // ==================
+
+    #[test]
+    fn config_defaults_rerank_enabled() {
+        let config = Config::default();
+        assert!(config.rerank_enabled);
+        assert_eq!(config.rerank_candidates, 30);
+    }
+
+    #[test]
+    fn config_rerank_roundtrip() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        // Default: enabled with 30 candidates
+        assert!(brain.config().rerank_enabled);
+        assert_eq!(brain.config().rerank_candidates, 30);
+
+        // Disable via configure()
+        assert!(brain.configure("rerank_enabled", 0.0).unwrap());
+        assert!(!brain.config().rerank_enabled);
+
+        // Re-enable
+        assert!(brain.configure("rerank_enabled", 1.0).unwrap());
+        assert!(brain.config().rerank_enabled);
+
+        // Set candidates
+        assert!(brain.configure("rerank_candidates", 50.0).unwrap());
+        assert_eq!(brain.config().rerank_candidates, 50);
+
+        // Candidates are clamped to [5, 200]
+        assert!(brain.configure("rerank_candidates", 1.0).unwrap());
+        assert_eq!(brain.config().rerank_candidates, 5);
+
+        assert!(brain.configure("rerank_candidates", 999.0).unwrap());
+        assert_eq!(brain.config().rerank_candidates, 200);
+    }
+
+    #[test]
+    fn config_rerank_backwards_compat_deserialization() {
+        // Old config JSON without rerank fields should deserialize with defaults
+        let old_json = r#"{
+            "decay_rate_per_day": 0.05,
+            "decay_interval_hours": 1.0,
+            "propagation_damping": 0.5,
+            "hebbian_learning_rate": 0.1,
+            "recall_strength": 0.2,
+            "blocked_tags": [],
+            "max_tag_cardinality": 20,
+            "association_decay_rate": 1.0,
+            "min_association_weight": 0.05,
+            "search_follow_associations": true,
+            "search_association_depth": 1
+        }"#;
+
+        let config: Config = serde_json::from_str(old_json).unwrap();
+        assert!(config.rerank_enabled, "rerank should default to enabled");
+        assert_eq!(config.rerank_candidates, 30, "rerank_candidates should default to 30");
+    }
+
+    // ==================
+    // HYBRID SEARCH / FTS5 TESTS
+    // ==================
+
+    #[test]
+    fn config_defaults_hybrid_search_enabled() {
+        let config = Config::default();
+        assert!(config.hybrid_search_enabled);
+    }
+
+    #[test]
+    fn config_hybrid_search_roundtrip() {
+        let storage = MemoryStorage::new();
+        let mut brain = Brain::new(storage).unwrap();
+
+        // Default: enabled
+        assert!(brain.config().hybrid_search_enabled);
+
+        // Disable via configure()
+        assert!(brain.configure("hybrid_search_enabled", 0.0).unwrap());
+        assert!(!brain.config().hybrid_search_enabled);
+
+        // Re-enable
+        assert!(brain.configure("hybrid_search_enabled", 1.0).unwrap());
+        assert!(brain.config().hybrid_search_enabled);
+    }
+
+    #[test]
+    fn config_hybrid_search_backwards_compat_deserialization() {
+        // Old config JSON without hybrid_search_enabled should deserialize with default true
+        let old_json = r#"{
+            "decay_rate_per_day": 0.05,
+            "decay_interval_hours": 1.0,
+            "propagation_damping": 0.5,
+            "hebbian_learning_rate": 0.1,
+            "recall_strength": 0.2,
+            "blocked_tags": [],
+            "max_tag_cardinality": 20,
+            "association_decay_rate": 1.0,
+            "min_association_weight": 0.05,
+            "search_follow_associations": true,
+            "search_association_depth": 1
+        }"#;
+
+        let config: Config = serde_json::from_str(old_json).unwrap();
+        assert!(config.hybrid_search_enabled, "hybrid_search should default to enabled");
+    }
+
+    #[test]
+    fn fts_backfill_populates_existing_engrams() {
+        // This test verifies the backfill flow through diesel.rs tests
+        // (where we have access to raw SQL). Here we just verify that
+        // keyword_search works end-to-end through Brain after normal create.
+        let mut brain = brain_with_sqlite();
+
+        brain.create("Memory about quantum computing").unwrap();
+        brain.create("Memory about neural networks").unwrap();
+
+        // Brain.new already called ensure_fts_index, so FTS should be populated
+        let results = brain.keyword_search("quantum", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("quantum"));
+    }
+
+    #[test]
+    fn keyword_search_via_brain() {
+        let mut brain = brain_with_sqlite();
+
+        brain.create("Rust programming language is fast").unwrap();
+        brain.create("Python is a dynamic scripting language").unwrap();
+        brain.create("Cooking recipes for pasta").unwrap();
+
+        let results = brain.keyword_search("language", 10).unwrap();
+        assert_eq!(results.len(), 2, "Both language memories should match");
     }
 }

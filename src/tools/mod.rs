@@ -14,6 +14,7 @@ pub mod lenses;
 pub mod plans;
 pub mod reference;
 pub mod open_dashboard;
+pub mod date_resolve;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
@@ -80,6 +81,7 @@ pub use plans::{
 };
 
 pub use open_dashboard::OpenDashboardTool;
+pub use date_resolve::DateResolveTool;
 
 // =============================================================================
 // Common helpers

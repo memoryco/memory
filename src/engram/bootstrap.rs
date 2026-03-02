@@ -35,6 +35,13 @@ Follow this workflow for EVERY user message:
 - Store aggressively - decay handles pruning, missed storage is permanent loss
 - Each memory: atomic (single concept) with good tags
 
+**date_resolve:**
+- Resolves relative time expressions to absolute dates
+- When a memory contains "last Tuesday", "next month", "two weeks ago", etc., call this instead of computing dates yourself
+- Pass the expression and the memory's created_at as reference_date
+- Example: date_resolve("last Sunday", "2023-05-25") → "2023-05-21 (Sunday)"
+- Always use this for date math — do not guess or calculate dates manually
+
 **engram_associate:**
 - Creates weighted connections between engrams
 - Use `ordinal` parameter to create ordered chains (procedure steps)

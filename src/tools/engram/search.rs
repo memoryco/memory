@@ -35,7 +35,11 @@ impl Tool<Context> for EngramSearchTool {
 
     fn description(&self) -> &str {
         "Search memories by semantic similarity using vector embeddings. \
-         Finds memories with similar meaning even if they don't share exact keywords."
+         Finds memories with similar meaning even if they don't share exact keywords. \
+         If results seem weak or irrelevant, try decomposing abstract queries into \
+         concrete related terms. For example, instead of 'relationship status', \
+         try 'breakup', 'dating', 'partner', or 'married'. Search for actions \
+         and events rather than abstract states."
     }
 
     fn schema(&self) -> JsonValue {
@@ -87,31 +91,147 @@ impl Tool<Context> for EngramSearchTool {
         let _ = brain.apply_time_decay();
         let _ = brain.sync_from_storage();
 
-        // Read config for association-following
+        // Read config for association-following, reranking, hybrid search, and query expansion
         let follow_associations = brain.config().search_follow_associations;
         let association_depth = brain.config().search_association_depth;
+        let rerank_enabled = brain.config().rerank_enabled;
+        let rerank_candidates = brain.config().rerank_candidates;
+        let hybrid_search_enabled = brain.config().hybrid_search_enabled;
+        let query_expansion_enabled = brain.config().query_expansion_enabled;
 
-        // Generate query embedding
+        // Query expansion: generate variant queries
+        let variants = if query_expansion_enabled {
+            super::query_expansion::expand_query(&args.query)
+        } else {
+            vec![args.query.clone()]
+        };
+
+        if variants.len() > 1 {
+            eprintln!("[search] query expansion: {} variants from {:?}",
+                variants.len(), &args.query);
+        }
+
         let generator = EmbeddingGenerator::new();
-        let query_embedding = generator.generate(&args.query)
-            .map_err(|e| McpError::ToolError(format!("Failed to generate embedding: {}", e)))?;
 
         // Find similar memories (fetch extra to allow for filtering)
-        let vector_results = brain.find_similar_by_embedding(&query_embedding, limit * 3, min_score)
-            .map_err(|e| McpError::ToolError(format!("Vector search failed: {}", e)))?;
+        // When reranking is enabled, fetch more candidates for the reranker to work with
+        let fetch_count = if rerank_enabled {
+            rerank_candidates.max(limit * 3)
+        } else {
+            limit * 3
+        };
+
+        // Run retrieval for each variant, merging results (keep highest score per engram).
+        // Cache the original query embedding (variants[0]) so we don't compute it twice —
+        // it's also needed for association discovery later.
+        let mut all_results: std::collections::HashMap<uuid::Uuid, crate::engram::SimilarityResult> =
+            std::collections::HashMap::new();
+        let mut original_query_embedding: Option<Vec<f32>> = None;
+
+        // Helper: run vector + BM25 for a single query variant and merge into all_results
+        fn run_variant(
+            variant_query: &str,
+            brain: &mut crate::engram::Brain,
+            generator: &EmbeddingGenerator,
+            fetch_count: usize,
+            min_score: f32,
+            hybrid_search_enabled: bool,
+            all_results: &mut std::collections::HashMap<uuid::Uuid, crate::engram::SimilarityResult>,
+            original_embedding: &mut Option<Vec<f32>>,
+            log_variant: bool,
+        ) -> sml_mcps::Result<()> {
+            let variant_embedding = generator.generate(variant_query)
+                .map_err(|e| McpError::ToolError(format!("Failed to generate embedding: {}", e)))?;
+
+            if original_embedding.is_none() {
+                *original_embedding = Some(variant_embedding.clone());
+            }
+
+            let vector_results = brain.find_similar_by_embedding(&variant_embedding, fetch_count, min_score)
+                .map_err(|e| McpError::ToolError(format!("Vector search failed: {}", e)))?;
+
+            let variant_merged = if hybrid_search_enabled {
+                let bm25_results = brain.keyword_search(variant_query, fetch_count)
+                    .unwrap_or_else(|e| {
+                        eprintln!("[search] BM25 keyword search failed, using vector only: {}", e);
+                        Vec::new()
+                    });
+
+                if bm25_results.is_empty() {
+                    vector_results
+                } else {
+                    use crate::engram::storage::rrf;
+                    let merged = rrf::reciprocal_rank_fusion(
+                        &[&vector_results, &bm25_results],
+                        rrf::DEFAULT_K,
+                    );
+                    if log_variant {
+                        eprintln!("[search] hybrid variant {:?}: {} vector + {} BM25 → {} merged",
+                            variant_query, vector_results.len(), bm25_results.len(), merged.len());
+                    } else {
+                        eprintln!("[search] hybrid: {} vector + {} BM25 → {} merged via RRF",
+                            vector_results.len(), bm25_results.len(), merged.len());
+                    }
+                    merged
+                }
+            } else {
+                vector_results
+            };
+
+            for result in variant_merged {
+                all_results.entry(result.id)
+                    .and_modify(|existing| {
+                        if result.score > existing.score {
+                            *existing = result.clone();
+                        }
+                    })
+                    .or_insert(result);
+            }
+            Ok(())
+        }
+
+        // Phase 1: Run primary variants (original + stop-word-stripped)
+        for variant_query in &variants {
+            run_variant(variant_query, &mut brain, &generator, fetch_count, min_score,
+                       hybrid_search_enabled, &mut all_results,
+                       &mut original_query_embedding, variants.len() > 1)?;
+        }
+
+        // Phase 2 (fallback): If results are sparse, try individual term queries
+        const SPARSE_THRESHOLD: usize = 3;
+        if query_expansion_enabled && all_results.len() < SPARSE_THRESHOLD {
+            let fallback = super::query_expansion::fallback_terms(&args.query);
+            if !fallback.is_empty() {
+                eprintln!("[search] sparse results ({}), running {} fallback term queries",
+                    all_results.len(), fallback.len());
+                for term in &fallback {
+                    run_variant(term, &mut brain, &generator, fetch_count, min_score,
+                               hybrid_search_enabled, &mut all_results,
+                               &mut original_query_embedding, true)?;
+                }
+            }
+        }
+
+        // Convert to sorted vec
+        let mut merged_results: Vec<crate::engram::SimilarityResult> = all_results.into_values().collect();
+        merged_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Use the ORIGINAL query embedding for association discovery and reranking
+        let query_embedding = original_query_embedding.expect("at least one variant always exists");
 
         // Score blending: 70% semantic similarity, 30% energy (recency/relevance)
         // This boosts recently-used memories even if semantic match is slightly lower
         struct ScoredResult {
             id: uuid::Uuid,
             content: String,
+            created_at: i64,
             similarity: f32,
             energy: f64,
             blended: f32,
             state_emoji: &'static str,
         }
 
-        let mut scored: Vec<ScoredResult> = vector_results.iter().filter_map(|r| {
+        let mut scored: Vec<ScoredResult> = merged_results.iter().filter_map(|r| {
             let engram = brain.get_or_load(&r.id)?;
 
             // State filter
@@ -129,6 +249,7 @@ impl Tool<Context> for EngramSearchTool {
             Some(ScoredResult {
                 id: r.id,
                 content: r.content.clone(),
+                created_at: engram.created_at,
                 similarity: r.score,
                 energy: engram.energy,
                 blended,
@@ -138,6 +259,40 @@ impl Tool<Context> for EngramSearchTool {
 
         // Sort by blended score descending
         scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Cross-encoder re-ranking: feed (query, content) pairs through a cross-encoder
+        // for significantly better relevance ordering than cosine similarity alone.
+        // Falls back silently to cosine results if reranking fails.
+        if rerank_enabled && !scored.is_empty() {
+            let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
+            let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+            let candidate_count = contents.len();
+
+            match crate::embedding::reranker::rerank(&args.query, &content_refs) {
+                Ok(reranked) => {
+                    let mut reranked_results = Vec::with_capacity(reranked.len());
+                    for rs in &reranked {
+                        if rs.index < scored.len() {
+                            let orig = &scored[rs.index];
+                            reranked_results.push(ScoredResult {
+                                id: orig.id,
+                                content: orig.content.clone(),
+                                created_at: orig.created_at,
+                                similarity: orig.similarity,
+                                energy: orig.energy,
+                                blended: rs.score, // Replace blended with reranker score
+                                state_emoji: orig.state_emoji,
+                            });
+                        }
+                    }
+                    scored = reranked_results;
+                    eprintln!("[search] re-ranked {} candidates with cross-encoder", candidate_count);
+                }
+                Err(e) => {
+                    eprintln!("[search] reranking failed, falling back to cosine: {}", e);
+                }
+            }
+        }
 
         // Association-following: discover related memories via associations
         let mut association_discovery_count: usize = 0;
@@ -187,6 +342,7 @@ impl Tool<Context> for EngramSearchTool {
                 scored.push(ScoredResult {
                     id: d.id,
                     content: engram.content.clone(),
+                    created_at: engram.created_at,
                     similarity: d.similarity,
                     energy: d.energy,
                     blended: d.blended_score,
@@ -244,15 +400,34 @@ impl Tool<Context> for EngramSearchTool {
         }
 
         for r in &scored {
+            // Format created_at as readable date
+            let created_date = chrono::DateTime::from_timestamp(r.created_at, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+
             output.push_str(&format!(
-                "ID: {}\nContent: {}\nScore: {:.2} (sim: {:.2}, energy: {:.2}) | State: {}\n\n",
+                "ID: {}\nContent: {}\nCreated: {}\nScore: {:.2} (sim: {:.2}, energy: {:.2}) | State: {}\n\n",
                 r.id,
                 r.content,
+                created_date,
                 r.blended,
                 r.similarity,
                 r.energy,
                 r.state_emoji,
             ));
+        }
+
+        // Sparse/weak results hint: nudge the caller to try related searches
+        let should_hint = scored.len() < 3
+            || scored.first().map(|r| r.blended < 0.45).unwrap_or(false);
+        if should_hint {
+            output.push_str(
+                "⚠️ Results may not be relevant. Try searching with related concepts:\n\
+                 - Break abstract questions into concrete topics (e.g. \"relationship status\" → \
+                   \"breakup\", \"dating\", \"partner\", \"married\", \"single\")\n\
+                 - Search for specific events or actions rather than status or state\n\
+                 - Try [person's name] + a related action, event, or feeling\n"
+            );
         }
 
         Ok(text_response(output))

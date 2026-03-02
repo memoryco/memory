@@ -41,7 +41,11 @@ impl Tool<Context> for ConfigGetTool {
              hebbian_learning_rate: {:.2} (association strength on co-access)\n\
              recall_strength: {:.2} (energy boost when recalling)\n\
              search_follow_associations: {} (follow associations during search)\n\
-             search_association_depth: {} (hops to follow)",
+             search_association_depth: {} (hops to follow)\n\
+             rerank_enabled: {} (cross-encoder re-ranking on search)\n\
+             rerank_candidates: {} (candidates for re-ranking pass)\n\
+             hybrid_search_enabled: {} (BM25+vector fusion via RRF)\n\
+             query_expansion_enabled: {} (expand queries with variants before retrieval)",
             config.decay_rate_per_day,
             config.decay_rate_per_day * 100.0,
             config.decay_interval_hours,
@@ -49,7 +53,11 @@ impl Tool<Context> for ConfigGetTool {
             config.hebbian_learning_rate,
             config.recall_strength,
             config.search_follow_associations,
-            config.search_association_depth
+            config.search_association_depth,
+            config.rerank_enabled,
+            config.rerank_candidates,
+            config.hybrid_search_enabled,
+            config.query_expansion_enabled
         );
 
         Ok(text_response(output))

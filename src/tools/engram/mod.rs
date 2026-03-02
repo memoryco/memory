@@ -9,6 +9,7 @@ mod associate;
 mod stats;
 mod associations;
 mod graph;
+mod query_expansion;
 
 pub use create::EngramCreateTool;
 pub use recall::EngramRecallTool;

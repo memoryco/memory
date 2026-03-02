@@ -14,6 +14,10 @@ pub struct EngramCreateTool;
 #[derive(Deserialize, Clone)]
 struct MemoryInput {
     content: String,
+    /// Optional creation timestamp (ISO 8601 or unix epoch seconds).
+    /// If omitted, defaults to now. Useful for importing historical data.
+    #[serde(default)]
+    created_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -41,7 +45,11 @@ impl Tool<Context> for EngramCreateTool {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "content": { "type": "string" }
+                            "content": { "type": "string" },
+                            "created_at": {
+                                "type": "string",
+                                "description": "Optional creation timestamp (ISO 8601 datetime or unix epoch seconds). Defaults to now. Use for importing historical data."
+                            }
                         },
                         "required": ["content"]
                     }
@@ -67,8 +75,13 @@ impl Tool<Context> for EngramCreateTool {
         {
             let mut brain = context.brain.lock().unwrap();
             for memory in &args.memories {
-                let id: EngramId = brain.create(&memory.content)
-                    .map_err(|e| McpError::ToolError(e.to_string()))?;
+                let id: EngramId = if let Some(ref ts) = memory.created_at {
+                    let epoch = parse_timestamp(ts)
+                        .map_err(|e| McpError::InvalidParams(format!("Invalid created_at '{}': {}", ts, e)))?;
+                    brain.create_with_timestamp(&memory.content, epoch)
+                } else {
+                    brain.create(&memory.content)
+                }.map_err(|e| McpError::ToolError(e.to_string()))?;
                 
                 output.push_str(&format!(
                     "ID: {}\nContent: {}\n\n",
@@ -99,4 +112,48 @@ impl Tool<Context> for EngramCreateTool {
         let header = format!("{} memories created (embeddings generating in background).\n\n", created.len());
         Ok(text_response(format!("{}{}", header, output.trim())))
     }
+}
+
+/// Parse a timestamp string into unix epoch seconds.
+/// Accepts:
+///   - Unix epoch seconds (integer or float): "1684937600"
+///   - ISO 8601 date: "2023-05-24"
+///   - ISO 8601 datetime: "2023-05-24T14:30:00Z" or "2023-05-24T14:30:00+00:00"
+fn parse_timestamp(s: &str) -> Result<i64, String> {
+    let trimmed = s.trim();
+
+    // Try as unix epoch (integer)
+    if let Ok(epoch) = trimmed.parse::<i64>() {
+        return Ok(epoch);
+    }
+
+    // Try as unix epoch (float)
+    if let Ok(epoch_f) = trimmed.parse::<f64>() {
+        return Ok(epoch_f as i64);
+    }
+
+    // Try ISO 8601 datetime with timezone
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(dt.timestamp());
+    }
+
+    // Try ISO 8601 datetime without timezone (assume UTC)
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
+        return Ok(dt.and_utc().timestamp());
+    }
+
+    // Try ISO 8601 date only (midnight UTC)
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp());
+    }
+
+    // Try common date formats: "24 May 2023", "May 24, 2023"
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%d %B %Y") {
+        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp());
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%B %d, %Y") {
+        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp());
+    }
+
+    Err(format!("Unrecognized timestamp format. Expected unix epoch, ISO 8601 date (YYYY-MM-DD), or ISO 8601 datetime."))
 }

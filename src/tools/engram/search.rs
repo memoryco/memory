@@ -49,6 +49,69 @@ fn is_inferential_query(query: &str) -> bool {
     cues.iter().any(|cue| q.contains(cue))
 }
 
+/// Very small stop-word list for diversity/cue tokenization.
+const SHAPING_STOP_WORDS: &[&str] = &[
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with",
+    "from", "is", "are", "was", "were", "be", "been", "this", "that", "it",
+    "as", "at", "by", "what", "when", "where", "who", "how", "does", "did",
+];
+
+/// Normalize a token for result-shaping analysis.
+fn normalize_shaping_token(raw: &str) -> Option<String> {
+    let mut t = raw
+        .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’' && c != '`')
+        .replace('’', "'")
+        .replace('`', "")
+        .to_lowercase();
+
+    if t.ends_with("'s") {
+        t.truncate(t.len().saturating_sub(2));
+    }
+    t = t.trim_matches(|c: char| !c.is_alphanumeric()).to_string();
+    if t.is_empty() || t.len() < 3 {
+        return None;
+    }
+    if SHAPING_STOP_WORDS.contains(&t.as_str()) {
+        return None;
+    }
+    Some(t)
+}
+
+/// Tokenize content to support overlap/diversity calculations.
+fn tokenize_for_shaping(text: &str) -> std::collections::HashSet<String> {
+    text.split_whitespace()
+        .filter_map(normalize_shaping_token)
+        .collect()
+}
+
+/// Jaccard overlap between two token sets.
+fn token_jaccard_overlap(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f32 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let inter = a.intersection(b).count() as f32;
+    let union = a.union(b).count() as f32;
+    if union == 0.0 { 0.0 } else { inter / union }
+}
+
+/// Derive a source bucket key from memory content + created_at.
+/// Used to avoid over-concentrating top results from one session snippet.
+fn source_bucket_key(content: &str, created_at: i64) -> String {
+    if content.starts_with('[') {
+        if let Some(end) = content.find(']') {
+            if end > 1 && end <= 48 {
+                return content[..=end].to_lowercase();
+            }
+        }
+    }
+    chrono::DateTime::from_timestamp(created_at, 0)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| created_at.to_string())
+}
+
 impl Tool<Context> for EngramSearchTool {
     fn name(&self) -> &str {
         "engram_search"
@@ -291,6 +354,7 @@ impl Tool<Context> for EngramSearchTool {
 
         // Score blending: 70% semantic similarity, 30% energy (recency/relevance)
         // This boosts recently-used memories even if semantic match is slightly lower
+        #[derive(Clone)]
         struct ScoredResult {
             id: uuid::Uuid,
             content: String,
@@ -431,6 +495,109 @@ impl Tool<Context> for EngramSearchTool {
             // Log discovery stats for visibility
             eprintln!("[search] association-following: {} discovered, {} merged (cap: {}, depth: {})",
                 association_discovery_count, association_merged_count, association_cap, association_depth);
+        }
+
+        // Aggregation-friendly shaping for list/composite queries:
+        // pick a diverse, coverage-rich, source-balanced subset for final context.
+        if composite_query && scored.len() > 1 {
+            let original_count = scored.len();
+            let target = effective_limit.min(scored.len());
+
+            let cue_terms: Vec<String> = {
+                let mut cues: Vec<String> = super::query_expansion::fallback_terms(&args.query)
+                    .into_iter()
+                    .filter_map(|t| normalize_shaping_token(&t))
+                    .collect();
+                if cues.is_empty() {
+                    cues = tokenize_for_shaping(&args.query).into_iter().collect();
+                }
+                cues.sort();
+                cues.dedup();
+                cues
+            };
+
+            let token_sets: Vec<std::collections::HashSet<String>> =
+                scored.iter().map(|r| tokenize_for_shaping(&r.content)).collect();
+            let lower_contents: Vec<String> = scored.iter().map(|r| r.content.to_lowercase()).collect();
+            let source_keys: Vec<String> = scored
+                .iter()
+                .map(|r| source_bucket_key(&r.content, r.created_at))
+                .collect();
+
+            let mut selected_indices: Vec<usize> = Vec::with_capacity(target);
+            let mut used = vec![false; scored.len()];
+            let mut covered_cues: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut source_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+            while selected_indices.len() < target {
+                let mut best_idx: Option<usize> = None;
+                let mut best_score = f32::NEG_INFINITY;
+                let mut best_new_cues: Vec<String> = Vec::new();
+
+                for idx in 0..scored.len() {
+                    if used[idx] {
+                        continue;
+                    }
+
+                    // Penalize near-duplicate results versus what's already selected.
+                    let max_overlap = selected_indices
+                        .iter()
+                        .map(|sel| token_jaccard_overlap(&token_sets[idx], &token_sets[*sel]))
+                        .fold(0.0_f32, f32::max);
+                    let diversity_penalty = max_overlap * 0.20;
+
+                    // Reward candidates that introduce uncovered cue terms.
+                    let mut new_cues = Vec::new();
+                    for cue in &cue_terms {
+                        if !covered_cues.contains(cue) && lower_contents[idx].contains(cue.as_str()) {
+                            new_cues.push(cue.clone());
+                        }
+                    }
+                    let cue_bonus = (new_cues.len() as f32) * 0.05;
+
+                    // Soft source balancing: down-rank overrepresented source buckets.
+                    let src_count = *source_counts.get(&source_keys[idx]).unwrap_or(&0);
+                    let source_penalty = if src_count >= 2 {
+                        (src_count as f32) * 0.08
+                    } else {
+                        0.0
+                    };
+
+                    let adjusted = scored[idx].blended + cue_bonus - diversity_penalty - source_penalty;
+
+                    if adjusted > best_score {
+                        best_score = adjusted;
+                        best_idx = Some(idx);
+                        best_new_cues = new_cues;
+                    }
+                }
+
+                let Some(chosen) = best_idx else {
+                    break;
+                };
+
+                used[chosen] = true;
+                selected_indices.push(chosen);
+                for cue in best_new_cues {
+                    covered_cues.insert(cue);
+                }
+                *source_counts.entry(source_keys[chosen].clone()).or_insert(0) += 1;
+            }
+
+            if !selected_indices.is_empty() {
+                let mut reshaped = Vec::with_capacity(selected_indices.len());
+                for idx in selected_indices {
+                    reshaped.push(scored[idx].clone());
+                }
+                scored = reshaped;
+                eprintln!(
+                    "[search] aggregation shaping: {} -> {} results (covered cues: {}/{})",
+                    original_count,
+                    scored.len(),
+                    covered_cues.len(),
+                    cue_terms.len()
+                );
+            }
         }
 
         // Chain detection: check if any seed results (vector search hits) are procedure anchors
@@ -696,5 +863,28 @@ mod tests {
         assert!(is_inferential_query("What might John's degree be in?"));
         assert!(is_inferential_query("Would Caroline be considered religious?"));
         assert!(!is_inferential_query("When did Caroline attend the support group?"));
+    }
+
+    #[test]
+    fn shaping_tokenizer_cleans_possessives_and_punctuation() {
+        let tokens = tokenize_for_shaping("Caroline's relationship status?");
+        assert!(tokens.contains("caroline"));
+        assert!(tokens.contains("relationship"));
+        assert!(tokens.contains("status"));
+    }
+
+    #[test]
+    fn token_overlap_detects_similarity() {
+        let a = tokenize_for_shaping("sunset painting pottery class");
+        let b = tokenize_for_shaping("pottery class with sunset");
+        let c = tokenize_for_shaping("veterans hospital fundraiser");
+        assert!(token_jaccard_overlap(&a, &b) > 0.2);
+        assert!(token_jaccard_overlap(&a, &c) < 0.2);
+    }
+
+    #[test]
+    fn source_bucket_uses_bracket_prefix_when_present() {
+        let key = source_bucket_key("[1:14 pm on 25 May, 2023] Melanie said: hello", 0);
+        assert!(key.starts_with("[1:14 pm on 25 may, 2023]"));
     }
 }

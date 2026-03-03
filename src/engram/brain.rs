@@ -574,6 +574,26 @@ impl Brain {
         self.storage.save_config(self.substrate.config())
     }
     
+    /// Save an engram directly to storage (for bulk operations like decompose)
+    pub(crate) fn storage_save_engram(&mut self, engram: &Engram) -> StorageResult<()> {
+        self.storage.save_engram(engram)
+    }
+
+    /// Save an association directly to storage (for bulk operations like decompose)
+    pub(crate) fn storage_save_association(&mut self, assoc: &Association) -> StorageResult<()> {
+        self.storage.save_association(assoc)
+    }
+
+    /// Get a metadata value by key
+    pub fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>> {
+        self.storage.get_metadata(key)
+    }
+
+    /// Set a metadata key/value pair
+    pub fn set_metadata(&mut self, key: &str, value: &str) -> StorageResult<()> {
+        self.storage.set_metadata(key, value)
+    }
+
     /// Flush all pending writes
     pub fn flush(&mut self) -> StorageResult<()> {
         self.storage.flush()
@@ -707,6 +727,11 @@ impl Brain {
         self.storage.get_ids_without_embeddings(limit)
     }
     
+    /// Get embedding for an engram
+    pub fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+        self.storage.get_embedding(id)
+    }
+
     /// Set embedding for an engram (used during backfill)
     pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         self.storage.set_embedding(id, embedding)

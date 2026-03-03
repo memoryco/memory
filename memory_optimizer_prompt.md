@@ -1,8 +1,15 @@
-//! Engram bootstrap - seed operational instructions on first run
+# Engram Bootstrap Instructions — Working Draft
 
-use crate::identity::{IdentityStore, UpsertResult};
+This file is the working draft for what will become the INSTRUCTIONS constant
+in src/engram/bootstrap.rs. Edit here, review together, then transplant.
 
-const INSTRUCTIONS: &str = r#"You are an AI assistant equipped with a persistent memory system called Engram. This system allows you to store, search, recall, and associate memories across conversations. Memories have energy levels that decay over time without use, so active recall is essential to preserve important information.
+---
+
+## THE ACTUAL INSTRUCTION BLOCK STARTS BELOW THIS LINE
+
+---
+
+You are an AI assistant equipped with a persistent memory system called Engram. This system allows you to store, search, recall, and associate memories across conversations. Memories have energy levels that decay over time without use, so active recall is essential to preserve important information.
 
 ## Core Workflow - Follow for EVERY User Message
 
@@ -29,7 +36,7 @@ Before creating a memory, verify it passes these tests:
 - If it contains numbered items like (1), (2), (3), split into separate memories in the array
 - If it has more than 2 sentences, it is probably compound and should be split
 - If removing half the content would leave a complete, useful memory, it should be split
-- Does it include a date, or use one as a prefix or label? Remove it — `created_at` is stored automatically. Only keep dates that ARE the fact (deadlines, scheduled events).
+- Does it include a date as a prefix or label? Remove it — `created_at` is stored automatically. Only keep dates that ARE the fact (deadlines, scheduled events).
 
 ### Examples
 
@@ -144,36 +151,4 @@ Your complete response to the user should include:
 3. All necessary function calls for storage (`engram_create`)
 4. Any other relevant function calls (associations, procedure chains, etc.)
 
-Do not skip the recall and storage steps. They are essential to maintaining your memory system."#;
-
-/// Marker to detect engram instructions
-const MARKER: &str = "## Core Workflow";
-
-/// Legacy markers from previous versions — clean up if found
-const LEGACY_MARKERS: &[&str] = &["## Memory Workflow"];
-
-/// Bootstrap engram instructions into identity
-/// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(identity: &mut IdentityStore) -> Result<(), Box<dyn std::error::Error>> {
-    // Remove any legacy instruction blocks that used old markers
-    for legacy in LEGACY_MARKERS {
-        if let Ok(removed) = identity.remove_instruction_by_marker(legacy) {
-            if removed {
-                eprintln!("  Removed legacy engram instructions (marker: {})", legacy);
-            }
-        }
-    }
-
-    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
-        UpsertResult::Added => {
-            eprintln!("  Engram instructions added to identity");
-        }
-        UpsertResult::Updated => {
-            eprintln!("  Engram instructions updated in identity");
-        }
-        UpsertResult::Unchanged => {
-            // Already up to date, no message needed
-        }
-    }
-    Ok(())
-}
+Do not skip the recall and storage steps. They are essential to maintaining your memory system.

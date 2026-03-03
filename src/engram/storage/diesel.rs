@@ -569,6 +569,24 @@ impl Storage for EngramStorage {
         }
     }
     
+    fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>> {
+        let result: Option<MetadataRow> = metadata::table
+            .filter(metadata::key.eq(key))
+            .select(MetadataRow::as_select())
+            .first(&mut self.conn)
+            .optional()?;
+        
+        Ok(result.map(|row| row.value))
+    }
+    
+    fn set_metadata(&mut self, key: &str, value: &str) -> StorageResult<()> {
+        diesel::replace_into(metadata::table)
+            .values(NewMetadata { key, value })
+            .execute(&mut self.conn)?;
+        
+        Ok(())
+    }
+    
     // ==================
     // LIFECYCLE
     // ==================

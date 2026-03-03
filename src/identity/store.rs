@@ -186,6 +186,20 @@ impl IdentityStore {
     /// Looks for an existing instruction containing `marker`. If found,
     /// compares content and updates if changed. If not found, adds it.
     /// Returns what happened so callers can log appropriately.
+    /// Remove an instruction by marker string. Returns true if one was found and removed.
+    pub fn remove_instruction_by_marker(&mut self, marker: &str) -> StorageResult<bool> {
+        let instructions = self.storage.list_items(Some(IdentityItemType::Instruction))?;
+        let existing = instructions.into_iter()
+            .find(|row| row.content.contains(marker));
+        match existing {
+            Some(row) => {
+                self.storage.remove_item(&row.id)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
     pub fn upsert_instruction(&mut self, content: &str, marker: &str) -> StorageResult<UpsertResult> {
         let instructions = self.storage.list_items(Some(IdentityItemType::Instruction))?;
         

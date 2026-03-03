@@ -14,6 +14,7 @@ pub struct MemoryStorage {
     associations: Vec<Association>,
     config: Option<Config>,
     last_decay_at: Option<i64>,
+    metadata: HashMap<String, String>,
 }
 
 impl MemoryStorage {
@@ -115,6 +116,15 @@ impl Storage for MemoryStorage {
         Ok(self.last_decay_at)
     }
     
+    fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>> {
+        Ok(self.metadata.get(key).cloned())
+    }
+
+    fn set_metadata(&mut self, key: &str, value: &str) -> StorageResult<()> {
+        self.metadata.insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
     fn initialize(&mut self) -> StorageResult<()> {
         // Nothing to do for in-memory
         Ok(())

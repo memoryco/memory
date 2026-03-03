@@ -129,6 +129,12 @@ pub trait Storage: Send {
     /// Load the last decay timestamp
     fn load_last_decay_at(&mut self) -> StorageResult<Option<i64>>;
     
+    /// Get a metadata value by key
+    fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>>;
+    
+    /// Set a metadata key/value pair
+    fn set_metadata(&mut self, key: &str, value: &str) -> StorageResult<()>;
+    
     // ==================
     // LIFECYCLE
     // ==================

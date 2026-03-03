@@ -17,6 +17,7 @@ pub mod association;
 pub mod storage;
 pub mod brain;
 pub mod bootstrap;
+pub mod decompose;
 pub mod persistence;
 
 pub use engram::{Engram, MemoryState};

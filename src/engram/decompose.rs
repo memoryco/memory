@@ -6,6 +6,7 @@
 
 use super::brain::Brain;
 use super::association::Association;
+use super::engram::MemoryState;
 use super::EngramId;
 use crate::storage::StorageResult;
 use crate::embedding::EmbeddingGenerator;
@@ -35,6 +36,22 @@ pub struct CompoundScore {
     pub connectors: usize,
     pub length: usize,
     pub line_breaks: usize,
+}
+
+/// Properties collected from a parent engram before decomposition.
+/// Children inherit these so they reflect the parent's actual state
+/// rather than starting fresh.
+struct DecomposePlan {
+    parent_id: EngramId,
+    children_content: Vec<String>,
+    created_at: i64,
+    #[allow(dead_code)]
+    tags: Vec<String>,
+    energy: f64,
+    state: MemoryState,
+    access_count: u64,
+    last_accessed: i64,
+    compound_score: f64,
 }
 
 /// Count sentences in text using punctuation boundaries
@@ -419,17 +436,17 @@ pub fn decompose_compound_memories(brain: &mut Brain) -> StorageResult<Decompose
     };
 
     // Collect all engrams first to avoid borrow issues
-    let engrams: Vec<(EngramId, String, i64, Vec<String>, f64)> = brain
+    let engrams: Vec<_> = brain
         .all_engrams()
-        .map(|e| (e.id, e.content.clone(), e.created_at, e.tags.clone(), e.energy))
+        .map(|e| (e.id, e.content.clone(), e.created_at, e.tags.clone(), e.energy, e.state, e.access_count, e.last_accessed))
         .collect();
 
     report.total_scanned = engrams.len();
 
-    // Collect decomposition plans (parent_id, children_content, created_at, tags, energy, score)
-    let mut plans: Vec<(EngramId, Vec<String>, i64, Vec<String>, f64, f64)> = Vec::new();
+    // Build decomposition plans
+    let mut plans: Vec<DecomposePlan> = Vec::new();
 
-    for (id, content, created_at, tags, energy) in &engrams {
+    for (id, content, created_at, tags, energy, state, access_count, last_accessed) in &engrams {
         let score = score_compound(content);
         if score.total < DECOMPOSE_THRESHOLD {
             continue;
@@ -440,16 +457,29 @@ pub fn decompose_compound_memories(brain: &mut Brain) -> StorageResult<Decompose
             continue; // Splitting didn't produce useful results
         }
 
-        plans.push((*id, children, *created_at, tags.clone(), *energy, score.total));
+        plans.push(DecomposePlan {
+            parent_id: *id,
+            children_content: children,
+            created_at: *created_at,
+            tags: tags.clone(),
+            energy: *energy,
+            state: *state,
+            access_count: *access_count,
+            last_accessed: *last_accessed,
+            compound_score: score.total,
+        });
     }
 
     // Execute each decomposition plan
-    for (parent_id, children_content, created_at, tags, energy, compound_score) in plans {
-        match decompose_one(brain, parent_id, &children_content, created_at, &tags, energy, &mut report) {
+    for plan in plans {
+        let num_children = plan.children_content.len();
+        let compound_score = plan.compound_score;
+        let parent_id = plan.parent_id;
+        match decompose_one(brain, plan, &mut report) {
             Ok(()) => {
                 eprintln!(
                     "[decompose] {} → {} children (score: {:.1})",
-                    parent_id, children_content.len(), compound_score
+                    parent_id, num_children, compound_score
                 );
                 report.total_decomposed += 1;
             }
@@ -477,13 +507,11 @@ pub fn decompose_compound_memories(brain: &mut Brain) -> StorageResult<Decompose
 /// Decompose a single parent engram into children
 fn decompose_one(
     brain: &mut Brain,
-    parent_id: EngramId,
-    children_content: &[String],
-    created_at: i64,
-    tags: &[String],
-    energy: f64,
+    plan: DecomposePlan,
     report: &mut DecomposeReport,
 ) -> StorageResult<()> {
+    let parent_id = plan.parent_id;
+
     // Collect association info before creating children
     let outbound: Vec<(EngramId, f64, Option<u32>)> = brain
         .associations_from(&parent_id)
@@ -512,24 +540,17 @@ fn decompose_one(
 
     // Create children with parent's timestamp
     let mut child_ids: Vec<EngramId> = Vec::new();
-    for content in children_content {
-        let child_id = if tags.is_empty() {
-            brain.create_with_timestamp(content, created_at)?
-        } else {
-            // create_with_tags doesn't support timestamp, so create then patch
-            let id = brain.create_with_timestamp(content, created_at)?;
-            // We can't easily set tags after creation without a dedicated method,
-            // so we'll accept that children inherit the timestamp but not tags.
-            // Actually, let's work around it: create with tags and accept the
-            // current timestamp for the tags path.
-            // Better: just use create_with_timestamp since tags are secondary.
-            id
-        };
-        // Inherit parent's energy level (don't reset to 1.0)
+    for content in &plan.children_content {
+        let child_id = brain.create_with_timestamp(content, plan.created_at)?;
+
+        // Inherit parent's properties so children reflect the parent's actual state
         if let Some(child) = brain.substrate.get_mut(&child_id) {
-            child.energy = energy;
+            child.energy = plan.energy;
+            child.state = plan.state;
+            child.access_count = plan.access_count;
+            child.last_accessed = plan.last_accessed;
         }
-        // Persist the energy update
+        // Persist inherited properties
         if let Some(child) = brain.substrate.get(&child_id).cloned() {
             brain.storage_save_engram(&child)?;
         }
@@ -539,7 +560,7 @@ fn decompose_one(
 
     // Generate embeddings for children
     let generator = EmbeddingGenerator::new();
-    let content_refs: Vec<&str> = children_content.iter().map(|s| s.as_str()).collect();
+    let content_refs: Vec<&str> = plan.children_content.iter().map(|s| s.as_str()).collect();
     match generator.generate_batch(&content_refs) {
         Ok(embeddings) => {
             for (id, embedding) in child_ids.iter().zip(embeddings.iter()) {
@@ -1017,6 +1038,62 @@ mod tests {
     // ==================
     // FIND PATTERN TESTS
     // ==================
+
+    #[test]
+    fn decompose_children_inherit_parent_properties() {
+        use super::super::engram::MemoryState;
+
+        let mut brain = brain_with_sqlite();
+
+        let parent_id = brain
+            .create("Issues: (1) null pointer (2) race condition (3) deadlock")
+            .unwrap();
+
+        // Simulate a decayed, well-accessed parent
+        if let Some(parent) = brain.substrate.get_mut(&parent_id) {
+            parent.energy = 0.25;
+            parent.state = MemoryState::Dormant;
+            parent.access_count = 42;
+            parent.last_accessed = 1_700_000_000;
+        }
+        // Persist parent changes so the collection picks them up
+        if let Some(parent) = brain.substrate.get(&parent_id).cloned() {
+            brain.storage_save_engram(&parent).unwrap();
+        }
+
+        let report = decompose_compound_memories(&mut brain).unwrap();
+
+        assert_eq!(report.total_decomposed, 1);
+        assert_eq!(report.total_children_created, 3);
+
+        // Verify all children inherited parent properties
+        let children: Vec<_> = brain.all_engrams().collect();
+        assert_eq!(children.len(), 3);
+
+        for child in &children {
+            assert!(
+                (child.energy - 0.25).abs() < 0.001,
+                "Child energy should be 0.25, got {}",
+                child.energy
+            );
+            assert_eq!(
+                child.state,
+                MemoryState::Dormant,
+                "Child state should be Dormant, got {:?}",
+                child.state
+            );
+            assert_eq!(
+                child.access_count, 42,
+                "Child access_count should be 42, got {}",
+                child.access_count
+            );
+            assert_eq!(
+                child.last_accessed, 1_700_000_000,
+                "Child last_accessed should be 1700000000, got {}",
+                child.last_accessed
+            );
+        }
+    }
 
     #[test]
     fn find_pattern_respects_boundary() {

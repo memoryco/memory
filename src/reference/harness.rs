@@ -265,6 +265,7 @@ mod tests {
     // ── Main harness ───────────────────────────────────────────────
 
     #[test]
+    #[ignore] // slow: processes entire PDF corpus; run explicitly with --ignored
     fn reference_harness() {
         let corpus_dir = std::env::var("HARNESS_DIR")
             .unwrap_or_else(|_| DEFAULT_CORPUS.to_string());

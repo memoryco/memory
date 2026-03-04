@@ -190,6 +190,15 @@ impl<'a> VectorSearch<'a> {
         Ok(())
     }
     
+    /// Clear all embeddings (set to NULL) for model migration.
+    /// Returns the number of affected rows.
+    pub fn clear_all_embeddings(&mut self) -> StorageResult<usize> {
+        let result = sql_query("UPDATE engrams SET embedding = NULL WHERE embedding IS NOT NULL")
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(result)
+    }
+
     /// Get embedding for a single engram
     pub fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
         let id_str = id.to_string();
@@ -286,5 +295,94 @@ mod tests {
         
         assert_eq!(vs.count_with_embeddings().unwrap(), 1);
         assert_eq!(vs.count_without_embeddings().unwrap(), 1);
+    }
+
+    #[test]
+    fn clear_all_embeddings() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut e1 = Engram::new("Has embedding 1");
+        e1.embedding = Some(vec![1.0, 0.0, 0.0]);
+
+        let mut e2 = Engram::new("Has embedding 2");
+        e2.embedding = Some(vec![0.0, 1.0, 0.0]);
+
+        let e3 = Engram::new("No embedding");
+
+        storage.save_engram(&e1).unwrap();
+        storage.save_engram(&e2).unwrap();
+        storage.save_engram(&e3).unwrap();
+
+        let mut vs = VectorSearch::new(storage.connection());
+        assert_eq!(vs.count_with_embeddings().unwrap(), 2);
+
+        let cleared = vs.clear_all_embeddings().unwrap();
+        assert_eq!(cleared, 2, "Should clear exactly the 2 rows with embeddings");
+
+        assert_eq!(vs.count_with_embeddings().unwrap(), 0);
+        assert_eq!(vs.count_without_embeddings().unwrap(), 3);
+    }
+
+    #[test]
+    fn clear_all_embeddings_empty_db() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut vs = VectorSearch::new(storage.connection());
+        let cleared = vs.clear_all_embeddings().unwrap();
+        assert_eq!(cleared, 0);
+    }
+
+    #[test]
+    fn no_hardcoded_dimension_in_storage() {
+        // Verify that the storage layer (SQL, blob format) has no hardcoded
+        // dimension assumptions. Both small and large embeddings are stored
+        // and retrieved correctly via the same code paths.
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Simulate 384-dim embedding (old model)
+        let small_emb: Vec<f32> = (0..384).map(|i| (i as f32) / 384.0).collect();
+        let mut e1 = Engram::new("Small embedding");
+        e1.embedding = Some(small_emb.clone());
+        storage.save_engram(&e1).unwrap();
+
+        // Simulate 1024-dim embedding (new model)
+        let large_emb: Vec<f32> = (0..1024).map(|i| (i as f32) / 1024.0).collect();
+        let mut e2 = Engram::new("Large embedding");
+        e2.embedding = Some(large_emb.clone());
+        storage.save_engram(&e2).unwrap();
+
+        // Both should be stored and retrievable
+        let mut vs = VectorSearch::new(storage.connection());
+        assert_eq!(vs.count_with_embeddings().unwrap(), 2);
+
+        // Roundtrip: get them back and check dimensions
+        let got1 = vs.get_embedding(&e1.id).unwrap().unwrap();
+        assert_eq!(got1.len(), 384);
+
+        let got2 = vs.get_embedding(&e2.id).unwrap().unwrap();
+        assert_eq!(got2.len(), 1024);
+
+        // Search with a 1024-dim query — only e2 will match dimensions
+        // (cosine_similarity asserts matching dimensions, so mismatched entries
+        // will be skipped by the search since bytes_to_embedding returns all of them
+        // but find_similar computes cosine_similarity which panics on mismatch.
+        // This is correct: after migration, all embeddings have the same dimension.)
+
+        // After clearing and re-embedding (as migration does), all are same dimension.
+        let cleared = vs.clear_all_embeddings().unwrap();
+        assert_eq!(cleared, 2);
+
+        // Re-embed both with 1024 dims
+        let new_emb1: Vec<f32> = (0..1024).map(|i| (i as f32 + 0.5) / 1024.0).collect();
+        let new_emb2: Vec<f32> = (0..1024).map(|i| (i as f32 + 1.0) / 1024.0).collect();
+        vs.set_embedding(&e1.id, &new_emb1).unwrap();
+        vs.set_embedding(&e2.id, &new_emb2).unwrap();
+
+        // Now both are 1024-dim, search should work
+        let results = vs.find_similar(&new_emb1, 10, 0.0).unwrap();
+        assert_eq!(results.len(), 2);
     }
 }

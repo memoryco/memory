@@ -98,6 +98,12 @@ impl Substrate {
         self.add(engram)
     }
     
+    /// Create and add a new engram with an explicit creation timestamp
+    pub fn create_with_timestamp(&mut self, content: impl Into<String>, created_at: i64) -> EngramId {
+        let engram = Engram::new_with_timestamp(content, created_at);
+        self.add(engram)
+    }
+
     /// Create an engram with tags
     pub fn create_with_tags(&mut self, content: impl Into<String>, tags: Vec<String>) -> EngramId {
         let engram = Engram::with_tags(content, tags);

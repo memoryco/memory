@@ -15,6 +15,7 @@ mod embedding;
 mod engram;
 mod identity;
 mod install;
+pub mod lang;
 mod lenses;
 mod plans;
 mod plugins;

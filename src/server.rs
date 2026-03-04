@@ -48,6 +48,7 @@ pub fn run() {
     apply_maintenance(&mut brain);
     backfill_embeddings(&mut brain);
     bootstrap_associations(&mut brain);
+    run_decomposition(&mut brain);
 
     // --- Identity ---
     let identity_storage = DieselIdentityStorage::open(&identity_db_path)
@@ -191,6 +192,50 @@ fn bootstrap_associations(brain: &mut Brain) {
     }
 }
 
+/// Run compound memory decomposition (one-time migration).
+///
+/// Splits compound memories into atomic ones for better embedding quality.
+/// Uses a metadata flag to ensure it only runs once per database.
+fn run_decomposition(brain: &mut Brain) {
+    const FLAG_KEY: &str = "decompose_v1_done";
+
+    match brain.get_metadata(FLAG_KEY) {
+        Ok(Some(_)) => return, // Already done
+        Ok(None) => {}         // Need to run
+        Err(e) => {
+            eprintln!("Warning: Failed to check decomposition flag: {}", e);
+            return;
+        }
+    }
+
+    eprintln!("Running one-time compound memory decomposition...");
+
+    match crate::engram::decompose::decompose_compound_memories(brain) {
+        Ok(report) => {
+            eprintln!(
+                "Decomposition complete: {}/{} memories split into {} children ({} procedural skipped, {} errors)",
+                report.total_decomposed,
+                report.total_scanned,
+                report.total_children_created,
+                report.skipped_procedural,
+                report.errors.len(),
+            );
+            for err in &report.errors {
+                eprintln!("  decompose error: {}", err);
+            }
+
+            // Mark as done
+            if let Err(e) = brain.set_metadata(FLAG_KEY, "1") {
+                eprintln!("Warning: Failed to set decomposition flag: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: Decomposition failed: {}", e);
+            // Don't set the flag — let it retry on next startup
+        }
+    }
+}
+
 /// Migrate identity from old JSON blob to flat storage (one-time).
 fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
     let old_identity = brain.identity();
@@ -262,6 +307,9 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::PlanStopTool).expect("plan_stop");
     server.add_tool(tools::StepAddTool).expect("step_add");
     server.add_tool(tools::StepCompleteTool).expect("step_complete");
+
+    // Date tools
+    server.add_tool(tools::DateResolveTool).expect("date_resolve");
 
     // UI tools
     server.add_tool(tools::OpenDashboardTool).expect("open_dashboard");

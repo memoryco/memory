@@ -138,7 +138,16 @@ impl EngramStorage {
             -- Index for association lookups
             CREATE INDEX IF NOT EXISTS idx_associations_from ON associations(from_id);
         "#).map_err(|e| StorageError::Database(e.to_string()))?;
-        
+
+        // FTS5 virtual table for BM25 keyword search
+        self.conn.batch_execute(r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS engram_fts USING fts5(
+                content,
+                engram_id UNINDEXED,
+                tokenize='porter unicode61'
+            );
+        "#).map_err(|e| StorageError::Database(e.to_string()))?;
+
         Ok(())
     }
     
@@ -267,10 +276,21 @@ impl Storage for EngramStorage {
                 embedding: engram.embedding.as_ref().map(|e| embedding_to_bytes(e)),
             })
             .execute(&mut self.conn)?;
-        
+
+        // Sync FTS5: delete existing entry (if any) then insert fresh
+        diesel::sql_query("DELETE FROM engram_fts WHERE engram_id = ?1")
+            .bind::<diesel::sql_types::Text, _>(&id_str)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        diesel::sql_query("INSERT INTO engram_fts(content, engram_id) VALUES (?1, ?2)")
+            .bind::<diesel::sql_types::Text, _>(&engram.content)
+            .bind::<diesel::sql_types::Text, _>(&id_str)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
         Ok(())
     }
-    
+
     fn save_engrams(&mut self, engram_list: &[&Engram]) -> StorageResult<()> {
         self.conn.transaction::<_, diesel::result::Error, _>(|conn| {
             for engram in engram_list {
@@ -278,7 +298,7 @@ impl Storage for EngramStorage {
                 let state_str = state_to_str(engram.state);
                 let tags_json = serde_json::to_string(&engram.tags)
                     .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(e)))?;
-                
+
                 diesel::replace_into(engrams::table)
                     .values(NewEngram {
                         id: &id_str,
@@ -293,10 +313,19 @@ impl Storage for EngramStorage {
                         embedding: engram.embedding.as_ref().map(|e| embedding_to_bytes(e)),
                     })
                     .execute(conn)?;
+
+                // Sync FTS5: delete existing entry (if any) then insert fresh
+                diesel::sql_query("DELETE FROM engram_fts WHERE engram_id = ?1")
+                    .bind::<diesel::sql_types::Text, _>(&id_str)
+                    .execute(conn)?;
+                diesel::sql_query("INSERT INTO engram_fts(content, engram_id) VALUES (?1, ?2)")
+                    .bind::<diesel::sql_types::Text, _>(&engram.content)
+                    .bind::<diesel::sql_types::Text, _>(&id_str)
+                    .execute(conn)?;
             }
             Ok(())
         })?;
-        
+
         Ok(())
     }
     
@@ -356,17 +385,23 @@ impl Storage for EngramStorage {
     
     fn delete_engram(&mut self, id: &EngramId) -> StorageResult<bool> {
         let id_str = id.to_string();
-        
+
         // Delete the engram
         let deleted = diesel::delete(engrams::table.filter(engrams::id.eq(&id_str)))
             .execute(&mut self.conn)?;
-        
+
+        // Delete from FTS5 index
+        diesel::sql_query("DELETE FROM engram_fts WHERE engram_id = ?1")
+            .bind::<diesel::sql_types::Text, _>(&id_str)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
         // Delete associations from/to this engram
         diesel::delete(associations::table.filter(
             associations::from_id.eq(&id_str).or(associations::to_id.eq(&id_str))
         ))
         .execute(&mut self.conn)?;
-        
+
         Ok(deleted > 0)
     }
     
@@ -534,6 +569,24 @@ impl Storage for EngramStorage {
         }
     }
     
+    fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>> {
+        let result: Option<MetadataRow> = metadata::table
+            .filter(metadata::key.eq(key))
+            .select(MetadataRow::as_select())
+            .first(&mut self.conn)
+            .optional()?;
+        
+        Ok(result.map(|row| row.value))
+    }
+    
+    fn set_metadata(&mut self, key: &str, value: &str) -> StorageResult<()> {
+        diesel::replace_into(metadata::table)
+            .values(NewMetadata { key, value })
+            .execute(&mut self.conn)?;
+        
+        Ok(())
+    }
+    
     // ==================
     // LIFECYCLE
     // ==================
@@ -631,6 +684,118 @@ impl Storage for EngramStorage {
     fn get_embedding(&mut self, _id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
         Ok(None) // TODO
     }
+
+    #[cfg(feature = "sqlite")]
+    fn clear_all_embeddings(&mut self) -> StorageResult<usize> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.clear_all_embeddings()
+    }
+
+    #[cfg(feature = "postgres")]
+    fn clear_all_embeddings(&mut self) -> StorageResult<usize> {
+        Ok(0) // TODO
+    }
+
+    // ==================
+    // KEYWORD SEARCH (FTS5)
+    // ==================
+
+    #[cfg(feature = "sqlite")]
+    fn keyword_search(&mut self, query: &str, limit: usize) -> StorageResult<Vec<SimilarityResult>> {
+        let sanitized = sanitize_fts_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        #[derive(QueryableByName, Debug)]
+        struct FtsRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            id: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            content: String,
+            #[diesel(sql_type = diesel::sql_types::Float)]
+            score: f32,
+        }
+
+        let rows: Vec<FtsRow> = diesel::sql_query(
+            "SELECT e.id, e.content, -bm25(engram_fts) as score \
+             FROM engram_fts f \
+             JOIN engrams e ON e.id = f.engram_id \
+             WHERE engram_fts MATCH ?1 \
+             ORDER BY bm25(engram_fts) \
+             LIMIT ?2"
+        )
+        .bind::<diesel::sql_types::Text, _>(&sanitized)
+        .bind::<diesel::sql_types::BigInt, _>(limit as i64)
+        .load(&mut self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = uuid::Uuid::parse_str(&row.id)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+            results.push(SimilarityResult {
+                id,
+                score: row.score,
+                content: row.content,
+            });
+        }
+
+        Ok(results)
+    }
+
+    #[cfg(feature = "postgres")]
+    fn keyword_search(&mut self, _query: &str, _limit: usize) -> StorageResult<Vec<SimilarityResult>> {
+        Ok(Vec::new()) // TODO
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn ensure_fts_populated(&mut self) -> StorageResult<usize> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let fts_count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+            .get_result(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        let engram_count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engrams")
+            .get_result(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        if fts_count.cnt > 0 || engram_count.cnt == 0 {
+            return Ok(0);
+        }
+
+        // Backfill FTS5 from existing engrams
+        let affected = diesel::sql_query(
+            "INSERT INTO engram_fts(content, engram_id) SELECT content, id FROM engrams"
+        )
+        .execute(&mut self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        Ok(affected)
+    }
+
+    #[cfg(feature = "postgres")]
+    fn ensure_fts_populated(&mut self) -> StorageResult<usize> {
+        Ok(0) // TODO
+    }
+}
+
+/// Sanitize a user query for FTS5 MATCH syntax.
+///
+/// Splits the query into words, wraps each in double quotes to treat as literal
+/// terms, and joins with spaces. This prevents FTS5 operator injection (AND, OR,
+/// NOT, NEAR) and handles special characters safely.
+fn sanitize_fts_query(query: &str) -> String {
+    query.split_whitespace()
+        .filter(|w| !w.is_empty())
+        .map(|w| format!("\"{}\"", w.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -968,5 +1133,237 @@ mod tests {
         let all = storage.load_all_associations().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].ordinal, Some(42));
+    }
+
+    // ==================
+    // FTS5 TESTS
+    // ==================
+
+    #[test]
+    fn fts_table_created_on_init() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Verify the FTS5 table exists by querying it
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let result: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+            .get_result(&mut storage.conn)
+            .expect("engram_fts table should exist after init");
+        assert_eq!(result.cnt, 0);
+    }
+
+    #[test]
+    fn fts_populated_on_create() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let engram = Engram::new("Rust programming language features");
+        storage.save_engram(&engram).unwrap();
+
+        // Check FTS5 has the entry
+        #[derive(QueryableByName)]
+        struct FtsCheck {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            engram_id: String,
+        }
+
+        let rows: Vec<FtsCheck> = diesel::sql_query(
+            "SELECT engram_id FROM engram_fts WHERE engram_fts MATCH '\"Rust\"'"
+        )
+        .load(&mut storage.conn)
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].engram_id, engram.id.to_string());
+    }
+
+    #[test]
+    fn fts_cleaned_on_delete() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let engram = Engram::new("Temporary memory for testing");
+        let id = engram.id;
+        storage.save_engram(&engram).unwrap();
+
+        // Verify it's in FTS
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let before: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+            .get_result(&mut storage.conn)
+            .unwrap();
+        assert_eq!(before.cnt, 1);
+
+        // Delete the engram
+        storage.delete_engram(&id).unwrap();
+
+        // FTS should be cleaned
+        let after: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+            .get_result(&mut storage.conn)
+            .unwrap();
+        assert_eq!(after.cnt, 0);
+    }
+
+    #[test]
+    fn keyword_search_basic() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        storage.save_engram(&Engram::new("Rust programming language")).unwrap();
+        storage.save_engram(&Engram::new("Python programming language")).unwrap();
+        storage.save_engram(&Engram::new("Cooking delicious pasta")).unwrap();
+
+        let results = storage.keyword_search("programming", 10).unwrap();
+        assert_eq!(results.len(), 2, "Should find both programming memories");
+
+        // Verify content matches
+        let contents: Vec<&str> = results.iter().map(|r| r.content.as_str()).collect();
+        assert!(contents.iter().any(|c| c.contains("Rust")));
+        assert!(contents.iter().any(|c| c.contains("Python")));
+    }
+
+    #[test]
+    fn keyword_search_stemming() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        storage.save_engram(&Engram::new("Researching machine learning techniques")).unwrap();
+
+        // "research" should match "Researching" via porter stemmer
+        let results = storage.keyword_search("research", 10).unwrap();
+        assert_eq!(results.len(), 1, "Porter stemmer should match 'research' to 'Researching'");
+    }
+
+    #[test]
+    fn keyword_search_no_results() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        storage.save_engram(&Engram::new("Rust programming")).unwrap();
+
+        let results = storage.keyword_search("quantum physics", 10).unwrap();
+        assert!(results.is_empty(), "No memories about quantum physics");
+    }
+
+    #[test]
+    fn keyword_search_empty_query() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        storage.save_engram(&Engram::new("Some content")).unwrap();
+
+        let results = storage.keyword_search("", 10).unwrap();
+        assert!(results.is_empty(), "Empty query should return no results");
+    }
+
+    #[test]
+    fn fts_updated_on_content_change() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut engram = Engram::new("Original content about dogs");
+        storage.save_engram(&engram).unwrap();
+
+        // Should find "dogs"
+        let results = storage.keyword_search("dogs", 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Update content
+        engram.content = "Updated content about cats".to_string();
+        storage.save_engram(&engram).unwrap();
+
+        // Should no longer find "dogs"
+        let results = storage.keyword_search("dogs", 10).unwrap();
+        assert!(results.is_empty(), "Old content should not be findable");
+
+        // Should find "cats"
+        let results = storage.keyword_search("cats", 10).unwrap();
+        assert_eq!(results.len(), 1, "New content should be findable");
+    }
+
+    #[test]
+    fn ensure_fts_populated_backfills() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Create engrams directly in the engrams table without FTS sync
+        // by using raw SQL to bypass the save_engram FTS logic
+        let e1 = Engram::new("Memory about Rust");
+        let e2 = Engram::new("Memory about Python");
+
+        // Save normally (which populates FTS)
+        storage.save_engram(&e1).unwrap();
+        storage.save_engram(&e2).unwrap();
+
+        // Clear FTS manually to simulate pre-FTS data
+        diesel::sql_query("DELETE FROM engram_fts")
+            .execute(&mut storage.conn)
+            .unwrap();
+
+        // Verify FTS is empty
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+            .get_result(&mut storage.conn)
+            .unwrap();
+        assert_eq!(count.cnt, 0, "FTS should be empty after manual clear");
+
+        // Run backfill
+        let backfilled = storage.ensure_fts_populated().unwrap();
+        assert_eq!(backfilled, 2, "Should backfill 2 engrams");
+
+        // Verify search works after backfill
+        let results = storage.keyword_search("Rust", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("Rust"));
+    }
+
+    #[test]
+    fn ensure_fts_populated_noop_when_already_populated() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        storage.save_engram(&Engram::new("Already indexed")).unwrap();
+
+        // FTS already has data, should be a no-op
+        let backfilled = storage.ensure_fts_populated().unwrap();
+        assert_eq!(backfilled, 0, "Should not backfill when FTS already has data");
+    }
+
+    #[test]
+    fn sanitize_fts_query_handles_special_chars() {
+        assert_eq!(sanitize_fts_query("hello world"), "\"hello\" \"world\"");
+        assert_eq!(sanitize_fts_query("AND OR NOT"), "\"AND\" \"OR\" \"NOT\"");
+        assert_eq!(sanitize_fts_query("test\"injection"), "\"testinjection\"");
+        assert_eq!(sanitize_fts_query(""), "");
+        assert_eq!(sanitize_fts_query("   "), "");
+    }
+
+    #[test]
+    fn fts_batch_save_populates() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Batch item alpha");
+        let e2 = Engram::new("Batch item beta");
+        let e3 = Engram::new("Batch item gamma");
+
+        storage.save_engrams(&[&e1, &e2, &e3]).unwrap();
+
+        let results = storage.keyword_search("batch", 10).unwrap();
+        assert_eq!(results.len(), 3, "All batch-saved engrams should be in FTS");
     }
 }

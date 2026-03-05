@@ -55,5 +55,6 @@ fn main() {
         Some(cli::Command::Doctor)           => commands::doctor(),
         Some(cli::Command::Reset)            => commands::reset(),
         Some(cli::Command::Update { dry_run })=> commands::update(dry_run),
+        Some(cli::Command::PruneRegistry)        => commands::prune_registry(),
     }
 }

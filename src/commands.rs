@@ -389,6 +389,16 @@ fn prompt_yes_no(question: &str) -> bool {
     trimmed.is_empty() || trimmed == "y" || trimmed == "yes"
 }
 
+/// Remove stale entries from ~/.memoryco/registry.toml.
+pub fn prune_registry() {
+    let pruned = crate::registry::prune_dead_homes();
+    if pruned == 0 {
+        println!("Registry is clean — no stale entries found.");
+    } else {
+        println!("Pruned {} stale entr{}.", pruned, if pruned == 1 { "y" } else { "ies" });
+    }
+}
+
 /// Print manual configuration instructions as a fallback.
 fn print_manual_config() {
     let (command, _, _) = install::memoryco_server_entry();

@@ -55,4 +55,7 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// Remove stale entries from the shared registry (~/.memoryco/registry.toml)
+    PruneRegistry,
 }

@@ -42,10 +42,10 @@ pub fn cache() {
 
 /// The prompt users should add to clients that don't support file-based injection.
 const PROMPT_INSTRUCTION: &str = "\
-You have access to a cognitive memory system via MCP tools (`memoryco:*`).
+You have access to a cognitive memory system via MCP tools (`memory:*`).
 
 As your first action in every conversation, call `identity_get` from your
-memoryco MCP tools. This contains your persona, values, preferences, and
+memory MCP tools. This contains your persona, values, preferences, and
 operational instructions. Follow what you find.";
 
 /// `memoryco install` — detect MCP clients and inject config.

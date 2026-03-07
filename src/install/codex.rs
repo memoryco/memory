@@ -2,11 +2,11 @@
 //!
 //! Codex stores MCP config in `~/.codex/config.toml` with the structure:
 //! ```toml
-//! [mcp_servers.memoryco]
+//! [mcp_servers.memory]
 //! command = "/path/to/memoryco"
 //! args = ["serve"]
 //!
-//! [mcp_servers.memoryco.env]
+//! [mcp_servers.memory.env]
 //! MEMORY_HOME = "~/.memoryco"
 //! ```
 
@@ -66,12 +66,12 @@ impl McpClient for CodexClient {
             Err(_) => return InstallStatus::NotInstalled,
         };
 
-        // Check for mcp_servers.memoryco
+        // Check for mcp_servers.memory
         let Some(servers) = doc.get("mcp_servers").and_then(|v| v.as_table()) else {
             return InstallStatus::NotInstalled;
         };
 
-        let Some(entry) = servers.get("memoryco").and_then(|v| v.as_table()) else {
+        let Some(entry) = servers.get("memory").and_then(|v| v.as_table()) else {
             return InstallStatus::NotInstalled;
         };
 
@@ -99,7 +99,7 @@ impl McpClient for CodexClient {
             doc["mcp_servers"] = Item::Table(Table::new());
         }
 
-        // Build the memoryco table
+        // Build the memory table
         let mut entry = Table::new();
         entry.insert("command", value(&command));
 
@@ -117,7 +117,7 @@ impl McpClient for CodexClient {
         entry.insert("env", Item::Table(env_table));
 
         // Insert under mcp_servers
-        doc["mcp_servers"]["memoryco"] = Item::Table(entry);
+        doc["mcp_servers"]["memory"] = Item::Table(entry);
 
         self.write_config(&doc)?;
         Ok(())
@@ -131,7 +131,7 @@ impl McpClient for CodexClient {
         let mut doc = self.read_config()?;
 
         if let Some(servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
-            servers.remove("memoryco");
+            servers.remove("memory");
         }
 
         self.write_config(&doc)?;
@@ -158,7 +158,7 @@ mod tests {
         let contents = std::fs::read_to_string(client.config_path()).unwrap();
         let doc: DocumentMut = contents.parse().unwrap();
 
-        let entry = doc["mcp_servers"]["memoryco"].as_table().unwrap();
+        let entry = doc["mcp_servers"]["memory"].as_table().unwrap();
         assert!(entry.get("command").unwrap().as_str().is_some());
         assert_eq!(entry["args"].as_array().unwrap().get(0).unwrap().as_str().unwrap(), "serve");
     }
@@ -186,7 +186,7 @@ args = ["--root", "/home"]
         assert_eq!(doc["model"].as_str().unwrap(), "o3");
         assert!(doc["mcp_servers"]["filesystem"].as_table().is_some());
         // Our entry added
-        assert!(doc["mcp_servers"]["memoryco"].as_table().is_some());
+        assert!(doc["mcp_servers"]["memory"].as_table().is_some());
     }
 
     #[test]
@@ -204,7 +204,7 @@ args = ["--root", "/home"]
         let client = test_client(&dir);
 
         let initial = r#"
-[mcp_servers.memoryco]
+[mcp_servers.memory]
 command = "memoryco"
 args = ["serve"]
 
@@ -218,7 +218,7 @@ command = "other"
         let contents = std::fs::read_to_string(client.config_path()).unwrap();
         let doc: DocumentMut = contents.parse().unwrap();
 
-        assert!(doc["mcp_servers"].as_table().unwrap().get("memoryco").is_none());
+        assert!(doc["mcp_servers"].as_table().unwrap().get("memory").is_none());
         assert!(doc["mcp_servers"]["other"].as_table().is_some());
     }
 }

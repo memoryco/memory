@@ -2,7 +2,7 @@
 //!
 //! Handles clients that store MCP server config in a JSON file with the structure:
 //! ```json
-//! { "<top_level_key>": { "memoryco": { "command": "...", "args": [...], "env": {...} } } }
+//! { "<top_level_key>": { "memory": { "command": "...", "args": [...], "env": {...} } } }
 //! ```
 //!
 //! Covers: Claude Desktop, Claude Code, Cursor, Windsurf, VS Code (Copilot).
@@ -67,11 +67,11 @@ impl JsonClient {
         Ok(())
     }
 
-    /// Get the memoryco entry from the config, if it exists.
-    fn get_memoryco_entry<'a>(&self, config: &'a Value) -> Option<&'a Value> {
+    /// Get the memory entry from the config, if it exists.
+    fn get_memory_entry<'a>(&self, config: &'a Value) -> Option<&'a Value> {
         config
             .get(&self.servers_key)?
-            .get("memoryco")
+            .get("memory")
     }
 
     /// Build the JSON value for our server entry.
@@ -119,7 +119,7 @@ impl McpClient for JsonClient {
             Err(_) => return InstallStatus::NotInstalled,
         };
 
-        let Some(existing) = self.get_memoryco_entry(&config) else {
+        let Some(existing) = self.get_memory_entry(&config) else {
             return InstallStatus::NotInstalled;
         };
 
@@ -152,7 +152,7 @@ impl McpClient for JsonClient {
             obj.insert(self.servers_key.clone(), json!({}));
         }
 
-        // Insert/update the memoryco entry
+        // Insert/update the memory entry
         let servers = obj
             .get_mut(&self.servers_key)
             .and_then(|v| v.as_object_mut())
@@ -160,7 +160,7 @@ impl McpClient for JsonClient {
                 format!("'{}' is not a JSON object", self.servers_key)
             ))?;
 
-        servers.insert("memoryco".to_string(), entry);
+        servers.insert("memory".to_string(), entry);
 
         self.write_config(&config)?;
         Ok(())
@@ -173,12 +173,12 @@ impl McpClient for JsonClient {
 
         let mut config = self.read_config()?;
 
-        // Remove the memoryco entry if it exists
+        // Remove the memory entry if it exists
         if let Some(servers) = config
             .get_mut(&self.servers_key)
             .and_then(|v| v.as_object_mut())
         {
-            servers.remove("memoryco");
+            servers.remove("memory");
         }
 
         self.write_config(&config)?;
@@ -219,8 +219,8 @@ mod tests {
         client.install().unwrap();
 
         let config = client.read_config().unwrap();
-        assert!(config["mcpServers"]["memoryco"]["command"].is_string());
-        assert_eq!(config["mcpServers"]["memoryco"]["args"][0], "serve");
+        assert!(config["mcpServers"]["memory"]["command"].is_string());
+        assert_eq!(config["mcpServers"]["memory"]["args"][0], "serve");
     }
 
     #[test]
@@ -243,7 +243,7 @@ mod tests {
 
         let config = client.read_config().unwrap();
         // Our entry was added
-        assert!(config["mcpServers"]["memoryco"]["command"].is_string());
+        assert!(config["mcpServers"]["memory"]["command"].is_string());
         // Other entry preserved
         assert_eq!(config["mcpServers"]["other-server"]["command"], "/usr/bin/other");
     }
@@ -266,7 +266,7 @@ mod tests {
         let config = client.read_config().unwrap();
         assert_eq!(config["theme"], "dark");
         assert_eq!(config["fontSize"], 14);
-        assert!(config["mcpServers"]["memoryco"]["command"].is_string());
+        assert!(config["mcpServers"]["memory"]["command"].is_string());
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod tests {
 
         let config = json!({
             "mcpServers": {
-                "memoryco": {
+                "memory": {
                     "command": "/old/path/memoryco",
                     "args": ["serve"]
                 }
@@ -308,7 +308,7 @@ mod tests {
 
         let config = json!({
             "mcpServers": {
-                "memoryco": { "command": "memoryco", "args": ["serve"] },
+                "memory": { "command": "memoryco", "args": ["serve"] },
                 "other": { "command": "other", "args": ["run"] }
             }
         });
@@ -317,7 +317,7 @@ mod tests {
         client.uninstall().unwrap();
 
         let config = client.read_config().unwrap();
-        assert!(config["mcpServers"]["memoryco"].is_null());
+        assert!(config["mcpServers"]["memory"].is_null());
         assert_eq!(config["mcpServers"]["other"]["command"], "other");
     }
 
@@ -338,7 +338,7 @@ mod tests {
         client.install().unwrap();
 
         let config = client.read_config().unwrap();
-        assert!(config["servers"]["memoryco"]["command"].is_string());
+        assert!(config["servers"]["memory"]["command"].is_string());
         assert!(config["mcpServers"].is_null()); // Should NOT create mcpServers
     }
 
@@ -379,6 +379,6 @@ mod tests {
         client.install().unwrap();
 
         let config = client.read_config().unwrap();
-        assert!(config["mcpServers"]["memoryco"]["command"].is_string());
+        assert!(config["mcpServers"]["memory"]["command"].is_string());
     }
 }

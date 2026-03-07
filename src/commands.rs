@@ -4,7 +4,6 @@
 
 use crate::config;
 use crate::install::{self, InstallStatus};
-use self_update::cargo_crate_version;
 use std::io::{self, Write};
 
 /// `memoryco setup` — full first-run experience.
@@ -309,35 +308,39 @@ pub fn reset() {
 
 /// `memoryco update` — self-update from GitHub Releases.
 pub fn update(dry_run: bool) {
-    let current = cargo_crate_version!();
-    eprintln!("Current version: {}", current);
-    eprintln!("Checking for updates...");
+    let updater = memoryco_updater::Updater::new();
+    let current = env!("CARGO_PKG_VERSION");
 
-    let update_builder = match self_update::backends::github::Update::configure()
-        .repo_owner("memoryco")
-        .repo_name("releases")
-        .bin_name("memoryco")
-        .current_version(current)
-        .show_download_progress(true)
-        .no_confirm(true)
-        .build()
-    {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("✗ Failed to check for updates: {}", e);
-            std::process::exit(1);
-        }
-    };
+    eprintln!("Current version: {}", current);
 
     if dry_run {
-        match update_builder.get_latest_release() {
-            Ok(release) => {
-                let latest = &release.version;
-                if latest == current {
-                    eprintln!("✓ Already on the latest version ({})", current);
+        eprintln!("Checking for updates...");
+        match updater.check_version("memoryco", current) {
+            Ok(check) if check.update_available => {
+                eprintln!("  New version available: {} → {}", current, check.latest);
+                if let Some(ref staged) = check.staged {
+                    eprintln!("  (v{} already staged, will apply on next restart)", staged);
                 } else {
-                    eprintln!("  New version available: {} → {}", current, latest);
                     eprintln!("  Run `memoryco update` to install.");
+                }
+            }
+            Ok(check) => {
+                eprintln!("✓ Already on the latest version ({})", current);
+                if let Some(ref staged) = check.staged {
+                    eprintln!("  (v{} staged, will apply on next restart)", staged);
+                }
+            }
+            Err(memoryco_updater::UpdateError::Throttled { .. }) => {
+                // For CLI dry-run, use unthrottled check instead
+                match updater.check("memoryco") {
+                    Ok(check) if check.update_available => {
+                        eprintln!("  New version available: {} → {}", current, check.latest);
+                    }
+                    Ok(_) => eprintln!("✓ Already on the latest version ({})", current),
+                    Err(e) => {
+                        eprintln!("✗ Failed to check for updates: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
             Err(e) => {
@@ -348,14 +351,19 @@ pub fn update(dry_run: bool) {
         return;
     }
 
-    match update_builder.update() {
-        Ok(status) => {
-            if status.updated() {
-                eprintln!("✓ Updated to version {}", status.version());
-                // Re-install into any configured MCP clients so the path stays current
-                // (in case the binary moved — unlikely with in-place update, but safe)
-            } else {
-                eprintln!("✓ Already on the latest version ({})", current);
+    eprintln!("Checking for updates...");
+    match updater.update_now("memoryco") {
+        Ok(result) => {
+            match result.action {
+                memoryco_updater::UpdateAction::Applied(_) => {
+                    eprintln!("✓ Updated to version {}", result.new_version);
+                }
+                memoryco_updater::UpdateAction::AlreadyLatest => {
+                    eprintln!("✓ Already on the latest version ({})", current);
+                }
+                memoryco_updater::UpdateAction::Staged(_) => {
+                    eprintln!("⬇ Update {} staged. Will apply on next restart.", result.new_version);
+                }
             }
         }
         Err(e) => {
@@ -407,7 +415,7 @@ fn print_manual_config() {
     eprintln!("Add this to your MCP client config manually:\n");
     eprintln!("  {{");
     eprintln!("    \"mcpServers\": {{");
-    eprintln!("      \"memoryco\": {{");
+    eprintln!("      \"memory\": {{");
     eprintln!("        \"command\": \"{}\",", command);
     eprintln!("        \"args\": [\"serve\"],");
     eprintln!("        \"env\": {{");

@@ -18,6 +18,42 @@ use std::sync::{Arc, Mutex};
 /// This is the main entry point for `memoryco serve` (and the default command).
 /// It opens databases, applies maintenance, registers tools, and blocks on stdio.
 pub fn run() {
+    // ── Auto-update: apply staged + background check ─────────────────────────────────
+    {
+        let updater = memoryco_updater::Updater::new();
+        let my_name = "memoryco";
+        let my_version = env!("CARGO_PKG_VERSION");
+
+        // Apply any previously-staged update before we start.
+        if let Ok(my_path) = std::env::current_exe() {
+            match updater.apply_staged(my_name, my_version, &my_path) {
+                Ok(Some(result)) => {
+                    eprintln!("✓ Applied staged update: {} → {}", my_version, result.new_version);
+                }
+                Ok(None) => {} // nothing staged
+                Err(e) => eprintln!("⚠ Staged update failed to apply: {}", e),
+            }
+        }
+
+        // Background check for new updates (throttled to every 4 hours).
+        let my_version = my_version.to_string();
+        std::thread::spawn(move || {
+            let updater = memoryco_updater::Updater::new();
+            match updater.check_version("memoryco", &my_version) {
+                Ok(check) if check.update_available => {
+                    match updater.stage("memoryco") {
+                        Ok(r) => eprintln!("⬇ Update v{} staged. Will apply on next restart.", r.new_version),
+                        Err(e) => eprintln!("⚠ Failed to stage update: {}", e),
+                    }
+                }
+                Ok(_) => {}
+                Err(memoryco_updater::UpdateError::Throttled { .. }) => {}
+                Err(e) => eprintln!("⚠ Update check failed: {}", e),
+            }
+        });
+    }
+
+    // ── Normal server startup continues below ─────────────────────────────────────
     let memory_home = config::get_memory_home();
     let db_path = memory_home.join("brain.db");
     let identity_db_path = memory_home.join("identity.db");

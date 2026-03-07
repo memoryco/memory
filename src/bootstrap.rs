@@ -73,7 +73,7 @@ mod tests {
 
         // Verify each module's marker is present
         let all_text: String = after.instructions.join("\n");
-        assert!(all_text.contains("## Core Workflow"),
+        assert!(all_text.contains("<workflow>"),
             "Missing engram instructions");
         assert!(all_text.contains("## Lenses"),
             "Missing lenses instructions");

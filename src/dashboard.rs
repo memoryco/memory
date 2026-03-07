@@ -133,11 +133,17 @@ fn route(
         ("POST", "/api/lenses") => handle_save_lens(&mut request, state),
         ("POST", "/api/lenses/upload") => handle_upload_lens(&mut request, state),
 
+        // Updates
+        ("GET", "/api/updates") => handle_check_updates(),
+
         // Engrams
         ("GET", "/api/engrams") => handle_list_engrams(query, state),
 
         // Graph
         ("GET", "/api/graph") => handle_graph(query, state),
+
+        // Dynamic POST routes
+        _ if method == "POST" => route_post(path, state),
 
         // Dynamic DELETE routes
         _ if method == "DELETE" => route_delete(path, state),
@@ -146,6 +152,21 @@ fn route(
     };
 
     let _ = request.respond(response);
+}
+
+fn route_post(
+    path: &str,
+    _state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+    match segments.as_slice() {
+        // POST /api/updates/:binary/stage
+        ["api", "updates", binary, "stage"] => handle_stage_update(binary),
+        // POST /api/updates/stage-all
+        ["api", "updates", "stage-all"] => handle_stage_all_updates(),
+        _ => json_response(404, r#"{"error":"Not found"}"#),
+    }
 }
 
 fn route_delete(
@@ -1026,6 +1047,61 @@ fn handle_graph(
 }
 
 // ---------------------------------------------------------------------------
+// Update handlers
+// ---------------------------------------------------------------------------
+
+/// GET /api/updates — check all installed MemoryCo binaries for updates.
+fn handle_check_updates() -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let updater = memoryco_updater::Updater::new();
+    match updater.check_all() {
+        Ok(checks) => {
+            match serde_json::to_string(&checks) {
+                Ok(body) => json_response(200, &body),
+                Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+            }
+        }
+        Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+    }
+}
+
+/// POST /api/updates/:binary/stage — stage an update for a specific binary.
+fn handle_stage_update(
+    binary: &str,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let updater = memoryco_updater::Updater::new();
+    match updater.stage(binary) {
+        Ok(result) => json_ok(&json!({
+            "binary": result.binary,
+            "previous_version": result.previous_version,
+            "new_version": result.new_version,
+            "staged": true,
+        })),
+        Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+    }
+}
+
+/// POST /api/updates/stage-all — stage updates for all binaries with newer versions.
+fn handle_stage_all_updates() -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let updater = memoryco_updater::Updater::new();
+    match updater.stage_all() {
+        Ok(results) => {
+            let staged: Vec<JsonValue> = results
+                .iter()
+                .map(|r| {
+                    json!({
+                        "binary": r.binary,
+                        "previous_version": r.previous_version,
+                        "new_version": r.new_version,
+                    })
+                })
+                .collect();
+            json_ok(&json!({ "staged": staged }))
+        }
+        Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Friendly error mapping
 // ---------------------------------------------------------------------------
 
@@ -1500,6 +1576,28 @@ mod tests {
         match segments.as_slice() {
             ["api", "references", name] => assert_eq!(*name, "dsm5tr"),
             _ => panic!("Should match reference delete"),
+        }
+    }
+
+    #[test]
+    fn route_post_stage_update() {
+        let segments: Vec<&str> = "api/updates/memoryco_fs/stage"
+            .split('/')
+            .collect();
+        match segments.as_slice() {
+            ["api", "updates", binary, "stage"] => assert_eq!(*binary, "memoryco_fs"),
+            _ => panic!("Should match stage update"),
+        }
+    }
+
+    #[test]
+    fn route_post_stage_all() {
+        let segments: Vec<&str> = "api/updates/stage-all"
+            .split('/')
+            .collect();
+        match segments.as_slice() {
+            ["api", "updates", "stage-all"] => {} // matches
+            _ => panic!("Should match stage-all"),
         }
     }
 

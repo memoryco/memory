@@ -25,7 +25,7 @@ mod server;
 mod storage;
 mod tools;
 
-use crate::engram::Brain;
+use crate::engram::{Brain, EngramId};
 use crate::identity::IdentityStore;
 use crate::plans::PlanStore;
 use crate::reference::ReferenceManager;
@@ -41,6 +41,10 @@ pub struct Context {
     pub references: Arc<Mutex<ReferenceManager>>,
     pub lenses_dir: PathBuf,
     pub memory_home: PathBuf,
+    /// Last search query text (for access log correlation with recall)
+    pub last_search_query: Mutex<Option<String>>,
+    /// Result IDs from the last search (for access log)
+    pub last_search_result_ids: Mutex<Vec<EngramId>>,
 }
 
 fn main() {

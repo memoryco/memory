@@ -676,6 +676,17 @@ impl Tool<Context> for EngramSearchTool {
         // Limit results
         scored.truncate(effective_limit);
 
+        // Save search state for access log (correlated with next recall)
+        {
+            let result_ids: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
+            if let Ok(mut q) = context.last_search_query.lock() {
+                *q = Some(args.query.clone());
+            }
+            if let Ok(mut r) = context.last_search_result_ids.lock() {
+                *r = result_ids;
+            }
+        }
+
         if scored.is_empty() {
             let mut output = String::from(
                 "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\

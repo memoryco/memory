@@ -130,6 +130,8 @@ pub fn run() {
         references: Arc::clone(&references),
         lenses_dir: lenses_dir.clone(),
         memory_home: memory_home.clone(),
+        last_search_query: Mutex::new(None),
+        last_search_result_ids: Mutex::new(Vec::new()),
     };
 
     // --- Build and start server ---

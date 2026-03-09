@@ -222,4 +222,20 @@ pub trait Storage: Send {
     fn ensure_fts_populated(&mut self) -> StorageResult<usize> {
         Ok(0)
     }
+
+    // ==================
+    // ACCESS LOG
+    // ==================
+
+    /// Log a search→recall cycle for training data extraction.
+    /// Records the query text, which engrams were returned, and which were recalled.
+    fn log_access(
+        &mut self,
+        query_text: &str,
+        result_ids: &[EngramId],
+        recalled_ids: &[EngramId],
+    ) -> StorageResult<()> {
+        let _ = (query_text, result_ids, recalled_ids);
+        Ok(())
+    }
 }

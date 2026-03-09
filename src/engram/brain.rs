@@ -922,6 +922,20 @@ impl Brain {
     pub fn keyword_search(&mut self, query: &str, limit: usize) -> StorageResult<Vec<SimilarityResult>> {
         self.storage.keyword_search(query, limit)
     }
+
+    // ==================
+    // ACCESS LOG
+    // ==================
+
+    /// Log a search→recall cycle for membed training data extraction.
+    pub fn log_access(
+        &mut self,
+        query_text: &str,
+        result_ids: &[EngramId],
+        recalled_ids: &[EngramId],
+    ) -> StorageResult<()> {
+        self.storage.log_access(query_text, result_ids, recalled_ids)
+    }
 }
 
 /// A memory discovered via association-following during search

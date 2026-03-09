@@ -137,6 +137,17 @@ impl EngramStorage {
             
             -- Index for association lookups
             CREATE INDEX IF NOT EXISTS idx_associations_from ON associations(from_id);
+
+            -- Access log: records search→recall cycles for training data extraction
+            CREATE TABLE IF NOT EXISTS access_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                query_text TEXT NOT NULL,
+                result_ids TEXT NOT NULL,
+                recalled_ids TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_access_log_timestamp ON access_log(timestamp);
         "#).map_err(|e| StorageError::Database(e.to_string()))?;
 
         // FTS5 virtual table for BM25 keyword search
@@ -783,6 +794,47 @@ impl Storage for EngramStorage {
     fn ensure_fts_populated(&mut self) -> StorageResult<usize> {
         Ok(0) // TODO
     }
+
+    // ==================
+    // ACCESS LOG
+    // ==================
+
+    fn log_access(
+        &mut self,
+        query_text: &str,
+        result_ids: &[EngramId],
+        recalled_ids: &[EngramId],
+    ) -> StorageResult<()> {
+        use super::schema::access_log;
+        use super::models::NewAccessLogEntry;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        let result_ids_json = serde_json::to_string(
+            &result_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+        ).unwrap_or_else(|_| "[]".to_string());
+
+        let recalled_ids_json = serde_json::to_string(
+            &recalled_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+        ).unwrap_or_else(|_| "[]".to_string());
+
+        let entry = NewAccessLogEntry {
+            timestamp: now,
+            query_text,
+            result_ids: &result_ids_json,
+            recalled_ids: &recalled_ids_json,
+        };
+
+        ::diesel::insert_into(access_log::table)
+            .values(&entry)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        Ok(())
+    }
 }
 
 /// Sanitize a user query for FTS5 MATCH syntax.
@@ -1365,5 +1417,78 @@ mod tests {
 
         let results = storage.keyword_search("batch", 10).unwrap();
         assert_eq!(results.len(), 3, "All batch-saved engrams should be in FTS");
+    }
+
+    #[test]
+    fn access_log_records_search_recall_cycle() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Brandon prefers ale");
+        let e2 = Engram::new("Brandon lives in Oregon City");
+        let e3 = Engram::new("Brandon is an engineer");
+
+        // Log an access cycle: searched for "drink preference",
+        // got all 3 results, recalled only e1
+        storage.log_access(
+            "what does Brandon like to drink",
+            &[e1.id, e2.id, e3.id],
+            &[e1.id],
+        ).unwrap();
+
+        // Verify the entry was written
+        #[derive(QueryableByName)]
+        struct LogRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            query_text: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            result_ids: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            recalled_ids: String,
+        }
+
+        let rows: Vec<LogRow> = diesel::sql_query(
+            "SELECT query_text, result_ids, recalled_ids FROM access_log"
+        )
+        .load(&mut storage.conn)
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].query_text, "what does Brandon like to drink");
+
+        // Verify result_ids contains all 3
+        let result_ids: Vec<String> = serde_json::from_str(&rows[0].result_ids).unwrap();
+        assert_eq!(result_ids.len(), 3);
+
+        // Verify recalled_ids contains only e1
+        let recalled_ids: Vec<String> = serde_json::from_str(&rows[0].recalled_ids).unwrap();
+        assert_eq!(recalled_ids.len(), 1);
+        assert_eq!(recalled_ids[0], e1.id.to_string());
+    }
+
+    #[test]
+    fn access_log_multiple_entries() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Memory one");
+        let e2 = Engram::new("Memory two");
+
+        storage.log_access("first query", &[e1.id], &[e1.id]).unwrap();
+        storage.log_access("second query", &[e1.id, e2.id], &[e2.id]).unwrap();
+
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let count: CountResult = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM access_log"
+        )
+        .get_result(&mut storage.conn)
+        .unwrap();
+
+        assert_eq!(count.cnt, 2);
     }
 }

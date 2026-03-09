@@ -98,6 +98,24 @@ impl Tool<Context> for EngramRecallTool {
             output.push_str("\n\n");
         }
 
+        // Log the search→recall cycle for membed training data extraction
+        {
+            let query_text = context.last_search_query.lock().ok()
+                .and_then(|mut q| q.take());
+            let result_ids = context.last_search_result_ids.lock().ok()
+                .map(|mut r| std::mem::take(&mut *r))
+                .unwrap_or_default();
+
+            if let Some(query) = query_text {
+                let recalled: Vec<EngramId> = args.ids.iter()
+                    .filter_map(|id_str| id_str.parse().ok())
+                    .collect();
+                if let Err(e) = brain.log_access(&query, &result_ids, &recalled) {
+                    eprintln!("[recall] access log write failed: {}", e);
+                }
+            }
+        }
+
         let reminder = "💾 **REQUIRED:** If you explored files or learned ANY new facts, call engram_create BEFORE responding.\n---\n\n";
         
         let header = format!(

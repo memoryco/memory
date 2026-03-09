@@ -50,3 +50,13 @@ diesel::table! {
         value -> Text,
     }
 }
+
+diesel::table! {
+    access_log (id) {
+        id -> Integer,
+        timestamp -> BigInt,
+        query_text -> Text,
+        result_ids -> Text,
+        recalled_ids -> Text,
+    }
+}

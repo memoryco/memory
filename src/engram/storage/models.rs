@@ -143,6 +143,20 @@ pub struct NewMetadata<'a> {
 }
 
 // ============================================================================
+// ACCESS LOG
+// ============================================================================
+
+/// Insertable access log entry
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = access_log)]
+pub struct NewAccessLogEntry<'a> {
+    pub timestamp: i64,
+    pub query_text: &'a str,
+    pub result_ids: &'a str,   // JSON array of UUID strings
+    pub recalled_ids: &'a str, // JSON array of UUID strings
+}
+
+// ============================================================================
 // CONVERSIONS: DB rows -> Domain types
 // ============================================================================
 

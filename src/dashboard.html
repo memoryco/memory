@@ -113,85 +113,13 @@
 
 
 
-/* Inline add form */
-.inline-form {
-  display: none;
-  gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.5rem;
-}
-
-.inline-form.visible { display: flex; }
-
-.inline-form input, .inline-form textarea {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.35rem 0.6rem;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.8rem;
-  color: var(--text);
-  outline: none;
-  flex: 1;
-  min-width: 0;
-}
-
-.inline-form input:focus, .inline-form textarea:focus {
-  border-color: var(--accent-blue);
-}
-
-.inline-form input::placeholder, .inline-form textarea::placeholder {
-  color: var(--text-dim);
-}
+/* Inline add form — styles provided by shared.css */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    REFERENCES TAB
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.upload-zone {
-  border: 2px dashed var(--border);
-  border-radius: 12px;
-  padding: 3rem 2rem;
-  text-align: center;
-  transition: all 0.2s ease;
-  cursor: pointer;
-  margin-bottom: 1.5rem;
-}
-
-.upload-zone:hover,
-.upload-zone.drag-over {
-  border-color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.04);
-}
-
-.upload-zone .icon {
-  font-size: 2.5rem;
-  margin-bottom: 0.75rem;
-  opacity: 0.5;
-}
-
-.upload-zone .label {
-  font-family: 'Instrument Serif', serif;
-  font-size: 1.2rem;
-  color: var(--text-muted);
-  margin-bottom: 0.35rem;
-}
-
-.upload-zone .hint {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  color: var(--text-dim);
-}
-
-.upload-zone .status {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  margin-top: 0.75rem;
-}
-
-.upload-zone .status.success { color: var(--accent-emerald); }
-.upload-zone .status.error { color: var(--accent-rose); }
-.upload-zone .status.uploading { color: var(--accent-amber); }
+/* upload-zone styles provided by shared.css */
 
 .upload-file-list {
   text-align: left;
@@ -677,175 +605,102 @@
   color: var(--text);
 }
 
-/* ── Toast notification ── */
-.toast {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.75rem 1.25rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  z-index: 100;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: all 0.2s ease;
-  pointer-events: none;
+/* Toast and modal styles provided by shared.css */
+
+/* ── Layout ── */
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem 1.75rem;
 }
 
-.toast.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.toast.success { border-left: 3px solid var(--accent-emerald); }
-.toast.error { border-left: 3px solid var(--accent-rose); }
-
-/* ── Modal ── */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: modalFadeIn 0.2s ease;
-}
-
-@keyframes modalFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.modal {
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  max-width: 420px;
-  width: 90vw;
-  padding: 1.5rem;
-  animation: modalSlideIn 0.25s ease;
-}
-
-@keyframes modalSlideIn {
-  from { opacity: 0; transform: translateY(16px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.modal-title {
-  font-family: 'Instrument Serif', serif;
-  font-size: 1.3rem;
-  font-weight: 400;
-  margin-bottom: 1rem;
-}
-
-.modal-field {
-  margin-bottom: 0.75rem;
-}
-
-.modal-field label {
-  display: block;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-dim);
-  margin-bottom: 0.25rem;
-}
-
-.modal-field input, .modal-field textarea {
-  width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  font-family: 'DM Sans', sans-serif;
+.nav-icon {
   font-size: 0.85rem;
-  color: var(--text);
-  outline: none;
-}
-
-.modal-field input:focus, .modal-field textarea:focus {
-  border-color: var(--accent-blue);
-}
-
-.modal-field textarea {
-  min-height: 60px;
-  resize: vertical;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1rem;
+  color: var(--text-dim);
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 0;
 }
 
 /* ── Responsive ── */
 @media (max-width: 900px) {
-  .container { padding: 1rem; }
+  .sidebar { display: none; }
   .memory-grid { grid-template-columns: 1fr; }
   .ref-list { grid-template-columns: 1fr; }
   .graph-container { height: calc(100vh - 200px); min-height: 250px; }
   .graph-legend, .graph-stats { font-size: 0.65rem; }
+  .main { padding: 1rem; }
 }
 </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <div class="header-row">
-      <!-- {{LOGO}} -->
-      <div>
-        <div class="logo">
-          <span>memory</span><span class="dim">co</span>
-          <span class="sep"> — </span>
-          <span class="product">memory</span>
+<div class="app-shell">
+  <div class="top-header">
+    <!-- {{LOGO_MD}} -->
+    <div class="logo-mid">
+      <span>memory</span><span class="dim">co</span>
+      <span class="sep"> — </span>
+      <span class="product">memory</span>
+    </div>
+    <span class="version-badge" id="version"></span>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-nav">
+        <div class="nav-item active" data-tab="identity" onclick="switchTab('identity')">
+          <div class="nav-icon">&#x25CF;</div>
+          Identity
         </div>
-        <div class="subtitle" id="subtitle">loading...</div>
+        <div class="nav-item" data-tab="references" onclick="switchTab('references')">
+          <div class="nav-icon">&#x1F4C4;</div>
+          References
+        </div>
+        <div class="nav-item" data-tab="lenses" onclick="switchTab('lenses')">
+          <div class="nav-icon">&#x1F50D;</div>
+          Lenses
+        </div>
+        <div class="nav-item" data-tab="memory" onclick="switchTab('memory')">
+          <div class="nav-icon">&#x1F9E0;</div>
+          Memory
+        </div>
+        <div class="nav-item" data-tab="graph" onclick="switchTab('graph')">
+          <div class="nav-icon">&#x25CE;</div>
+          Graph
+        </div>
       </div>
-      <span class="version-badge" id="version"></span>
-    </div>
-  </header>
+      <div class="sidebar-stats" id="sidebar-stats"></div>
+    </aside>
 
-  <div class="tab-bar">
-    <button class="tab active" data-tab="identity" onclick="switchTab('identity')">Identity</button>
-    <button class="tab" data-tab="references" onclick="switchTab('references')">References</button>
-    <button class="tab" data-tab="lenses" onclick="switchTab('lenses')">Lenses</button>
-    <button class="tab" data-tab="memory" onclick="switchTab('memory')">Memory</button>
-    <button class="tab" data-tab="graph" onclick="switchTab('graph')">Graph</button>
-  </div>
-
-  <div id="identity-tab" class="tab-content active">
-    <div id="identity-content"></div>
-  </div>
-
-  <div id="references-tab" class="tab-content">
-    <div id="references-content"></div>
-  </div>
-
-  <div id="lenses-tab" class="tab-content">
-    <div id="lenses-content"></div>
-  </div>
-
-  <div id="memory-tab" class="tab-content">
-    <div class="search-bar">
-      <div class="search-wrap">
-        <input type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="toggleSearchClear()">
-        <button class="search-clear" id="search-clear" onclick="clearSearch()">&times;</button>
+    <main class="main scrollable">
+      <div id="identity-tab" class="tab-content active">
+        <div id="identity-content"></div>
       </div>
-      <button class="btn btn-primary" onclick="searchMemories()">Search</button>
-    </div>
-    <div class="toolbar" id="memory-toolbar"></div>
-    <div id="memory-content"></div>
-  </div>
 
-  <div id="graph-tab" class="tab-content">
-    <div id="graph-content"></div>
+      <div id="references-tab" class="tab-content">
+        <div id="references-content"></div>
+      </div>
+
+      <div id="lenses-tab" class="tab-content">
+        <div id="lenses-content"></div>
+      </div>
+
+      <div id="memory-tab" class="tab-content">
+        <div class="search-bar">
+          <div class="search-wrap">
+            <input type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="toggleSearchClear()">
+            <button class="search-clear" id="search-clear" onclick="clearSearch()">&times;</button>
+          </div>
+          <button class="btn btn-primary" onclick="searchMemories()">Search</button>
+        </div>
+        <div class="toolbar" id="memory-toolbar"></div>
+        <div id="memory-content"></div>
+      </div>
+
+      <div id="graph-tab" class="tab-content">
+        <div id="graph-content"></div>
+      </div>
+    </main>
   </div>
 </div>
 
@@ -870,12 +725,7 @@
   var graphLoaded = false;
 
   // ── Helpers ──
-  function escapeHtml(str) {
-    if (!str) return '';
-    var div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // escapeHtml is provided globally by BASE_JS
 
   function truncate(str, len) {
     if (!str) return '';
@@ -885,7 +735,7 @@
   function showToast(msg, type) {
     var toast = document.getElementById('toast');
     toast.textContent = msg;
-    toast.className = 'toast visible ' + (type || 'success');
+    toast.className = 'toast show toast-' + (type || 'success');
     clearTimeout(toast._timer);
     toast._timer = setTimeout(function() {
       toast.className = 'toast';
@@ -906,11 +756,32 @@
     });
   }
 
+  // ── Sidebar stats ──
+  function updateSidebarStats() {
+    var statsEl = document.getElementById('sidebar-stats');
+    if (!statsEl) return;
+    var stats = lastMemoryStats;
+    function row(label, val, color) {
+      var c = val > 0 ? color : 'var(--text-dim)';
+      return '<div class="stat-row"><span>' + label + '</span><span class="stat-val" style="color:' + c + '">' + (val != null ? val.toLocaleString() : '\u2014') + '</span></div>';
+    }
+    var html = '';
+    if (stats) {
+      var total = stats.total || ((stats.active || 0) + (stats.dormant || 0) + (stats.deep || 0) + (stats.archived || 0));
+      html += row('engrams', total, 'var(--text-muted)');
+      html += row('active', stats.active || 0, 'var(--accent-emerald)');
+      html += row('dormant', stats.dormant || 0, 'var(--accent-amber)');
+      html += row('deep', stats.deep || 0, 'var(--accent-violet)');
+    }
+    html += row('references', refsData.length, 'var(--text-muted)');
+    statsEl.innerHTML = html;
+  }
+
   // ── Tab switching ──
   window.switchTab = function(tab) {
     activeTab = tab;
-    document.querySelectorAll('.tab').forEach(function(t) {
-      t.classList.toggle('active', t.getAttribute('data-tab') === tab);
+    document.querySelectorAll('.nav-item').forEach(function(n) {
+      n.classList.toggle('active', n.getAttribute('data-tab') === tab);
     });
     document.querySelectorAll('.tab-content').forEach(function(tc) {
       tc.classList.toggle('active', tc.id === tab + '-tab');
@@ -1137,7 +1008,6 @@
       identityItems = data._items || [];
       delete data._items;
       identityData = data;
-      document.getElementById('subtitle').textContent = identityData.persona.name ? identityData.persona.name + "'s memory" : 'dashboard';
       renderIdentity();
     }).catch(function() {});
   }
@@ -1378,6 +1248,7 @@
       if (JSON.stringify(data) === JSON.stringify(refsData)) return;
       refsData = data;
       renderReferences();
+      updateSidebarStats();
     }).catch(function() {});
   }
 
@@ -1696,7 +1567,10 @@
 
     var engrams = memoryData.engrams || [];
     var stats = memoryData.stats || lastMemoryStats;
-    if (memoryData.stats) lastMemoryStats = memoryData.stats;
+    if (memoryData.stats) {
+      lastMemoryStats = memoryData.stats;
+      updateSidebarStats();
+    }
 
     if (stats) {
       var filters = [
@@ -2158,6 +2032,8 @@
 
   // Initial loads
   fetchIdentity();
+  fetchMemories();   // populate sidebar stats
+  fetchReferences(); // populate sidebar stats
 
   // Keyboard shortcut: Enter in add forms
   document.addEventListener('keydown', function(e) {

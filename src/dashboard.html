@@ -3,292 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>memory.dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>memoryco — memory</title>
+<!-- {{FONTS}} -->
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --bg: #0a0a0b;
-  --surface: #111113;
-  --surface-raised: #18181b;
-  --border: #27272a;
-  --border-subtle: #1e1e21;
-  --text: #fafafa;
-  --text-muted: #a1a1aa;
-  --text-dim: #71717a;
-  --accent-blue: #3b82f6;
-  --accent-amber: #f59e0b;
-  --accent-violet: #8b5cf6;
-  --accent-emerald: #10b981;
-  --accent-rose: #f43f5e;
-}
-
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'DM Sans', sans-serif;
-  line-height: 1.5;
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-}
-
-.container {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem 1.5rem;
-}
-
-header { margin-bottom: 2.5rem; }
-
-.logo {
-  font-family: 'Instrument Serif', serif;
-  font-size: 2rem;
-  font-weight: 400;
-  letter-spacing: -0.02em;
-}
-
-.logo .dim {
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-.subtitle {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  margin-top: 0.25rem;
-}
-
-.brand-attr {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  opacity: 0.5;
-  margin-top: 0.35rem;
-  letter-spacing: 0.02em;
-}
-
-/* ── Tab bar ── */
-.tab-bar {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 1.5rem;
-}
-
-.tab {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-  color: var(--text-dim);
-  background: none;
-  border: none;
-  padding: 0.6rem 1.2rem;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s ease, border-color 0.15s ease;
-  position: relative;
-  bottom: -1px;
-}
-
-.tab:hover { color: var(--text-muted); }
-
-.tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent-blue);
-}
-
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-
-/* ── Cards ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 1.25rem;
-  transition: border-color 0.2s ease;
-}
-
-.card:hover {
-  border-color: var(--border);
-  background: var(--surface-raised);
-}
-
-/* ── Badge ── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.badge-active   { background: rgba(16, 185, 129, 0.12); color: var(--accent-emerald); }
-.badge-dormant  { background: rgba(245, 158, 11, 0.12); color: var(--accent-amber); }
-.badge-deep     { background: rgba(139, 92, 246, 0.12); color: var(--accent-violet); }
-.badge-archived { background: rgba(113, 113, 122, 0.12); color: var(--text-dim); }
-
-.badge-selected {
-  outline: 2px solid var(--accent-blue);
-  outline-offset: -1px;
-}
-
-/* ── Buttons ── */
-.btn {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  font-weight: 500;
-  cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.btn-primary {
-  background: var(--accent-blue);
-  border: 1px solid var(--accent-blue);
-  color: #fff;
-  padding: 0.4rem 0.85rem;
-}
-
-.btn-primary:hover {
-  background: #2563eb;
-  border-color: #2563eb;
-}
-
-.btn-ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 0.4rem 0.85rem;
-}
-
-.btn-ghost:hover {
-  border-color: var(--text-dim);
-  color: var(--text-muted);
-}
-
-.btn-danger {
-  background: rgba(244, 63, 94, 0.1);
-  border: 1px solid rgba(244, 63, 94, 0.25);
-  color: var(--accent-rose);
-  padding: 0.15rem 0.55rem;
-  font-size: 0.6rem;
-  border-radius: 999px;
-}
-
-.btn-danger:hover {
-  background: rgba(244, 63, 94, 0.2);
-  border-color: rgba(244, 63, 94, 0.4);
-}
-
-.btn-add {
-  background: transparent;
-  border: 1px dashed var(--border);
-  color: var(--text-dim);
-  padding: 0.35rem 0.75rem;
-  font-size: 0.65rem;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-add:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
-}
-
-/* ── Toolbar ── */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-  min-height: 2rem;
-}
-
-/* ── Scrollbar ── */
-@-moz-document url-prefix() {
-  .scrollable {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.08) transparent;
-  }
-}
-
-.scrollable::-webkit-scrollbar { width: 6px; height: 6px; }
-.scrollable::-webkit-scrollbar-track { background: transparent; }
-.scrollable::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
-.scrollable::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
-.scrollable::-webkit-scrollbar-corner { background: transparent; }
-
-/* ── Animations ── */
-.fade-in {
-  animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* ── Empty state ── */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 40vh;
-  text-align: center;
-}
-
-.empty-state .icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  opacity: 0.6;
-}
-
-.empty-state .message {
-  font-family: 'Instrument Serif', serif;
-  font-size: 1.5rem;
-  color: var(--text-dim);
-}
-
-.empty-state .hint {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  opacity: 0.5;
-  margin-top: 0.5rem;
-}
-
-/* ── Section label ── */
-.section-label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-dim);
-  margin-bottom: 0.75rem;
-  margin-top: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.section-label:first-child { margin-top: 0; }
+/* {{SHARED_CSS}} */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    IDENTITY TAB
@@ -1080,9 +798,18 @@ header { margin-bottom: 2.5rem; }
 <body>
 <div class="container">
   <header>
-    <div class="logo">memory<span class="dim">co</span></div>
-    <div class="brand-attr">dashboard</div>
-    <div class="subtitle" id="subtitle">loading...</div>
+    <div class="header-row">
+      <!-- {{LOGO}} -->
+      <div>
+        <div class="logo">
+          <span>memory</span><span class="dim">co</span>
+          <span class="sep"> — </span>
+          <span class="product">memory</span>
+        </div>
+        <div class="subtitle" id="subtitle">loading...</div>
+      </div>
+      <span class="version-badge" id="version"></span>
+    </div>
   </header>
 
   <div class="tab-bar">
@@ -1125,6 +852,8 @@ header { margin-bottom: 2.5rem; }
 <div class="toast" id="toast"></div>
 
 <script>
+/* {{BASE_JS}} */
+
 (function() {
   // ── State ──
   var activeTab = 'identity';

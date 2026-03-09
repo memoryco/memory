@@ -1652,6 +1652,7 @@ dependencies = [
  "diesel",
  "dirs",
  "fastembed",
+ "memoryco_design",
  "memoryco_updater",
  "ort",
  "pdf-extract",
@@ -1667,6 +1668,11 @@ dependencies = [
  "uuid",
  "whatlang",
 ]
+
+[[package]]
+name = "memoryco_design"
+version = "0.1.0"
+source = "git+ssh://git@github.com/memoryco/design.git#4b258b68326390cdf87d1d47ce9ea986931c78a1"
 
 [[package]]
 name = "memoryco_updater"

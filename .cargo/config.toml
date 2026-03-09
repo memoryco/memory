@@ -1,0 +1,4 @@
+# Use system git for fetches so SSH agent handles auth to private repos.
+# This file is checked into the repo — no per-machine setup needed.
+[net]
+git-fetch-with-cli = true

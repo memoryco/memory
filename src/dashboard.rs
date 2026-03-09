@@ -13,7 +13,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use memoryco_design as design;
+use std::sync::LazyLock;
+
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+
+static PAGE_HTML: LazyLock<String> = LazyLock::new(|| design::compose(DASHBOARD_HTML));
 pub(crate) const BIND_HOST: &str = "127.0.0.1";
 pub(crate) const BIND_PORT: u16 = 4242;
 
@@ -112,7 +117,7 @@ fn route(
 
     let response = match (method, path) {
         // Static
-        ("GET", "/") => html_response(DASHBOARD_HTML),
+        ("GET", "/") => html_response(&PAGE_HTML),
 
         // Identity
         ("GET", "/api/identity") => handle_get_identity(state),
@@ -312,6 +317,8 @@ fn handle_get_identity(
 
     let mut result = serde_json::to_value(&id).unwrap_or(json!({}));
     result["_items"] = json!(items);
+    result["version"] = json!(env!("CARGO_PKG_VERSION"));
+    result["name"] = json!("memory");
 
     json_ok(&result)
 }

@@ -3,8 +3,8 @@
 //! These are the DB-layer representations. They get converted to/from
 //! the domain types in `crate::engram::*`.
 
-use diesel::prelude::*;
 use super::schema::*;
+use diesel::prelude::*;
 
 // ============================================================================
 // ENGRAMS
@@ -25,7 +25,7 @@ pub struct EngramRow {
     pub created_at: i64,
     pub last_accessed: i64,
     pub access_count: i64,
-    pub tags: String,  // JSON array
+    pub tags: String, // JSON array
     pub embedding: Option<Vec<u8>>,
 }
 
@@ -41,7 +41,7 @@ pub struct NewEngram<'a> {
     pub created_at: i64,
     pub last_accessed: i64,
     pub access_count: i64,
-    pub tags: String,  // JSON array
+    pub tags: String, // JSON array
     pub embedding: Option<Vec<u8>>,
 }
 
@@ -87,7 +87,7 @@ pub struct NewAssociation<'a> {
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ConfigRow {
     pub id: i32,
-    pub data: String,  // JSON
+    pub data: String, // JSON
 }
 
 /// Insertable config
@@ -95,7 +95,7 @@ pub struct ConfigRow {
 #[diesel(table_name = config)]
 pub struct NewConfig<'a> {
     pub id: i32,
-    pub data: &'a str,  // JSON
+    pub data: &'a str, // JSON
 }
 
 // ============================================================================
@@ -109,7 +109,7 @@ pub struct NewConfig<'a> {
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct IdentityRow {
     pub id: i32,
-    pub data: String,  // JSON
+    pub data: String, // JSON
 }
 
 /// Insertable identity
@@ -117,7 +117,7 @@ pub struct IdentityRow {
 #[diesel(table_name = identity)]
 pub struct NewIdentity<'a> {
     pub id: i32,
-    pub data: &'a str,  // JSON
+    pub data: &'a str, // JSON
 }
 
 // ============================================================================
@@ -160,7 +160,7 @@ pub struct NewAccessLogEntry<'a> {
 // CONVERSIONS: DB rows -> Domain types
 // ============================================================================
 
-use crate::engram::{Engram, MemoryState, Association};
+use crate::engram::{Association, Engram, MemoryState};
 use crate::storage::StorageError;
 
 impl EngramRow {
@@ -168,18 +168,23 @@ impl EngramRow {
     pub fn into_engram(self) -> Result<Engram, StorageError> {
         let id = uuid::Uuid::parse_str(&self.id)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
-        
+
         let state = match self.state.as_str() {
             "active" => MemoryState::Active,
             "dormant" => MemoryState::Dormant,
             "deep" => MemoryState::Deep,
             "archived" => MemoryState::Archived,
-            _ => return Err(StorageError::Serialization(format!("Unknown state: {}", self.state))),
+            _ => {
+                return Err(StorageError::Serialization(format!(
+                    "Unknown state: {}",
+                    self.state
+                )));
+            }
         };
-        
+
         let tags: Vec<String> = serde_json::from_str(&self.tags)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
-        
+
         Ok(Engram {
             id,
             content: self.content,
@@ -190,7 +195,7 @@ impl EngramRow {
             last_accessed: self.last_accessed,
             access_count: self.access_count as u64,
             tags,
-            embedding: None,  // Loaded separately when needed
+            embedding: None, // Loaded separately when needed
         })
     }
 }
@@ -202,7 +207,7 @@ impl AssociationRow {
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
         let to = uuid::Uuid::parse_str(&self.to_id)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
-        
+
         Ok(Association {
             from,
             to,
@@ -229,16 +234,19 @@ pub fn bytes_to_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
     if !bytes.len().is_multiple_of(4) {
         return None;
     }
-    Some(bytes.chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect())
+    Some(
+        bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect(),
+    )
 }
 
 /// Get state string from MemoryState enum
 pub fn state_to_str(state: MemoryState) -> &'static str {
     match state {
         MemoryState::Active => "active",
-        MemoryState::Dormant => "dormant", 
+        MemoryState::Dormant => "dormant",
         MemoryState::Deep => "deep",
         MemoryState::Archived => "archived",
     }

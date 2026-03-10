@@ -1,8 +1,8 @@
 //! config_set - Update a configuration value
 
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -64,15 +64,14 @@ impl Tool<Context> for ConfigSetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         // Handle embedding_model separately (string value)
         if args.key == "embedding_model" {
-            let model_name = args.value.as_str()
-                .ok_or_else(|| McpError::InvalidParams(
-                    "embedding_model value must be a string".to_string()
-                ))?;
+            let model_name = args.value.as_str().ok_or_else(|| {
+                McpError::InvalidParams("embedding_model value must be a string".to_string())
+            })?;
 
             if !crate::embedding::is_valid_model(model_name) {
                 return Ok(text_response(format!(
@@ -86,26 +85,31 @@ impl Tool<Context> for ConfigSetTool {
             let mut config = brain.config().clone();
             config.embedding_model = model_name.to_string();
             // Don't update embedding_model_active — mismatch triggers migration on next startup
-            brain.set_config(config)
+            brain
+                .set_config(config)
                 .map_err(|e| McpError::ToolError(e.to_string()))?;
 
             return Ok(text_response(format!(
                 "Configuration updated: embedding_model = {}. \
                  Migration will occur on next restart (current embeddings: {:?}).",
                 model_name,
-                brain.config().embedding_model_active.as_deref().unwrap_or("(none)")
+                brain
+                    .config()
+                    .embedding_model_active
+                    .as_deref()
+                    .unwrap_or("(none)")
             )));
         }
 
         // All other keys are numeric
-        let value = args.value.as_f64()
-            .ok_or_else(|| McpError::InvalidParams(
-                "value must be a number for this config key".to_string()
-            ))?;
+        let value = args.value.as_f64().ok_or_else(|| {
+            McpError::InvalidParams("value must be a number for this config key".to_string())
+        })?;
 
         let mut brain = context.brain.lock().unwrap();
 
-        let updated = brain.configure(&args.key, value)
+        let updated = brain
+            .configure(&args.key, value)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         if updated {

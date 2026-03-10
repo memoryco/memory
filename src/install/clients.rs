@@ -4,8 +4,8 @@
 //! config paths. Currently macOS only; Linux/Windows paths can be added later.
 
 use super::McpClient;
-use super::json_client::JsonClient;
 use super::codex::CodexClient;
+use super::json_client::JsonClient;
 
 /// Return all known MCP clients for this platform.
 pub fn all_clients() -> Vec<Box<dyn McpClient>> {
@@ -15,11 +15,10 @@ pub fn all_clients() -> Vec<Box<dyn McpClient>> {
     let mut clients: Vec<Box<dyn McpClient>> = vec![
         // Claude Code
         //   Config: ~/.claude.json  (detect via ~/.claude/ directory)
-        Box::new(JsonClient::new(
-            "Claude Code",
-            home.join(".claude.json"),
-            "mcpServers",
-        ).with_detect_path(home.join(".claude"))),
+        Box::new(
+            JsonClient::new("Claude Code", home.join(".claude.json"), "mcpServers")
+                .with_detect_path(home.join(".claude")),
+        ),
         // Cursor
         //   All platforms: ~/.cursor/mcp.json
         Box::new(JsonClient::new(
@@ -44,20 +43,26 @@ pub fn all_clients() -> Vec<Box<dyn McpClient>> {
     {
         // Claude Desktop
         //   macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
-        clients.insert(0, Box::new(JsonClient::new(
-            "Claude Desktop",
-            home.join("Library/Application Support/Claude/claude_desktop_config.json"),
-            "mcpServers",
-        )));
+        clients.insert(
+            0,
+            Box::new(JsonClient::new(
+                "Claude Desktop",
+                home.join("Library/Application Support/Claude/claude_desktop_config.json"),
+                "mcpServers",
+            )),
+        );
 
         // VS Code (Copilot)
         //   macOS: ~/Library/Application Support/Code/User/mcp.json
         //   NOTE: uses "servers" not "mcpServers"
-        clients.insert(4, Box::new(JsonClient::new(
-            "VS Code",
-            home.join("Library/Application Support/Code/User/mcp.json"),
-            "servers",
-        )));
+        clients.insert(
+            4,
+            Box::new(JsonClient::new(
+                "VS Code",
+                home.join("Library/Application Support/Code/User/mcp.json"),
+                "servers",
+            )),
+        );
     }
 
     clients

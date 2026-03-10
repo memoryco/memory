@@ -24,24 +24,16 @@ impl Dsm5HandbookProfile {
     pub fn new() -> Self {
         Self {
             // Match Part headers: "Part 1: Title" or "PART 1: TITLE"
-            part_pattern: Regex::new(
-                r"(?mi)^(?:PART|Part)\s+(\d+)\s*:\s*(.+?)$"
-            ).unwrap(),
-            
+            part_pattern: Regex::new(r"(?mi)^(?:PART|Part)\s+(\d+)\s*:\s*(.+?)$").unwrap(),
+
             // Match Chapter headers: "Chapter 4: Title" or "CHAPTER 4: TITLE"
-            chapter_pattern: Regex::new(
-                r"(?mi)^(?:CHAPTER|Chapter)\s+(\d+)\s*:\s*(.+?)$"
-            ).unwrap(),
-            
+            chapter_pattern: Regex::new(r"(?mi)^(?:CHAPTER|Chapter)\s+(\d+)\s*:\s*(.+?)$").unwrap(),
+
             // Match section headers: "4.1 Title" (number.number at line start)
-            section_pattern: Regex::new(
-                r"(?m)^(\d+)\.(\d+)\s+([A-Z][^\n]+?)$"
-            ).unwrap(),
-            
+            section_pattern: Regex::new(r"(?m)^(\d+)\.(\d+)\s+([A-Z][^\n]+?)$").unwrap(),
+
             // Match subsection headers: "4.1.1 Title" (number.number.number at line start)
-            subsection_pattern: Regex::new(
-                r"(?m)^(\d+)\.(\d+)\.(\d+)\s+([A-Z][^\n]+?)$"
-            ).unwrap(),
+            subsection_pattern: Regex::new(r"(?m)^(\d+)\.(\d+)\.(\d+)\s+([A-Z][^\n]+?)$").unwrap(),
         }
     }
 }
@@ -63,10 +55,10 @@ impl DocumentProfile for Dsm5HandbookProfile {
 
     fn matches(&self, filename: &str, _sample_text: &str) -> bool {
         let filename_lower = filename.to_lowercase();
-        
+
         // Must have "handbook" to distinguish from main DSM-5-TR
-        filename_lower.contains("handbook") && 
-        (filename_lower.contains("dsm") || filename_lower.contains("diagnostic"))
+        filename_lower.contains("handbook")
+            && (filename_lower.contains("dsm") || filename_lower.contains("diagnostic"))
     }
 
     fn parse_sections(&self, pages: &[PageText]) -> Option<Vec<Section>> {
@@ -95,7 +87,11 @@ impl DocumentProfile for Dsm5HandbookProfile {
             let pos = cap.get(0).unwrap().start();
             let num = cap.get(1).unwrap().as_str();
             let title = cap.get(2).unwrap().as_str().trim();
-            elements.push((pos, ElementType::Chapter(num.to_string()), format!("Chapter {}: {}", num, title)));
+            elements.push((
+                pos,
+                ElementType::Chapter(num.to_string()),
+                format!("Chapter {}: {}", num, title),
+            ));
         }
 
         // Find Sections (e.g., "4.1 Autism Spectrum Disorder")
@@ -105,9 +101,9 @@ impl DocumentProfile for Dsm5HandbookProfile {
             let section_num = cap.get(2).unwrap().as_str();
             let title = cap.get(3).unwrap().as_str().trim();
             elements.push((
-                pos, 
-                ElementType::Section(chapter_num.to_string(), section_num.to_string()), 
-                format!("{}.{} {}", chapter_num, section_num, title)
+                pos,
+                ElementType::Section(chapter_num.to_string(), section_num.to_string()),
+                format!("{}.{} {}", chapter_num, section_num, title),
             ));
         }
 
@@ -120,8 +116,15 @@ impl DocumentProfile for Dsm5HandbookProfile {
             let title = cap.get(4).unwrap().as_str().trim();
             elements.push((
                 pos,
-                ElementType::Subsection(chapter_num.to_string(), section_num.to_string(), subsection_num.to_string()),
-                format!("{}.{}.{} {}", chapter_num, section_num, subsection_num, title)
+                ElementType::Subsection(
+                    chapter_num.to_string(),
+                    section_num.to_string(),
+                    subsection_num.to_string(),
+                ),
+                format!(
+                    "{}.{}.{} {}",
+                    chapter_num, section_num, subsection_num, title
+                ),
             ));
         }
 
@@ -161,9 +164,7 @@ impl DocumentProfile for Dsm5HandbookProfile {
                     current_section = Some(title.clone());
                     (current_chapter.clone(), SectionType::Other)
                 }
-                ElementType::Subsection(_, _, _) => {
-                    (current_section.clone(), SectionType::Other)
-                }
+                ElementType::Subsection(_, _, _) => (current_section.clone(), SectionType::Other),
             };
 
             sections.push(Section {

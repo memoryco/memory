@@ -1,7 +1,7 @@
 //! reference_get - Get a specific section by title
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -41,11 +41,13 @@ impl Tool<Context> for ReferenceGetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let source_name = args.get("source")
+        let source_name = args
+            .get("source")
             .and_then(|v| v.as_str())
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("source is required".into()))?;
-        
-        let title = args.get("title")
+
+        let title = args
+            .get("title")
             .and_then(|v| v.as_str())
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("title is required".into()))?;
 
@@ -53,37 +55,42 @@ impl Tool<Context> for ReferenceGetTool {
 
         let result = match references.get_section(source_name, title) {
             Ok(Some(r)) => r,
-            Ok(None) => return Ok(text_response(format!(
-                "Section not found: \"{}\" in {}\n\nUse reference_sections to list available sections.",
-                title, source_name
-            ))),
+            Ok(None) => {
+                return Ok(text_response(format!(
+                    "Section not found: \"{}\" in {}\n\nUse reference_sections to list available sections.",
+                    title, source_name
+                )));
+            }
             Err(e) => return Ok(text_response(format!("Error: {}", e))),
         };
 
         let mut output = format!("# {}\n\n", result.title);
-        
+
         // Show parent section if present
         if let Some(ref parent) = result.parent {
             output.push_str(&format!("**Parent:** {}\n", parent));
         }
-        
+
         // Show ICD codes if present
         if !result.codes.is_empty() {
             output.push_str(&format!("**Codes:** {}\n", result.codes.join(", ")));
         }
-        
+
         // Page range
         if result.page_start == result.page_end {
             output.push_str(&format!("**Page:** {}\n", result.page_start));
         } else {
-            output.push_str(&format!("**Pages:** {}-{}\n", result.page_start, result.page_end));
+            output.push_str(&format!(
+                "**Pages:** {}-{}\n",
+                result.page_start, result.page_end
+            ));
         }
-        
+
         output.push_str("\n---\n\n");
-        
+
         // Full content (stored in snippet field for get_section)
         output.push_str(&result.snippet);
-        
+
         // Citation
         output.push_str("\n\n---\n\n");
         if let Some(citation) = references.get_citation(source_name) {

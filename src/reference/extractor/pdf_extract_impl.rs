@@ -32,20 +32,18 @@ impl PdfExtractor for PdfExtractBackend {
         //
         // Wrap in catch_unwind because pdf-extract panics on certain PDFs
         // (e.g. "unhandled function type 4", "DeviceN" color spaces).
-        let raw_text = panic::catch_unwind(|| {
-            pdf_extract::extract_text_from_mem(&bytes)
-        })
-        .map_err(|panic_payload| {
-            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "unknown panic in pdf-extract".to_string()
-            };
-            ReferenceError::Extraction(format!("pdf-extract panicked: {}", msg))
-        })?
-        .map_err(|e| ReferenceError::Extraction(e.to_string()))?;
+        let raw_text = panic::catch_unwind(|| pdf_extract::extract_text_from_mem(&bytes))
+            .map_err(|panic_payload| {
+                let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic in pdf-extract".to_string()
+                };
+                ReferenceError::Extraction(format!("pdf-extract panicked: {}", msg))
+            })?
+            .map_err(|e| ReferenceError::Extraction(e.to_string()))?;
 
         // Post-process: collapse multiple spaces (common pdf-extract issue)
         let text = normalize_whitespace(&raw_text);
@@ -75,7 +73,7 @@ fn normalize_whitespace(text: &str) -> String {
     // Collapse runs of spaces (but preserve newlines for structure)
     let mut result = String::with_capacity(text.len());
     let mut prev_was_space = false;
-    
+
     for ch in text.chars() {
         if ch == ' ' || ch == '\t' {
             if !prev_was_space {
@@ -87,7 +85,7 @@ fn normalize_whitespace(text: &str) -> String {
             prev_was_space = false;
         }
     }
-    
+
     result
 }
 
@@ -144,7 +142,8 @@ mod tests {
         // pdf-extract should either error or panic — either way we should get
         // a clean ReferenceError::Extraction, not a process crash.
         let mut tmp = NamedTempFile::new().unwrap();
-        tmp.write_all(b"this is definitely not a pdf file at all").unwrap();
+        tmp.write_all(b"this is definitely not a pdf file at all")
+            .unwrap();
         tmp.flush().unwrap();
 
         let backend = PdfExtractBackend::new();

@@ -6,10 +6,10 @@
 use crate::config;
 use crate::embedding::EmbeddingGenerator;
 use crate::engram::Brain;
-use crate::identity::{IdentityStore, DieselIdentityStorage};
-use crate::plans::{PlanStore, DieselPlanStorage};
+use crate::identity::{DieselIdentityStorage, IdentityStore};
+use crate::plans::{DieselPlanStorage, PlanStore};
 use crate::reference::ReferenceManager;
-use crate::{bootstrap, lenses, tools, Context};
+use crate::{Context, bootstrap, lenses, tools};
 use sml_mcps::{Server, ServerConfig, StdioTransport};
 use std::sync::{Arc, Mutex};
 
@@ -28,7 +28,10 @@ pub fn run() {
         if let Ok(my_path) = std::env::current_exe() {
             match updater.apply_staged(my_name, my_version, &my_path) {
                 Ok(Some(result)) => {
-                    eprintln!("✓ Applied staged update: {} → {}", my_version, result.new_version);
+                    eprintln!(
+                        "✓ Applied staged update: {} → {}",
+                        my_version, result.new_version
+                    );
                 }
                 Ok(None) => {} // nothing staged
                 Err(e) => eprintln!("⚠ Staged update failed to apply: {}", e),
@@ -40,12 +43,13 @@ pub fn run() {
         std::thread::spawn(move || {
             let updater = memoryco_updater::Updater::new();
             match updater.check_version("memoryco", &my_version) {
-                Ok(check) if check.update_available => {
-                    match updater.stage("memoryco") {
-                        Ok(r) => eprintln!("⬇ Update v{} staged. Will apply on next restart.", r.new_version),
-                        Err(e) => eprintln!("⚠ Failed to stage update: {}", e),
-                    }
-                }
+                Ok(check) if check.update_available => match updater.stage("memoryco") {
+                    Ok(r) => eprintln!(
+                        "⬇ Update v{} staged. Will apply on next restart.",
+                        r.new_version
+                    ),
+                    Err(e) => eprintln!("⚠ Failed to stage update: {}", e),
+                },
                 Ok(_) => {}
                 Err(memoryco_updater::UpdateError::Throttled { .. }) => {}
                 Err(e) => eprintln!("⚠ Update check failed: {}", e),
@@ -66,6 +70,7 @@ pub fn run() {
     std::fs::create_dir_all(&lenses_dir).ok();
     std::fs::create_dir_all(&references_dir).ok();
     std::fs::create_dir_all(config::get_model_cache_dir()).ok();
+    std::fs::create_dir_all(crate::llm::LlmConfig::managed_model_dir(&memory_home)).ok();
 
     // Register our MEMORY_HOME in the shared registry
     crate::registry::ensure_registered(&memory_home);
@@ -77,9 +82,27 @@ pub fn run() {
     eprintln!("  Lenses: {}", lenses_dir.display());
     eprintln!("  References: {}", references_dir.display());
 
+    let llm = match crate::llm::build_llm_service(&memory_home) {
+        Ok(service) => {
+            if service.available() {
+                eprintln!(
+                    "  Local LLM: {} ({:?})",
+                    service.model_name(),
+                    service.tier()
+                );
+            } else {
+                eprintln!("  Local LLM: disabled");
+            }
+            service
+        }
+        Err(e) => {
+            eprintln!("Warning: failed to initialize local LLM: {:?}", e);
+            Arc::new(crate::llm::NoLlmService)
+        }
+    };
+
     // --- Brain ---
-    let mut brain = Brain::open_path(&db_path)
-        .expect("Failed to open brain");
+    let mut brain = Brain::open_path(&db_path).expect("Failed to open brain");
 
     apply_maintenance(&mut brain);
     backfill_embeddings(&mut brain);
@@ -87,24 +110,26 @@ pub fn run() {
     run_decomposition(&mut brain);
 
     // --- Identity ---
-    let identity_storage = DieselIdentityStorage::open(&identity_db_path)
-        .expect("Failed to open identity database");
-    let mut identity = IdentityStore::new(identity_storage)
-        .expect("Failed to open identity store");
+    let identity_storage =
+        DieselIdentityStorage::open(&identity_db_path).expect("Failed to open identity database");
+    let mut identity = IdentityStore::new(identity_storage).expect("Failed to open identity store");
 
     migrate_identity(&brain, &mut identity);
 
     // --- Plans ---
-    let plans_storage = DieselPlanStorage::open(&plans_db_path)
-        .expect("Failed to open plans database");
-    let plans = PlanStore::new(plans_storage)
-        .expect("Failed to open plans store");
+    let plans_storage =
+        DieselPlanStorage::open(&plans_db_path).expect("Failed to open plans database");
+    let plans = PlanStore::new(plans_storage).expect("Failed to open plans store");
 
     // --- References ---
     let mut references = ReferenceManager::new();
     match references.load_directory(&references_dir) {
         Ok(loaded) if !loaded.is_empty() => {
-            eprintln!("Loaded {} reference source(s): {}", loaded.len(), loaded.join(", "));
+            eprintln!(
+                "Loaded {} reference source(s): {}",
+                loaded.len(),
+                loaded.join(", ")
+            );
         }
         Ok(_) => {}
         Err(e) => eprintln!("Warning: Failed to load references: {}", e),
@@ -113,7 +138,8 @@ pub fn run() {
     // --- Bootstrap ---
     // Instructions go into identity.db so identity_get always returns them,
     // even on a fresh install before the user has configured anything.
-    if let Err(e) = bootstrap::bootstrap_all(&mut identity, &lenses_dir, &references, &memory_home) {
+    if let Err(e) = bootstrap::bootstrap_all(&mut identity, &lenses_dir, &references, &memory_home)
+    {
         eprintln!("Warning: Bootstrap failed: {}", e);
     }
 
@@ -125,6 +151,7 @@ pub fn run() {
     // --- Build context ---
     let context = Context {
         brain: Arc::clone(&brain),
+        llm,
         identity: Arc::clone(&identity),
         plans: Arc::new(Mutex::new(plans)),
         references: Arc::clone(&references),
@@ -170,8 +197,11 @@ fn apply_maintenance(brain: &mut Brain) {
 
     match brain.prune_weak_associations() {
         Ok(0) => {}
-        Ok(count) => eprintln!("Pruned {} weak associations (below {} threshold)",
-            count, brain.config().min_association_weight),
+        Ok(count) => eprintln!(
+            "Pruned {} weak associations (below {} threshold)",
+            count,
+            brain.config().min_association_weight
+        ),
         Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
     }
 }
@@ -190,7 +220,8 @@ fn backfill_embeddings(brain: &mut Brain) {
                 match brain.get_ids_without_embeddings(50) {
                     Ok(ids) if ids.is_empty() => break,
                     Ok(ids) => {
-                        let items: Vec<_> = ids.iter()
+                        let items: Vec<_> = ids
+                            .iter()
                             .filter_map(|id| brain.get(id).map(|e| (*id, e.content.clone())))
                             .collect();
                         let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
@@ -215,7 +246,10 @@ fn backfill_embeddings(brain: &mut Brain) {
                     }
                 }
             }
-            eprintln!("\r  Generated {} embeddings ({} errors)        ", processed, errors);
+            eprintln!(
+                "\r  Generated {} embeddings ({} errors)        ",
+                processed, errors
+            );
         }
         Err(e) => eprintln!("Warning: Failed to check embedding status: {}", e),
     }
@@ -295,33 +329,81 @@ fn build_server() -> Server<Context> {
     });
 
     // Engram tools
-    server.add_tool(tools::EngramCreateTool).expect("engram_create");
-    server.add_tool(tools::EngramRecallTool).expect("engram_recall");
-    server.add_tool(tools::EngramSearchTool).expect("engram_search");
+    server
+        .add_tool(tools::EngramCreateTool)
+        .expect("engram_create");
+    server
+        .add_tool(tools::EngramRecallTool)
+        .expect("engram_recall");
+    server
+        .add_tool(tools::EngramSearchTool)
+        .expect("engram_search");
     server.add_tool(tools::EngramGetTool).expect("engram_get");
-    server.add_tool(tools::EngramDeleteTool).expect("engram_delete");
-    server.add_tool(tools::EngramAssociateTool).expect("engram_associate");
-    server.add_tool(tools::EngramStatsTool).expect("engram_stats");
-    server.add_tool(tools::EngramAssociationsTool).expect("engram_associations");
-    server.add_tool(tools::EngramGraphTool).expect("engram_graph");
+    server
+        .add_tool(tools::EngramDeleteTool)
+        .expect("engram_delete");
+    server
+        .add_tool(tools::EngramAssociateTool)
+        .expect("engram_associate");
+    server
+        .add_tool(tools::EngramStatsTool)
+        .expect("engram_stats");
+    server
+        .add_tool(tools::EngramAssociationsTool)
+        .expect("engram_associations");
+    server
+        .add_tool(tools::EngramGraphTool)
+        .expect("engram_graph");
 
     // Identity tools
-    server.add_tool(tools::IdentityGetTool).expect("identity_get");
-    server.add_tool(tools::IdentitySearchTool).expect("identity_search");
-    server.add_tool(tools::IdentityListTool).expect("identity_list");
-    server.add_tool(tools::IdentityRemoveTool).expect("identity_remove");
-    server.add_tool(tools::IdentitySetPersonaNameTool).expect("identity_set_persona_name");
-    server.add_tool(tools::IdentitySetPersonaDescriptionTool).expect("identity_set_persona_description");
-    server.add_tool(tools::IdentityAddTraitTool).expect("identity_add_trait");
-    server.add_tool(tools::IdentityAddExpertiseTool).expect("identity_add_expertise");
-    server.add_tool(tools::IdentityAddInstructionTool).expect("identity_add_instruction_v2");
-    server.add_tool(tools::IdentityAddToneTool).expect("identity_add_tone");
-    server.add_tool(tools::IdentityAddDirectiveTool).expect("identity_add_directive");
-    server.add_tool(tools::IdentityAddValueTool).expect("identity_add_value");
-    server.add_tool(tools::IdentityAddPreferenceTool).expect("identity_add_preference");
-    server.add_tool(tools::IdentityAddRelationshipTool).expect("identity_add_relationship");
-    server.add_tool(tools::IdentityAddAntipatternTool).expect("identity_add_antipattern");
-    server.add_tool(tools::IdentitySetupTool).expect("identity_setup");
+    server
+        .add_tool(tools::IdentityGetTool)
+        .expect("identity_get");
+    server
+        .add_tool(tools::IdentitySearchTool)
+        .expect("identity_search");
+    server
+        .add_tool(tools::IdentityListTool)
+        .expect("identity_list");
+    server
+        .add_tool(tools::IdentityRemoveTool)
+        .expect("identity_remove");
+    server
+        .add_tool(tools::IdentitySetPersonaNameTool)
+        .expect("identity_set_persona_name");
+    server
+        .add_tool(tools::IdentitySetPersonaDescriptionTool)
+        .expect("identity_set_persona_description");
+    server
+        .add_tool(tools::IdentityAddTraitTool)
+        .expect("identity_add_trait");
+    server
+        .add_tool(tools::IdentityAddExpertiseTool)
+        .expect("identity_add_expertise");
+    server
+        .add_tool(tools::IdentityAddInstructionTool)
+        .expect("identity_add_instruction_v2");
+    server
+        .add_tool(tools::IdentityAddToneTool)
+        .expect("identity_add_tone");
+    server
+        .add_tool(tools::IdentityAddDirectiveTool)
+        .expect("identity_add_directive");
+    server
+        .add_tool(tools::IdentityAddValueTool)
+        .expect("identity_add_value");
+    server
+        .add_tool(tools::IdentityAddPreferenceTool)
+        .expect("identity_add_preference");
+    server
+        .add_tool(tools::IdentityAddRelationshipTool)
+        .expect("identity_add_relationship");
+    server
+        .add_tool(tools::IdentityAddAntipatternTool)
+        .expect("identity_add_antipattern");
+    server
+        .add_tool(tools::IdentitySetupTool)
+        .expect("identity_setup");
 
     // Config tools
     server.add_tool(tools::ConfigGetTool).expect("config_get");
@@ -332,11 +414,21 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::LensesGetTool).expect("lenses_get");
 
     // Reference tools
-    server.add_tool(tools::ReferenceListTool).expect("reference_list");
-    server.add_tool(tools::ReferenceSearchTool).expect("reference_search");
-    server.add_tool(tools::ReferenceGetTool).expect("reference_get");
-    server.add_tool(tools::ReferenceSectionsTool).expect("reference_sections");
-    server.add_tool(tools::ReferenceCitationTool).expect("reference_citation");
+    server
+        .add_tool(tools::ReferenceListTool)
+        .expect("reference_list");
+    server
+        .add_tool(tools::ReferenceSearchTool)
+        .expect("reference_search");
+    server
+        .add_tool(tools::ReferenceGetTool)
+        .expect("reference_get");
+    server
+        .add_tool(tools::ReferenceSectionsTool)
+        .expect("reference_sections");
+    server
+        .add_tool(tools::ReferenceCitationTool)
+        .expect("reference_citation");
 
     // Plan tools
     server.add_tool(tools::PlansListTool).expect("plans");
@@ -344,13 +436,19 @@ fn build_server() -> Server<Context> {
     server.add_tool(tools::PlanStartTool).expect("plan_start");
     server.add_tool(tools::PlanStopTool).expect("plan_stop");
     server.add_tool(tools::StepAddTool).expect("step_add");
-    server.add_tool(tools::StepCompleteTool).expect("step_complete");
+    server
+        .add_tool(tools::StepCompleteTool)
+        .expect("step_complete");
 
     // Date tools
-    server.add_tool(tools::DateResolveTool).expect("date_resolve");
+    server
+        .add_tool(tools::DateResolveTool)
+        .expect("date_resolve");
 
     // UI tools
-    server.add_tool(tools::OpenDashboardTool).expect("open_dashboard");
+    server
+        .add_tool(tools::OpenDashboardTool)
+        .expect("open_dashboard");
 
     server
 }

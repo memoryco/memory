@@ -1,7 +1,7 @@
 //! identity_get - Get the current identity
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -32,17 +32,19 @@ impl Tool<Context> for IdentityGetTool {
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
         let mut store = context.identity.lock().unwrap();
-        let identity = store.get()
+        let identity = store
+            .get()
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         let mut output = identity.render();
 
         if identity.persona.name.is_empty() {
-            output.insert_str(0,
+            output.insert_str(
+                0,
                 "No persona is currently configured. \
                  You might ask the user if they'd like to set one up \
                  (use `identity_setup` to walk them through it).\n\n\
-                 ---\n\n"
+                 ---\n\n",
             );
         }
 
@@ -52,7 +54,7 @@ impl Tool<Context> for IdentityGetTool {
 
 #[cfg(test)]
 mod tests {
-    use crate::identity::{IdentityStore, DieselIdentityStorage};
+    use crate::identity::{DieselIdentityStorage, IdentityStore};
 
     fn test_store() -> IdentityStore {
         let storage = DieselIdentityStorage::in_memory().unwrap();
@@ -66,22 +68,31 @@ mod tests {
         let mut output = identity.render();
 
         if identity.persona.name.is_empty() {
-            output.insert_str(0, "No persona is currently configured. \
+            output.insert_str(
+                0,
+                "No persona is currently configured. \
                 You might ask the user if they'd like to set one up \
-                (use `identity_setup` to walk them through it).\n\n---\n\n");
+                (use `identity_setup` to walk them through it).\n\n---\n\n",
+            );
         }
 
-        assert!(output.contains("identity_setup"),
-            "Empty identity should mention identity_setup");
-        assert!(output.contains("No persona"),
-            "Should indicate no persona configured");
+        assert!(
+            output.contains("identity_setup"),
+            "Empty identity should mention identity_setup"
+        );
+        assert!(
+            output.contains("No persona"),
+            "Should indicate no persona configured"
+        );
     }
 
     #[test]
     fn get_populated_identity_no_hint() {
         let mut store = test_store();
         store.set_persona_name("Porter").unwrap();
-        store.set_persona_description("A pragmatic assistant").unwrap();
+        store
+            .set_persona_description("A pragmatic assistant")
+            .unwrap();
 
         let identity = store.get().unwrap();
         let mut output = identity.render();
@@ -90,9 +101,10 @@ mod tests {
             output.push_str("identity_setup hint");
         }
 
-        assert!(!output.contains("identity_setup"),
-            "Populated identity should NOT hint about setup");
-        assert!(output.contains("Porter"),
-            "Should render the persona name");
+        assert!(
+            !output.contains("identity_setup"),
+            "Populated identity should NOT hint about setup"
+        );
+        assert!(output.contains("Porter"), "Should render the persona name");
     }
 }

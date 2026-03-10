@@ -1,7 +1,7 @@
 //! reference_sections - List sections in a reference source
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -37,7 +37,8 @@ impl Tool<Context> for ReferenceSectionsTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let source_name = args.get("source")
+        let source_name = args
+            .get("source")
             .and_then(|v| v.as_str())
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("source is required".into()))?;
 

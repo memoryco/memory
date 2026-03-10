@@ -1,7 +1,7 @@
 //! Lens tools - List and retrieve lenses for AI-initiated loading
 
-mod list;
 mod get;
+mod list;
 
-pub use list::LensesListTool;
 pub use get::LensesGetTool;
+pub use list::LensesListTool;

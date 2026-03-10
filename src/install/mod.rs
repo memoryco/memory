@@ -3,10 +3,10 @@
 //! Discovers installed MCP clients, checks for existing MemoryCo config,
 //! and injects/updates configuration as needed.
 
-mod json_client;
-mod codex;
-mod clients;
 pub mod claude_md;
+mod clients;
+mod codex;
+mod json_client;
 
 pub use clients::all_clients;
 
@@ -22,9 +22,7 @@ pub enum InstallStatus {
     /// MemoryCo entry exists and matches current binary/args.
     Installed,
     /// MemoryCo entry exists but points to a different binary or has stale config.
-    NeedsUpdate {
-        current_command: String,
-    },
+    NeedsUpdate { current_command: String },
     /// Client does not appear to be installed (no config file or parent dir).
     ClientNotFound,
 }
@@ -81,9 +79,7 @@ pub fn memoryco_server_entry() -> (String, Vec<String>, Vec<(String, String)>) {
     let args = vec!["serve".to_string()];
 
     let memory_home = config::get_memory_home();
-    let env = vec![
-        ("MEMORY_HOME".to_string(), memory_home.display().to_string()),
-    ];
+    let env = vec![("MEMORY_HOME".to_string(), memory_home.display().to_string())];
 
     (command, args, env)
 }
@@ -99,5 +95,4 @@ pub enum InstallError {
 
     #[error("Failed to serialize config: {0}")]
     Serialize(String),
-
 }

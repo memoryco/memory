@@ -69,11 +69,11 @@ impl DocumentProfile for Icd11Profile {
 
     fn matches(&self, filename: &str, _sample_text: &str) -> bool {
         let filename_lower = filename.to_lowercase();
-        
+
         // Match ICD-11 MMS documents
-        (filename_lower.contains("icd") && filename_lower.contains("11")) ||
-        filename_lower.contains("icd-11") ||
-        filename_lower.contains("icd11")
+        (filename_lower.contains("icd") && filename_lower.contains("11"))
+            || filename_lower.contains("icd-11")
+            || filename_lower.contains("icd11")
     }
 
     fn parse_sections(&self, pages: &[PageText]) -> Option<Vec<Section>> {
@@ -95,10 +95,10 @@ impl DocumentProfile for Icd11Profile {
             let num = cap.get(1).unwrap().as_str();
             let title = cap.get(2).unwrap().as_str().trim();
             elements.push((
-                pos, 
-                ElementType::Chapter(num.to_string()), 
+                pos,
+                ElementType::Chapter(num.to_string()),
                 format!("Chapter {}: {}", num, title),
-                Vec::new()
+                Vec::new(),
             ));
         }
 
@@ -112,7 +112,7 @@ impl DocumentProfile for Icd11Profile {
                 pos,
                 ElementType::Block,
                 format!("{} ({}-{})", title, code_start, code_end),
-                vec![code_start.to_string(), code_end.to_string()]
+                vec![code_start.to_string(), code_end.to_string()],
             ));
         }
 
@@ -125,7 +125,7 @@ impl DocumentProfile for Icd11Profile {
                 pos,
                 ElementType::Category,
                 format!("{} {}", code, title),
-                vec![code.to_string()]
+                vec![code.to_string()],
             ));
         }
 
@@ -138,7 +138,7 @@ impl DocumentProfile for Icd11Profile {
                 pos,
                 ElementType::Subcategory,
                 format!("{} {}", code, title),
-                vec![code.to_string()]
+                vec![code.to_string()],
             ));
         }
 
@@ -177,11 +177,17 @@ impl DocumentProfile for Icd11Profile {
                 ElementType::Category => {
                     current_category = Some(title.clone());
                     // Categories are the main disorder entries
-                    (current_block.clone().or(current_chapter.clone()), SectionType::Disorder)
+                    (
+                        current_block.clone().or(current_chapter.clone()),
+                        SectionType::Disorder,
+                    )
                 }
                 ElementType::Subcategory => {
                     // Subcategories are specific variants
-                    (current_category.clone().or(current_block.clone()), SectionType::Disorder)
+                    (
+                        current_category.clone().or(current_block.clone()),
+                        SectionType::Disorder,
+                    )
                 }
             };
 
@@ -214,10 +220,10 @@ impl DocumentProfile for Icd11Profile {
 #[allow(dead_code)] // Variant data used for structural context
 #[derive(Debug, Clone)]
 enum ElementType {
-    Chapter(String),  // chapter number
-    Block,            // code range block
-    Category,         // 4-char diagnostic code
-    Subcategory,      // code with decimal
+    Chapter(String), // chapter number
+    Block,           // code range block
+    Category,        // 4-char diagnostic code
+    Subcategory,     // code with decimal
 }
 
 /// Extract the most recent page number from text with our markers.

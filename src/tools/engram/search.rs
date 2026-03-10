@@ -1,9 +1,10 @@
 //! engram_search - Semantic memory search with energy weighting
 
 use crate::embedding::{EmbeddingGenerator, cosine_similarity};
+use crate::llm::LlmTier;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -41,8 +42,18 @@ fn is_composite_query(query: &str) -> bool {
     let q = query.to_lowercase();
     let conjunction = q.contains(" and ") || q.contains(" both ");
     let list_cues = [
-        "activities", "events", "books", "states", "cities", "names", "causes",
-        "traits", "attributes", "both have", "in common", "all ",
+        "activities",
+        "events",
+        "books",
+        "states",
+        "cities",
+        "names",
+        "causes",
+        "traits",
+        "attributes",
+        "both have",
+        "in common",
+        "all ",
     ];
     conjunction || list_cues.iter().any(|cue| q.contains(cue))
 }
@@ -52,17 +63,25 @@ fn is_composite_query(query: &str) -> bool {
 fn is_inferential_query(query: &str) -> bool {
     let q = query.to_lowercase();
     let cues = [
-        "might", "likely", "considered", "would", "could", "personality",
-        "attributes", "traits", "describe", "what job",
+        "might",
+        "likely",
+        "considered",
+        "would",
+        "could",
+        "personality",
+        "attributes",
+        "traits",
+        "describe",
+        "what job",
     ];
     cues.iter().any(|cue| q.contains(cue))
 }
 
 /// Very small stop-word list for diversity/cue tokenization.
 const SHAPING_STOP_WORDS: &[&str] = &[
-    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with",
-    "from", "is", "are", "was", "were", "be", "been", "this", "that", "it",
-    "as", "at", "by", "what", "when", "where", "who", "how", "does", "did",
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "from", "is", "are",
+    "was", "were", "be", "been", "this", "that", "it", "as", "at", "by", "what", "when", "where",
+    "who", "how", "does", "did",
 ];
 
 /// Normalize a token for result-shaping analysis.
@@ -121,6 +140,43 @@ fn source_bucket_key(content: &str, created_at: i64) -> String {
         .unwrap_or_else(|| created_at.to_string())
 }
 
+fn llm_query_variants(context: &Context, query: &str) -> Option<Vec<String>> {
+    if !context.llm.available() || context.llm.tier() < LlmTier::Minimal {
+        return None;
+    }
+
+    match context.llm.expand_query(query, 3) {
+        Ok(variants) => Some(normalize_variants(query, variants)),
+        Err(e) => {
+            eprintln!("[search] llm query expansion failed: {:?}", e);
+            None
+        }
+    }
+}
+
+fn normalize_variants(original: &str, generated: Vec<String>) -> Vec<String> {
+    let mut variants = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for candidate in std::iter::once(original.to_string()).chain(generated.into_iter()) {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let key = trimmed.to_lowercase();
+        if seen.insert(key) {
+            variants.push(trimmed.to_string());
+        }
+    }
+
+    if variants.is_empty() {
+        vec![original.to_string()]
+    } else {
+        variants
+    }
+}
+
 impl Tool<Context> for EngramSearchTool {
     fn name(&self) -> &str {
         "engram_search"
@@ -170,8 +226,8 @@ impl Tool<Context> for EngramSearchTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let limit = args.limit.unwrap_or(10);
         let min_score = args.min_score.unwrap_or(0.4);
@@ -187,33 +243,49 @@ impl Tool<Context> for EngramSearchTool {
             limit
         };
 
-        let mut brain = context.brain.lock().unwrap();
+        let (
+            follow_associations,
+            association_depth,
+            rerank_enabled,
+            rerank_candidates,
+            hybrid_search_enabled,
+            query_expansion_enabled,
+        ) = {
+            let mut brain = context.brain.lock().unwrap();
 
-        // Lazy maintenance: decay + cross-process sync
-        let _ = brain.apply_time_decay();
-        let _ = brain.sync_from_storage();
+            // Lazy maintenance: decay + cross-process sync
+            let _ = brain.apply_time_decay();
+            let _ = brain.sync_from_storage();
 
-        // Read config for association-following, reranking, hybrid search, and query expansion
-        let follow_associations = brain.config().search_follow_associations;
-        let association_depth = brain.config().search_association_depth;
-        let rerank_enabled = brain.config().rerank_enabled;
-        let rerank_candidates = brain.config().rerank_candidates;
-        let hybrid_search_enabled = brain.config().hybrid_search_enabled;
-        let query_expansion_enabled = brain.config().query_expansion_enabled;
+            // Read config for association-following, reranking, hybrid search, and query expansion
+            (
+                brain.config().search_follow_associations,
+                brain.config().search_association_depth,
+                brain.config().rerank_enabled,
+                brain.config().rerank_candidates,
+                brain.config().hybrid_search_enabled,
+                brain.config().query_expansion_enabled,
+            )
+        };
 
         // Query expansion: generate variant queries
         let variants = if query_expansion_enabled {
-            super::query_expansion::expand_query(&args.query)
+            llm_query_variants(context, &args.query)
+                .unwrap_or_else(|| super::query_expansion::expand_query(&args.query))
         } else {
             vec![args.query.clone()]
         };
 
         if variants.len() > 1 {
-            eprintln!("[search] query expansion: {} variants from {:?}",
-                variants.len(), &args.query);
+            eprintln!(
+                "[search] query expansion: {} variants from {:?}",
+                variants.len(),
+                &args.query
+            );
         }
 
         let generator = EmbeddingGenerator::new();
+        let mut brain = context.brain.lock().unwrap();
 
         // Find similar memories (fetch extra to allow for filtering)
         // When reranking is enabled, fetch more candidates for the reranker to work with
@@ -226,8 +298,10 @@ impl Tool<Context> for EngramSearchTool {
         // Run retrieval for each variant, merging results (keep highest score per engram).
         // Cache the original query embedding (variants[0]) so we don't compute it twice —
         // it's also needed for association discovery later.
-        let mut all_results: std::collections::HashMap<uuid::Uuid, crate::engram::SimilarityResult> =
-            std::collections::HashMap::new();
+        let mut all_results: std::collections::HashMap<
+            uuid::Uuid,
+            crate::engram::SimilarityResult,
+        > = std::collections::HashMap::new();
         let mut original_query_embedding: Option<Vec<f32>> = None;
 
         // Helper: run vector + BM25 for a single query variant and merge into all_results
@@ -238,24 +312,33 @@ impl Tool<Context> for EngramSearchTool {
             fetch_count: usize,
             min_score: f32,
             hybrid_search_enabled: bool,
-            all_results: &mut std::collections::HashMap<uuid::Uuid, crate::engram::SimilarityResult>,
+            all_results: &mut std::collections::HashMap<
+                uuid::Uuid,
+                crate::engram::SimilarityResult,
+            >,
             original_embedding: &mut Option<Vec<f32>>,
             log_variant: bool,
         ) -> sml_mcps::Result<()> {
-            let variant_embedding = generator.generate(variant_query)
+            let variant_embedding = generator
+                .generate(variant_query)
                 .map_err(|e| McpError::ToolError(format!("Failed to generate embedding: {}", e)))?;
 
             if original_embedding.is_none() {
                 *original_embedding = Some(variant_embedding.clone());
             }
 
-            let vector_results = brain.find_similar_by_embedding(&variant_embedding, fetch_count, min_score)
+            let vector_results = brain
+                .find_similar_by_embedding(&variant_embedding, fetch_count, min_score)
                 .map_err(|e| McpError::ToolError(format!("Vector search failed: {}", e)))?;
 
             let variant_merged = if hybrid_search_enabled {
-                let bm25_results = brain.keyword_search(variant_query, fetch_count)
+                let bm25_results = brain
+                    .keyword_search(variant_query, fetch_count)
                     .unwrap_or_else(|e| {
-                        eprintln!("[search] BM25 keyword search failed, using vector only: {}", e);
+                        eprintln!(
+                            "[search] BM25 keyword search failed, using vector only: {}",
+                            e
+                        );
                         Vec::new()
                     });
 
@@ -268,11 +351,20 @@ impl Tool<Context> for EngramSearchTool {
                         rrf::DEFAULT_K,
                     );
                     if log_variant {
-                        eprintln!("[search] hybrid variant {:?}: {} vector + {} BM25 → {} merged",
-                            variant_query, vector_results.len(), bm25_results.len(), merged.len());
+                        eprintln!(
+                            "[search] hybrid variant {:?}: {} vector + {} BM25 → {} merged",
+                            variant_query,
+                            vector_results.len(),
+                            bm25_results.len(),
+                            merged.len()
+                        );
                     } else {
-                        eprintln!("[search] hybrid: {} vector + {} BM25 → {} merged via RRF",
-                            vector_results.len(), bm25_results.len(), merged.len());
+                        eprintln!(
+                            "[search] hybrid: {} vector + {} BM25 → {} merged via RRF",
+                            vector_results.len(),
+                            bm25_results.len(),
+                            merged.len()
+                        );
                     }
                     merged
                 }
@@ -281,7 +373,8 @@ impl Tool<Context> for EngramSearchTool {
             };
 
             for result in variant_merged {
-                all_results.entry(result.id)
+                all_results
+                    .entry(result.id)
                     .and_modify(|existing| {
                         if result.score > existing.score {
                             *existing = result.clone();
@@ -294,9 +387,17 @@ impl Tool<Context> for EngramSearchTool {
 
         // Phase 1: Run primary variants (original + stop-word-stripped)
         for variant_query in &variants {
-            run_variant(variant_query, &mut brain, &generator, fetch_count, min_score,
-                       hybrid_search_enabled, &mut all_results,
-                       &mut original_query_embedding, variants.len() > 1)?;
+            run_variant(
+                variant_query,
+                &mut brain,
+                &generator,
+                fetch_count,
+                min_score,
+                hybrid_search_enabled,
+                &mut all_results,
+                &mut original_query_embedding,
+                variants.len() > 1,
+            )?;
         }
 
         // Phase 2 (fallback): run individual term queries when sparse OR
@@ -320,9 +421,17 @@ impl Tool<Context> for EngramSearchTool {
                     max_fallback_terms
                 );
                 for term in fallback.iter().take(max_fallback_terms) {
-                    run_variant(term, &mut brain, &generator, fetch_count, min_score,
-                               hybrid_search_enabled, &mut all_results,
-                               &mut original_query_embedding, true)?;
+                    run_variant(
+                        term,
+                        &mut brain,
+                        &generator,
+                        fetch_count,
+                        min_score,
+                        hybrid_search_enabled,
+                        &mut all_results,
+                        &mut original_query_embedding,
+                        true,
+                    )?;
                 }
             }
         }
@@ -333,7 +442,10 @@ impl Tool<Context> for EngramSearchTool {
             let relaxed_min_score = (min_score * 0.6).max(0.15);
             if relaxed_min_score < min_score {
                 let mut relaxed_queries = vec![args.query.clone()];
-                for term in super::query_expansion::fallback_terms(&args.query).into_iter().take(2) {
+                for term in super::query_expansion::fallback_terms(&args.query)
+                    .into_iter()
+                    .take(2)
+                {
                     if !relaxed_queries.iter().any(|q| q == &term) {
                         relaxed_queries.push(term);
                     }
@@ -347,16 +459,29 @@ impl Tool<Context> for EngramSearchTool {
                     relaxed_queries.len()
                 );
                 for rq in &relaxed_queries {
-                    run_variant(rq, &mut brain, &generator, fetch_count, relaxed_min_score,
-                               hybrid_search_enabled, &mut all_results,
-                               &mut original_query_embedding, true)?;
+                    run_variant(
+                        rq,
+                        &mut brain,
+                        &generator,
+                        fetch_count,
+                        relaxed_min_score,
+                        hybrid_search_enabled,
+                        &mut all_results,
+                        &mut original_query_embedding,
+                        true,
+                    )?;
                 }
             }
         }
 
         // Convert to sorted vec
-        let mut merged_results: Vec<crate::engram::SimilarityResult> = all_results.into_values().collect();
-        merged_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        let mut merged_results: Vec<crate::engram::SimilarityResult> =
+            all_results.into_values().collect();
+        merged_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Use the ORIGINAL query embedding for association discovery and reranking
         let query_embedding = original_query_embedding.expect("at least one variant always exists");
@@ -374,34 +499,43 @@ impl Tool<Context> for EngramSearchTool {
             state_emoji: &'static str,
         }
 
-        let mut scored: Vec<ScoredResult> = merged_results.iter().filter_map(|r| {
-            let engram = brain.get_or_load(&r.id)?;
+        let mut scored: Vec<ScoredResult> = merged_results
+            .iter()
+            .filter_map(|r| {
+                let engram = brain.get_or_load(&r.id)?;
 
-            // State filter
-            let state_ok = if include_archived {
-                true
-            } else if include_deep {
-                !engram.is_archived()
-            } else {
-                engram.is_searchable()
-            };
-            if !state_ok { return None; }
+                // State filter
+                let state_ok = if include_archived {
+                    true
+                } else if include_deep {
+                    !engram.is_archived()
+                } else {
+                    engram.is_searchable()
+                };
+                if !state_ok {
+                    return None;
+                }
 
-            let blended = r.score * 0.7 + (engram.energy as f32) * 0.3;
+                let blended = r.score * 0.7 + (engram.energy as f32) * 0.3;
 
-            Some(ScoredResult {
-                id: r.id,
-                content: r.content.clone(),
-                created_at: engram.created_at,
-                similarity: r.score,
-                energy: engram.energy,
-                blended,
-                state_emoji: engram.state.emoji(),
+                Some(ScoredResult {
+                    id: r.id,
+                    content: r.content.clone(),
+                    created_at: engram.created_at,
+                    similarity: r.score,
+                    energy: engram.energy,
+                    blended,
+                    state_emoji: engram.state.emoji(),
+                })
             })
-        }).collect();
+            .collect();
 
         // Sort by blended score descending
-        scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.blended
+                .partial_cmp(&a.blended)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Cross-encoder re-ranking: feed (query, content) pairs through a cross-encoder
         // for significantly better relevance ordering than cosine similarity alone.
@@ -429,7 +563,10 @@ impl Tool<Context> for EngramSearchTool {
                         }
                     }
                     scored = reranked_results;
-                    eprintln!("[search] re-ranked {} candidates with cross-encoder", candidate_count);
+                    eprintln!(
+                        "[search] re-ranked {} candidates with cross-encoder",
+                        candidate_count
+                    );
                 }
                 Err(e) => {
                     eprintln!("[search] reranking failed, falling back to cosine: {}", e);
@@ -450,12 +587,14 @@ impl Tool<Context> for EngramSearchTool {
 
             let mut seen_ids: HashSet<uuid::Uuid> = seed_ids.iter().copied().collect();
 
-            let discoveries = brain.discover_associated_memories(
-                &query_embedding,
-                &seed_ids,
-                &mut seen_ids,
-                association_depth,
-            ).map_err(|e| McpError::ToolError(format!("Association discovery failed: {}", e)))?;
+            let discoveries = brain
+                .discover_associated_memories(
+                    &query_embedding,
+                    &seed_ids,
+                    &mut seen_ids,
+                    association_depth,
+                )
+                .map_err(|e| McpError::ToolError(format!("Association discovery failed: {}", e)))?;
 
             // Cap discoveries to avoid swamping vector results.
             // Scale the cap with requested limit so list/multi-hop questions
@@ -464,7 +603,11 @@ impl Tool<Context> for EngramSearchTool {
             let association_cap = effective_limit.clamp(5, 12);
             let capped: Vec<_> = {
                 let mut sorted = discoveries;
-                sorted.sort_by(|a, b| b.blended_score.partial_cmp(&a.blended_score).unwrap_or(std::cmp::Ordering::Equal));
+                sorted.sort_by(|a, b| {
+                    b.blended_score
+                        .partial_cmp(&a.blended_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 sorted.into_iter().take(association_cap).collect()
             };
 
@@ -483,7 +626,9 @@ impl Tool<Context> for EngramSearchTool {
                 } else {
                     engram.is_searchable()
                 };
-                if !state_ok { continue; }
+                if !state_ok {
+                    continue;
+                }
 
                 scored.push(ScoredResult {
                     id: d.id,
@@ -497,13 +642,22 @@ impl Tool<Context> for EngramSearchTool {
             }
 
             // Re-sort after merging
-            scored.sort_by(|a, b| b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal));
+            scored.sort_by(|a, b| {
+                b.blended
+                    .partial_cmp(&a.blended)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             association_merged_count = association_discovery_count.min(association_cap);
 
             // Log discovery stats for visibility
-            eprintln!("[search] association-following: {} discovered, {} merged (cap: {}, depth: {})",
-                association_discovery_count, association_merged_count, association_cap, association_depth);
+            eprintln!(
+                "[search] association-following: {} discovered, {} merged (cap: {}, depth: {})",
+                association_discovery_count,
+                association_merged_count,
+                association_cap,
+                association_depth
+            );
         }
 
         // Diversity shaping: pick a diverse, coverage-rich, source-balanced subset.
@@ -525,9 +679,12 @@ impl Tool<Context> for EngramSearchTool {
                 cues
             };
 
-            let token_sets: Vec<std::collections::HashSet<String>> =
-                scored.iter().map(|r| tokenize_for_shaping(&r.content)).collect();
-            let lower_contents: Vec<String> = scored.iter().map(|r| r.content.to_lowercase()).collect();
+            let token_sets: Vec<std::collections::HashSet<String>> = scored
+                .iter()
+                .map(|r| tokenize_for_shaping(&r.content))
+                .collect();
+            let lower_contents: Vec<String> =
+                scored.iter().map(|r| r.content.to_lowercase()).collect();
             let source_keys: Vec<String> = scored
                 .iter()
                 .map(|r| source_bucket_key(&r.content, r.created_at))
@@ -541,8 +698,10 @@ impl Tool<Context> for EngramSearchTool {
 
             let mut selected_indices: Vec<usize> = Vec::with_capacity(target);
             let mut used = vec![false; scored.len()];
-            let mut covered_cues: std::collections::HashSet<String> = std::collections::HashSet::new();
-            let mut source_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut covered_cues: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut source_counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
 
             while selected_indices.len() < target {
                 let mut best_idx: Option<usize> = None;
@@ -559,30 +718,33 @@ impl Tool<Context> for EngramSearchTool {
                     // embedding is too similar to any already-selected result, skip it
                     // entirely — these are effectively duplicates that Jaccard would miss
                     // when the same fact is phrased differently.
-                    let candidate_embedding = embedding_cache.get(&idx).cloned().unwrap_or_else(|| {
-                        match brain.get_embedding(&scored[idx].id) {
-                            Ok(Some(emb)) => {
-                                embedding_cache.insert(idx, emb.clone());
-                                emb
+                    let candidate_embedding =
+                        embedding_cache.get(&idx).cloned().unwrap_or_else(|| {
+                            match brain.get_embedding(&scored[idx].id) {
+                                Ok(Some(emb)) => {
+                                    embedding_cache.insert(idx, emb.clone());
+                                    emb
+                                }
+                                _ => Vec::new(), // empty = no embedding available
                             }
-                            _ => Vec::new(), // empty = no embedding available
-                        }
-                    });
+                        });
 
                     if !candidate_embedding.is_empty() && !selected_indices.is_empty() {
-                        let max_semantic_sim = selected_indices.iter()
+                        let max_semantic_sim = selected_indices
+                            .iter()
                             .filter_map(|&sel_idx| {
-                                let sel_emb = embedding_cache.get(&sel_idx).cloned().unwrap_or_else(|| {
-                                    match brain.get_embedding(&scored[sel_idx].id) {
-                                        Ok(Some(emb)) => {
-                                            // Can't insert into cache here (borrowing issues),
-                                            // but selected embeddings are already cached from
-                                            // when they were candidates.
-                                            emb
+                                let sel_emb =
+                                    embedding_cache.get(&sel_idx).cloned().unwrap_or_else(|| {
+                                        match brain.get_embedding(&scored[sel_idx].id) {
+                                            Ok(Some(emb)) => {
+                                                // Can't insert into cache here (borrowing issues),
+                                                // but selected embeddings are already cached from
+                                                // when they were candidates.
+                                                emb
+                                            }
+                                            _ => Vec::new(),
                                         }
-                                        _ => Vec::new(),
-                                    }
-                                });
+                                    });
                                 if sel_emb.is_empty() {
                                     None
                                 } else {
@@ -611,7 +773,8 @@ impl Tool<Context> for EngramSearchTool {
                     // Reward candidates that introduce uncovered cue terms.
                     let mut new_cues = Vec::new();
                     for cue in &cue_terms {
-                        if !covered_cues.contains(cue) && lower_contents[idx].contains(cue.as_str()) {
+                        if !covered_cues.contains(cue) && lower_contents[idx].contains(cue.as_str())
+                        {
                             new_cues.push(cue.clone());
                         }
                     }
@@ -625,7 +788,8 @@ impl Tool<Context> for EngramSearchTool {
                         0.0
                     };
 
-                    let adjusted = scored[idx].blended + cue_bonus - diversity_penalty - source_penalty;
+                    let adjusted =
+                        scored[idx].blended + cue_bonus - diversity_penalty - source_penalty;
 
                     if adjusted > best_score {
                         best_score = adjusted;
@@ -650,7 +814,9 @@ impl Tool<Context> for EngramSearchTool {
                 for cue in best_new_cues {
                     covered_cues.insert(cue);
                 }
-                *source_counts.entry(source_keys[chosen].clone()).or_insert(0) += 1;
+                *source_counts
+                    .entry(source_keys[chosen].clone())
+                    .or_insert(0) += 1;
             }
 
             if !selected_indices.is_empty() {
@@ -691,7 +857,7 @@ impl Tool<Context> for EngramSearchTool {
             let mut output = String::from(
                 "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
                  💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
-                 ---\n\n"
+                 ---\n\n",
             );
             output.push_str("No memories found.\n");
             output.push_str("\n💡 Tip: Try a different query or lower min_score.");
@@ -701,7 +867,7 @@ impl Tool<Context> for EngramSearchTool {
         let mut output = String::from(
             "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
              💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
-             ---\n\n"
+             ---\n\n",
         );
 
         // Show chain hints before memory listings
@@ -714,8 +880,12 @@ impl Tool<Context> for EngramSearchTool {
         }
 
         if association_merged_count > 0 {
-            output.push_str(&format!("Found {} memories ({} via associations, {} total discovered):\n\n",
-                scored.len(), association_merged_count, association_discovery_count));
+            output.push_str(&format!(
+                "Found {} memories ({} via associations, {} total discovered):\n\n",
+                scored.len(),
+                association_merged_count,
+                association_discovery_count
+            ));
         } else {
             output.push_str(&format!("Found {} memories:\n\n", scored.len()));
         }
@@ -739,15 +909,15 @@ impl Tool<Context> for EngramSearchTool {
         }
 
         // Sparse/weak results hint: nudge the caller to try related searches
-        let should_hint = scored.len() < 3
-            || scored.first().map(|r| r.blended < 0.45).unwrap_or(false);
+        let should_hint =
+            scored.len() < 3 || scored.first().map(|r| r.blended < 0.45).unwrap_or(false);
         if should_hint {
             output.push_str(
                 "⚠️ Results may not be relevant. Try searching with related concepts:\n\
                  - Break abstract questions into concrete topics (e.g. \"relationship status\" → \
                    \"breakup\", \"dating\", \"partner\", \"married\", \"single\")\n\
                  - Search for specific events or actions rather than status or state\n\
-                 - Try [person's name] + a related action, event, or feeling\n"
+                 - Try [person's name] + a related action, event, or feeling\n",
             );
         }
 
@@ -834,9 +1004,15 @@ mod tests {
         let step2 = brain.create("Run tests").unwrap();
         let step3 = brain.create("Deploy").unwrap();
 
-        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
-        brain.associate_with_ordinal(anchor, step2, 0.9, Some(2)).unwrap();
-        brain.associate_with_ordinal(anchor, step3, 0.9, Some(3)).unwrap();
+        brain
+            .associate_with_ordinal(anchor, step1, 0.9, Some(1))
+            .unwrap();
+        brain
+            .associate_with_ordinal(anchor, step2, 0.9, Some(2))
+            .unwrap();
+        brain
+            .associate_with_ordinal(anchor, step3, 0.9, Some(3))
+            .unwrap();
 
         let hints = detect_procedure_chains(&brain, &[anchor]);
         assert_eq!(hints.len(), 1);
@@ -856,7 +1032,10 @@ mod tests {
         brain.associate(memory, related, 0.8).unwrap();
 
         let hints = detect_procedure_chains(&brain, &[memory]);
-        assert!(hints.is_empty(), "Unordered associations should not trigger chain detection");
+        assert!(
+            hints.is_empty(),
+            "Unordered associations should not trigger chain detection"
+        );
     }
 
     #[test]
@@ -867,12 +1046,17 @@ mod tests {
         let step1 = brain.create("Step 1").unwrap();
         let related = brain.create("Related but unordered").unwrap();
 
-        brain.associate_with_ordinal(anchor, step1, 0.9, Some(1)).unwrap();
+        brain
+            .associate_with_ordinal(anchor, step1, 0.9, Some(1))
+            .unwrap();
         brain.associate(anchor, related, 0.5).unwrap();
 
         let hints = detect_procedure_chains(&brain, &[anchor]);
         assert_eq!(hints.len(), 1);
-        assert_eq!(hints[0].ordered_step_count, 1, "Only count ordered associations");
+        assert_eq!(
+            hints[0].ordered_step_count, 1,
+            "Only count ordered associations"
+        );
     }
 
     #[test]
@@ -881,13 +1065,19 @@ mod tests {
 
         let anchor1 = brain.create("Procedure A").unwrap();
         let a_step = brain.create("A step 1").unwrap();
-        brain.associate_with_ordinal(anchor1, a_step, 0.9, Some(1)).unwrap();
+        brain
+            .associate_with_ordinal(anchor1, a_step, 0.9, Some(1))
+            .unwrap();
 
         let anchor2 = brain.create("Procedure B").unwrap();
         let b_step1 = brain.create("B step 1").unwrap();
         let b_step2 = brain.create("B step 2").unwrap();
-        brain.associate_with_ordinal(anchor2, b_step1, 0.9, Some(1)).unwrap();
-        brain.associate_with_ordinal(anchor2, b_step2, 0.9, Some(2)).unwrap();
+        brain
+            .associate_with_ordinal(anchor2, b_step1, 0.9, Some(1))
+            .unwrap();
+        brain
+            .associate_with_ordinal(anchor2, b_step2, 0.9, Some(2))
+            .unwrap();
 
         let non_anchor = brain.create("Not a procedure").unwrap();
 
@@ -895,7 +1085,8 @@ mod tests {
         assert_eq!(hints.len(), 2);
 
         // Verify both anchors detected with correct step counts
-        let hint_map: std::collections::HashMap<_, _> = hints.iter()
+        let hint_map: std::collections::HashMap<_, _> = hints
+            .iter()
             .map(|h| (h.anchor_id, h.ordered_step_count))
             .collect();
         assert_eq!(hint_map[&anchor1], 1);
@@ -934,16 +1125,24 @@ mod tests {
 
     #[test]
     fn composite_query_heuristic_detects_list_style_questions() {
-        assert!(is_composite_query("What activities does Melanie partake in?"));
-        assert!(is_composite_query("What do Jon and Gina both have in common?"));
+        assert!(is_composite_query(
+            "What activities does Melanie partake in?"
+        ));
+        assert!(is_composite_query(
+            "What do Jon and Gina both have in common?"
+        ));
         assert!(!is_composite_query("Where did Caroline move from?"));
     }
 
     #[test]
     fn inferential_query_heuristic_detects_open_domain_style_questions() {
         assert!(is_inferential_query("What might John's degree be in?"));
-        assert!(is_inferential_query("Would Caroline be considered religious?"));
-        assert!(!is_inferential_query("When did Caroline attend the support group?"));
+        assert!(is_inferential_query(
+            "Would Caroline be considered religious?"
+        ));
+        assert!(!is_inferential_query(
+            "When did Caroline attend the support group?"
+        ));
     }
 
     #[test]
@@ -983,7 +1182,10 @@ mod tests {
     #[test]
     fn shaping_helpers_work_for_non_composite_queries() {
         let query = "Where did Caroline move from?";
-        assert!(!is_composite_query(query), "sanity: query should NOT be composite");
+        assert!(
+            !is_composite_query(query),
+            "sanity: query should NOT be composite"
+        );
 
         // Tokenization and overlap still function for non-composite queries
         let tokens = tokenize_for_shaping(query);
@@ -1034,9 +1236,12 @@ mod tests {
             let mut best_adj = f32::NEG_INFINITY;
 
             for idx in 0..3 {
-                if used[idx] { continue; }
+                if used[idx] {
+                    continue;
+                }
 
-                let max_overlap = selected.iter()
+                let max_overlap = selected
+                    .iter()
                     .map(|sel| token_jaccard_overlap(&token_sets[idx], &token_sets[*sel]))
                     .fold(0.0_f32, f32::max);
                 let diversity_penalty = max_overlap * 0.20;
@@ -1077,10 +1282,7 @@ mod tests {
         ];
         let scores: [f32; 4] = [0.90, 0.85, 0.80, 0.78];
 
-        let source_keys: Vec<String> = contents
-            .iter()
-            .map(|c| source_bucket_key(c, 0))
-            .collect();
+        let source_keys: Vec<String> = contents.iter().map(|c| source_bucket_key(c, 0)).collect();
 
         // All chat-1 items should have the same bucket key
         assert_eq!(source_keys[0], source_keys[1]);
@@ -1098,7 +1300,9 @@ mod tests {
             let mut best_adj = f32::NEG_INFINITY;
 
             for idx in 0..4 {
-                if used[idx] { continue; }
+                if used[idx] {
+                    continue;
+                }
 
                 let src_count = *source_counts.get(&source_keys[idx]).unwrap_or(&0);
                 let source_penalty = if src_count >= 2 {
@@ -1117,7 +1321,9 @@ mod tests {
             let chosen = best_idx.unwrap();
             used[chosen] = true;
             selected.push(chosen);
-            *source_counts.entry(source_keys[chosen].clone()).or_insert(0) += 1;
+            *source_counts
+                .entry(source_keys[chosen].clone())
+                .or_insert(0) += 1;
         }
 
         // First two from chat-1 are fine (under threshold). The third from chat-1
@@ -1153,7 +1359,10 @@ mod tests {
     fn normalize_shaping_token_strips_possessive() {
         assert_eq!(normalize_shaping_token("John's"), Some("john".to_string()));
         // Smart quote possessive
-        assert_eq!(normalize_shaping_token("John\u{2019}s"), Some("john".to_string()));
+        assert_eq!(
+            normalize_shaping_token("John\u{2019}s"),
+            Some("john".to_string())
+        );
     }
 
     #[test]
@@ -1180,9 +1389,15 @@ mod tests {
 
         let mut brain = brain_with_sqlite();
 
-        let id1 = brain.create("Memory MCP server location: /work/memoryco/memory").unwrap();
-        let id2 = brain.create("MemoryCo source code lives at /work/memoryco/memory").unwrap();
-        let id3 = brain.create("Brandon enjoys hiking in the Cascades every weekend").unwrap();
+        let id1 = brain
+            .create("Memory MCP server location: /work/memoryco/memory")
+            .unwrap();
+        let id2 = brain
+            .create("MemoryCo source code lives at /work/memoryco/memory")
+            .unwrap();
+        let id3 = brain
+            .create("Brandon enjoys hiking in the Cascades every weekend")
+            .unwrap();
 
         // Create embeddings: id1 and id2 are near-identical (cosine sim ~1.0),
         // id3 is orthogonal.
@@ -1194,10 +1409,14 @@ mod tests {
         // Verify our test embeddings actually have the properties we expect
         let sim_12 = cosine_similarity(&emb_similar, &emb_similar2);
         let sim_13 = cosine_similarity(&emb_similar, &emb_different);
-        assert!(sim_12 >= SEMANTIC_DEDUP_THRESHOLD,
-            "test embeddings 1&2 should be above threshold: {sim_12}");
-        assert!(sim_13 < SEMANTIC_DEDUP_THRESHOLD,
-            "test embeddings 1&3 should be below threshold: {sim_13}");
+        assert!(
+            sim_12 >= SEMANTIC_DEDUP_THRESHOLD,
+            "test embeddings 1&2 should be above threshold: {sim_12}"
+        );
+        assert!(
+            sim_13 < SEMANTIC_DEDUP_THRESHOLD,
+            "test embeddings 1&3 should be below threshold: {sim_13}"
+        );
 
         brain.set_embedding(&id1, &emb_similar).unwrap();
         brain.set_embedding(&id2, &emb_similar2).unwrap();
@@ -1223,15 +1442,18 @@ mod tests {
             let mut best_score = f32::NEG_INFINITY;
 
             for idx in 0..3 {
-                if used[idx] { continue; }
+                if used[idx] {
+                    continue;
+                }
 
                 // Semantic dedup check
                 let candidate_emb = embedding_cache.get(&idx).unwrap();
-                let max_sim = selected.iter()
+                let max_sim = selected
+                    .iter()
                     .filter_map(|&sel_idx| {
-                        embedding_cache.get(&sel_idx).map(|sel_emb| {
-                            cosine_similarity(candidate_emb, sel_emb)
-                        })
+                        embedding_cache
+                            .get(&sel_idx)
+                            .map(|sel_emb| cosine_similarity(candidate_emb, sel_emb))
                     })
                     .fold(0.0_f32, f32::max);
 
@@ -1258,7 +1480,10 @@ mod tests {
         // id1 should be selected (highest score), id2 should be deduped (similar to id1),
         // id3 should survive (different embedding)
         assert_eq!(selected, vec![0, 2], "id2 (index 1) should be deduped");
-        assert_eq!(semantic_dedup_count, 1, "exactly one result should be semantic-deduped");
+        assert_eq!(
+            semantic_dedup_count, 1,
+            "exactly one result should be semantic-deduped"
+        );
     }
 
     /// Results below the semantic dedup threshold should survive even if they have
@@ -1272,9 +1497,14 @@ mod tests {
         let emb_b: Vec<f32> = vec![0.5, 0.5, 0.2, 0.1];
 
         let sim = cosine_similarity(&emb_a, &emb_b);
-        assert!(sim < SEMANTIC_DEDUP_THRESHOLD,
-            "test embeddings should be below threshold: {sim}");
-        assert!(sim > 0.3, "test embeddings should have some similarity: {sim}");
+        assert!(
+            sim < SEMANTIC_DEDUP_THRESHOLD,
+            "test embeddings should be below threshold: {sim}"
+        );
+        assert!(
+            sim > 0.3,
+            "test embeddings should have some similarity: {sim}"
+        );
 
         // Simulate: both should survive the dedup
         let mut embedding_cache: std::collections::HashMap<usize, Vec<f32>> =
@@ -1292,14 +1522,17 @@ mod tests {
             let mut best_score = f32::NEG_INFINITY;
 
             for idx in 0..2 {
-                if used[idx] { continue; }
+                if used[idx] {
+                    continue;
+                }
 
                 let candidate_emb = embedding_cache.get(&idx).unwrap();
-                let max_sim = selected.iter()
+                let max_sim = selected
+                    .iter()
                     .filter_map(|&sel_idx| {
-                        embedding_cache.get(&sel_idx).map(|sel_emb| {
-                            cosine_similarity(candidate_emb, sel_emb)
-                        })
+                        embedding_cache
+                            .get(&sel_idx)
+                            .map(|sel_emb| cosine_similarity(candidate_emb, sel_emb))
                     })
                     .fold(0.0_f32, f32::max);
 
@@ -1323,7 +1556,11 @@ mod tests {
             }
         }
 
-        assert_eq!(selected, vec![0, 1], "both results should survive below-threshold similarity");
+        assert_eq!(
+            selected,
+            vec![0, 1],
+            "both results should survive below-threshold similarity"
+        );
         assert_eq!(semantic_dedup_count, 0, "no results should be deduped");
     }
 
@@ -1334,9 +1571,15 @@ mod tests {
         let mut brain = brain_with_sqlite();
 
         // Create engrams but do NOT set embeddings — simulates embedding unavailability
-        let id1 = brain.create("Caroline moved from Portland to Seattle last year").unwrap();
-        let id2 = brain.create("Caroline moved from Portland to Seattle in March").unwrap();
-        let id3 = brain.create("John works as a software engineer in Austin").unwrap();
+        let id1 = brain
+            .create("Caroline moved from Portland to Seattle last year")
+            .unwrap();
+        let id2 = brain
+            .create("Caroline moved from Portland to Seattle in March")
+            .unwrap();
+        let id3 = brain
+            .create("John works as a software engineer in Austin")
+            .unwrap();
 
         // Verify no embeddings exist
         assert!(brain.get_embedding(&id1).unwrap().is_none());
@@ -1365,15 +1608,19 @@ mod tests {
             let mut best_adj = f32::NEG_INFINITY;
 
             for idx in 0..3 {
-                if used[idx] { continue; }
+                if used[idx] {
+                    continue;
+                }
 
                 // Semantic dedup: skip if embedding available and above threshold
                 let candidate_emb = embedding_cache.get(&idx);
                 if let Some(c_emb) = candidate_emb {
                     if !c_emb.is_empty() {
-                        let max_sim = selected.iter()
+                        let max_sim = selected
+                            .iter()
                             .filter_map(|&sel| {
-                                embedding_cache.get(&sel)
+                                embedding_cache
+                                    .get(&sel)
                                     .filter(|e| !e.is_empty())
                                     .map(|sel_emb| cosine_similarity(c_emb, sel_emb))
                             })
@@ -1386,7 +1633,8 @@ mod tests {
                 }
 
                 // Jaccard fallback
-                let max_overlap = selected.iter()
+                let max_overlap = selected
+                    .iter()
                     .map(|sel| token_jaccard_overlap(&token_sets[idx], &token_sets[*sel]))
                     .fold(0.0_f32, f32::max);
                 let diversity_penalty = max_overlap * 0.20;
@@ -1409,15 +1657,26 @@ mod tests {
         // Without embeddings, Jaccard kicks in. The near-duplicate (idx 1) should be
         // penalized, making idx 2 (unique content) preferred in position 2.
         assert_eq!(selected[0], 0, "highest score should be first");
-        assert_eq!(selected[1], 2,
-            "Jaccard fallback should promote unique result over near-duplicate");
+        assert_eq!(
+            selected[1], 2,
+            "Jaccard fallback should promote unique result over near-duplicate"
+        );
         assert_eq!(selected[2], 1, "near-duplicate should be selected last");
     }
 
     #[test]
     fn semantic_dedup_threshold_constant_is_reasonable() {
-        assert!(SEMANTIC_DEDUP_THRESHOLD > 0.5, "threshold should be well above random similarity");
-        assert!(SEMANTIC_DEDUP_THRESHOLD < 1.0, "threshold should allow some variation");
-        assert!((SEMANTIC_DEDUP_THRESHOLD - 0.85).abs() < f32::EPSILON, "threshold should be 0.85");
+        assert!(
+            SEMANTIC_DEDUP_THRESHOLD > 0.5,
+            "threshold should be well above random similarity"
+        );
+        assert!(
+            SEMANTIC_DEDUP_THRESHOLD < 1.0,
+            "threshold should allow some variation"
+        );
+        assert!(
+            (SEMANTIC_DEDUP_THRESHOLD - 0.85).abs() < f32::EPSILON,
+            "threshold should be 0.85"
+        );
     }
 }

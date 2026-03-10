@@ -11,22 +11,22 @@ mod setup;
 
 // Core tools
 pub use get::IdentityGetTool;
-pub use search::IdentitySearchTool;
 pub use list::IdentityListTool;
 pub use remove::IdentityRemoveTool;
+pub use search::IdentitySearchTool;
 pub use setup::IdentitySetupTool;
 
 // Typed add tools
 pub use add_typed::{
-    IdentitySetPersonaNameTool,
-    IdentitySetPersonaDescriptionTool,
-    IdentityAddTraitTool,
-    IdentityAddExpertiseTool,
-    IdentityAddInstructionTool,  // v2 - uses new storage
-    IdentityAddToneTool,
+    IdentityAddAntipatternTool,
     IdentityAddDirectiveTool,
-    IdentityAddValueTool,
+    IdentityAddExpertiseTool,
+    IdentityAddInstructionTool, // v2 - uses new storage
     IdentityAddPreferenceTool,
     IdentityAddRelationshipTool,
-    IdentityAddAntipatternTool,
+    IdentityAddToneTool,
+    IdentityAddTraitTool,
+    IdentityAddValueTool,
+    IdentitySetPersonaDescriptionTool,
+    IdentitySetPersonaNameTool,
 };

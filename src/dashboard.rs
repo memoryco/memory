@@ -8,7 +8,7 @@
 use crate::engram::Brain;
 use crate::identity::IdentityStore;
 use crate::reference::{self, ReferenceManager};
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -106,12 +106,7 @@ pub fn start_dashboard(
 // Routing
 // ---------------------------------------------------------------------------
 
-fn route(
-    method: &str,
-    url: &str,
-    mut request: tiny_http::Request,
-    state: &Arc<DashboardState>,
-) {
+fn route(method: &str, url: &str, mut request: tiny_http::Request, state: &Arc<DashboardState>) {
     // Strip query string for path matching, but keep it for parameter parsing
     let (path, query) = url.split_once('?').unwrap_or((url, ""));
 
@@ -121,9 +116,7 @@ fn route(
 
         // Identity
         ("GET", "/api/identity") => handle_get_identity(state),
-        ("POST", "/api/identity/persona/name") => {
-            handle_set_persona_name(&mut request, state)
-        }
+        ("POST", "/api/identity/persona/name") => handle_set_persona_name(&mut request, state),
         ("POST", "/api/identity/persona/description") => {
             handle_set_persona_description(&mut request, state)
         }
@@ -418,7 +411,12 @@ fn handle_identity_add(
         "directive" => identity.add_directive(content),
         "expertise" => identity.add_expertise(content),
         "instruction" => identity.add_instruction(content),
-        _ => return json_response(400, &format!(r#"{{"error":"Unknown type: {}"}}"#, item_type)),
+        _ => {
+            return json_response(
+                400,
+                &format!(r#"{{"error":"Unknown type: {}"}}"#, item_type),
+            );
+        }
     };
 
     match result {
@@ -483,7 +481,7 @@ fn handle_upload_reference(
             return json_response(
                 400,
                 r#"{"error":"Missing multipart boundary in Content-Type"}"#,
-            )
+            );
         }
     };
 
@@ -502,7 +500,10 @@ fn handle_upload_reference(
     let temp_path = temp_dir.join(&file.filename);
 
     if let Err(e) = std::fs::write(&temp_path, &file.data) {
-        return json_response(500, &format!(r#"{{"error":"Failed to write temp file: {}"}}"#, e));
+        return json_response(
+            500,
+            &format!(r#"{{"error":"Failed to write temp file: {}"}}"#, e),
+        );
     }
 
     let dest = match reference::sanitize_and_copy(&temp_path, &state.references_dir) {
@@ -589,11 +590,7 @@ fn sanitize_lens_name(name: &str) -> Option<String> {
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .collect();
-    if clean.is_empty() {
-        None
-    } else {
-        Some(clean)
-    }
+    if clean.is_empty() { None } else { Some(clean) }
 }
 
 fn handle_list_lenses(
@@ -705,7 +702,7 @@ fn handle_upload_lens(
             return json_response(
                 400,
                 r#"{"error":"Missing multipart boundary in Content-Type"}"#,
-            )
+            );
         }
     };
 
@@ -808,7 +805,14 @@ fn handle_list_engrams(
 
     if let Some(q) = search_query {
         if q.is_empty() {
-            return list_recent_engrams(&brain, limit, offset, include_archived, include_deep, state_filter);
+            return list_recent_engrams(
+                &brain,
+                limit,
+                offset,
+                include_archived,
+                include_deep,
+                state_filter,
+            );
         }
 
         // Direct lookup if the query is a UUID
@@ -849,8 +853,11 @@ fn handle_list_engrams(
                     Err(_) => {
                         // Fall back to text search
                         let results = brain.search(q);
-                        let engrams: Vec<JsonValue> =
-                            results.iter().take(limit).map(|e| engram_to_json(e, None)).collect();
+                        let engrams: Vec<JsonValue> = results
+                            .iter()
+                            .take(limit)
+                            .map(|e| engram_to_json(e, None))
+                            .collect();
                         let engrams = filter_json_engrams_by_state(engrams, state_filter);
                         json_ok(&json!({
                             "engrams": engrams,
@@ -863,8 +870,11 @@ fn handle_list_engrams(
             Err(_) => {
                 // Fall back to text search
                 let results = brain.search(q);
-                let engrams: Vec<JsonValue> =
-                    results.iter().take(limit).map(|e| engram_to_json(e, None)).collect();
+                let engrams: Vec<JsonValue> = results
+                    .iter()
+                    .take(limit)
+                    .map(|e| engram_to_json(e, None))
+                    .collect();
                 let engrams = filter_json_engrams_by_state(engrams, state_filter);
                 json_ok(&json!({
                     "engrams": engrams,
@@ -874,7 +884,14 @@ fn handle_list_engrams(
             }
         }
     } else {
-        list_recent_engrams(&brain, limit, offset, include_archived, include_deep, state_filter)
+        list_recent_engrams(
+            &brain,
+            limit,
+            offset,
+            include_archived,
+            include_deep,
+            state_filter,
+        )
     }
 }
 
@@ -888,7 +905,8 @@ fn list_recent_engrams(
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let mut engrams: Vec<&crate::engram::Engram> = if let Some(state_str) = state_filter {
         if let Some(target_state) = parse_memory_state(state_str) {
-            brain.all_engrams()
+            brain
+                .all_engrams()
                 .filter(|e| e.state == target_state)
                 .collect()
         } else {
@@ -897,10 +915,7 @@ fn list_recent_engrams(
     } else if include_archived {
         brain.all_engrams().collect()
     } else if include_deep {
-        brain
-            .all_engrams()
-            .filter(|e| !e.is_archived())
-            .collect()
+        brain.all_engrams().filter(|e| !e.is_archived()).collect()
     } else {
         brain.searchable_engrams().collect()
     };
@@ -957,13 +972,20 @@ fn engram_to_json(e: &crate::engram::Engram, score: Option<f32>) -> JsonValue {
 
 /// Filter a Vec of JSON engrams by state. The "state" field in JSON is the
 /// Debug format like "Active", "Dormant", etc., so we case-insensitive match.
-fn filter_json_engrams_by_state(engrams: Vec<JsonValue>, state_filter: Option<&str>) -> Vec<JsonValue> {
+fn filter_json_engrams_by_state(
+    engrams: Vec<JsonValue>,
+    state_filter: Option<&str>,
+) -> Vec<JsonValue> {
     if let Some(state_str) = state_filter {
-        engrams.into_iter().filter(|e| {
-            e.get("state").and_then(|s| s.as_str())
-                .map(|s| s.eq_ignore_ascii_case(state_str))
-                .unwrap_or(false)
-        }).collect()
+        engrams
+            .into_iter()
+            .filter(|e| {
+                e.get("state")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.eq_ignore_ascii_case(state_str))
+                    .unwrap_or(false)
+            })
+            .collect()
     } else {
         engrams
     }
@@ -1003,7 +1025,10 @@ fn handle_graph(
     let _ = brain.sync_from_storage();
 
     let all_assocs = brain.all_associations();
-    let filtered: Vec<_> = all_assocs.iter().filter(|a| a.weight >= min_weight).collect();
+    let filtered: Vec<_> = all_assocs
+        .iter()
+        .filter(|a| a.weight >= min_weight)
+        .collect();
 
     // Collect node IDs
     let mut node_ids: HashSet<uuid::Uuid> = HashSet::new();
@@ -1061,20 +1086,16 @@ fn handle_graph(
 fn handle_check_updates() -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let updater = memoryco_updater::Updater::new();
     match updater.check_all() {
-        Ok(checks) => {
-            match serde_json::to_string(&checks) {
-                Ok(body) => json_response(200, &body),
-                Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
-            }
-        }
+        Ok(checks) => match serde_json::to_string(&checks) {
+            Ok(body) => json_response(200, &body),
+            Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
+        },
         Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
     }
 }
 
 /// POST /api/updates/:binary/stage — stage an update for a specific binary.
-fn handle_stage_update(
-    binary: &str,
-) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+fn handle_stage_update(binary: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let updater = memoryco_updater::Updater::new();
     match updater.stage(binary) {
         Ok(result) => json_ok(&json!({
@@ -1118,7 +1139,8 @@ fn friendly_error(technical: &str) -> String {
         return "This file doesn't appear to be a PDF".to_string();
     }
     if technical.contains("invalid PDF: missing %PDF- magic bytes") {
-        return "This file isn't a valid PDF — it may be corrupted or not actually a PDF".to_string();
+        return "This file isn't a valid PDF — it may be corrupted or not actually a PDF"
+            .to_string();
     }
     if technical.contains("panicked") {
         return "This PDF couldn't be read — it may be damaged or use unsupported features"
@@ -1234,11 +1256,7 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// Extract filename from Content-Disposition header value.
 fn extract_filename(headers: &str) -> Option<String> {
     for line in headers.lines() {
-        if line
-            .to_lowercase()
-            .contains("content-disposition")
-            && line.contains("filename=")
-        {
+        if line.to_lowercase().contains("content-disposition") && line.contains("filename=") {
             // Find filename="..." or filename=...
             let (_, rest) = line.split_once("filename=")?;
             let filename = if let Some(stripped) = rest.strip_prefix('"') {
@@ -1414,16 +1432,14 @@ mod tests {
 
     #[test]
     fn friendly_error_encryption() {
-        let msg = friendly_error(
-            "pdf-extract: encryption scheme that is not supported by this library",
-        );
+        let msg =
+            friendly_error("pdf-extract: encryption scheme that is not supported by this library");
         assert_eq!(msg, "This PDF is encrypted and can't be read");
     }
 
     #[test]
     fn friendly_error_no_extractable_text() {
-        let msg =
-            friendly_error("No extractable text (PDF may be scanned images without OCR)");
+        let msg = friendly_error("No extractable text (PDF may be scanned images without OCR)");
         assert_eq!(
             msg,
             "This PDF contains only images — text search isn't available for it"
@@ -1553,9 +1569,7 @@ mod tests {
 
     #[test]
     fn route_delete_identity() {
-        let segments: Vec<&str> = "api/identity/abc-123"
-            .split('/')
-            .collect();
+        let segments: Vec<&str> = "api/identity/abc-123".split('/').collect();
         match segments.as_slice() {
             ["api", "identity", id] => assert_eq!(*id, "abc-123"),
             _ => panic!("Should match identity delete"),
@@ -1577,9 +1591,7 @@ mod tests {
 
     #[test]
     fn route_delete_reference() {
-        let segments: Vec<&str> = "api/references/dsm5tr"
-            .split('/')
-            .collect();
+        let segments: Vec<&str> = "api/references/dsm5tr".split('/').collect();
         match segments.as_slice() {
             ["api", "references", name] => assert_eq!(*name, "dsm5tr"),
             _ => panic!("Should match reference delete"),
@@ -1588,9 +1600,7 @@ mod tests {
 
     #[test]
     fn route_post_stage_update() {
-        let segments: Vec<&str> = "api/updates/memoryco_fs/stage"
-            .split('/')
-            .collect();
+        let segments: Vec<&str> = "api/updates/memoryco_fs/stage".split('/').collect();
         match segments.as_slice() {
             ["api", "updates", binary, "stage"] => assert_eq!(*binary, "memoryco_fs"),
             _ => panic!("Should match stage update"),
@@ -1599,9 +1609,7 @@ mod tests {
 
     #[test]
     fn route_post_stage_all() {
-        let segments: Vec<&str> = "api/updates/stage-all"
-            .split('/')
-            .collect();
+        let segments: Vec<&str> = "api/updates/stage-all".split('/').collect();
         match segments.as_slice() {
             ["api", "updates", "stage-all"] => {} // matches
             _ => panic!("Should match stage-all"),
@@ -1696,15 +1704,27 @@ mod tests {
 
     #[test]
     fn sanitize_lens_name_basic() {
-        assert_eq!(sanitize_lens_name("humanizer"), Some("humanizer".to_string()));
-        assert_eq!(sanitize_lens_name("codereview"), Some("codereview".to_string()));
+        assert_eq!(
+            sanitize_lens_name("humanizer"),
+            Some("humanizer".to_string())
+        );
+        assert_eq!(
+            sanitize_lens_name("codereview"),
+            Some("codereview".to_string())
+        );
     }
 
     #[test]
     fn sanitize_lens_name_strips_bad_chars() {
-        assert_eq!(sanitize_lens_name("../../../etc/passwd"), Some("etcpasswd".to_string()));
+        assert_eq!(
+            sanitize_lens_name("../../../etc/passwd"),
+            Some("etcpasswd".to_string())
+        );
         assert_eq!(sanitize_lens_name("my lens!"), Some("mylens".to_string()));
-        assert_eq!(sanitize_lens_name("foo bar/baz"), Some("foobarbaz".to_string()));
+        assert_eq!(
+            sanitize_lens_name("foo bar/baz"),
+            Some("foobarbaz".to_string())
+        );
     }
 
     #[test]
@@ -1717,15 +1737,16 @@ mod tests {
 
     #[test]
     fn sanitize_lens_name_preserves_hyphens_underscores() {
-        assert_eq!(sanitize_lens_name("my-lens_v2"), Some("my-lens_v2".to_string()));
+        assert_eq!(
+            sanitize_lens_name("my-lens_v2"),
+            Some("my-lens_v2".to_string())
+        );
         assert_eq!(sanitize_lens_name("a-b_c"), Some("a-b_c".to_string()));
     }
 
     #[test]
     fn route_delete_lens() {
-        let segments: Vec<&str> = "api/lenses/humanizer"
-            .split('/')
-            .collect();
+        let segments: Vec<&str> = "api/lenses/humanizer".split('/').collect();
         match segments.as_slice() {
             ["api", "lenses", name] => assert_eq!(*name, "humanizer"),
             _ => panic!("Should match lens delete"),

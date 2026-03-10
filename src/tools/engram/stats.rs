@@ -1,7 +1,7 @@
 //! engram_stats - Get substrate statistics
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -31,11 +31,11 @@ impl Tool<Context> for EngramStatsTool {
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
         let mut brain = context.brain.lock().unwrap();
-        
+
         // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();
         let _ = brain.sync_from_storage();
-        
+
         let stats = brain.stats();
 
         let output = format!(

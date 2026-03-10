@@ -1,7 +1,7 @@
 //! plans - List all active plans
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -31,15 +31,17 @@ impl Tool<Context> for PlansListTool {
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
         let mut plans = context.plans.lock().unwrap();
-        
-        let plan_list = plans.list()
+
+        let plan_list = plans
+            .list()
             .map_err(|e| sml_mcps::McpError::ToolError(e.to_string()))?;
 
         if plan_list.is_empty() {
             return Ok(text_response("No active plans.".to_string()));
         }
 
-        let output = plan_list.iter()
+        let output = plan_list
+            .iter()
             .map(|(id, desc)| format!("• {} - {}", id, desc))
             .collect::<Vec<_>>()
             .join("\n");

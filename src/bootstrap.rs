@@ -41,7 +41,7 @@ pub fn bootstrap_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::{IdentityStore, DieselIdentityStorage};
+    use crate::identity::{DieselIdentityStorage, IdentityStore};
     use crate::reference::ReferenceManager;
     use tempfile::TempDir;
 
@@ -60,27 +60,36 @@ mod tests {
 
         // Before bootstrap: identity should be empty
         let before = identity.get().unwrap();
-        assert!(before.instructions.is_empty(),
-            "Fresh IdentityStore should have no instructions");
+        assert!(
+            before.instructions.is_empty(),
+            "Fresh IdentityStore should have no instructions"
+        );
 
         // Run bootstrap
         bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
 
         // After bootstrap: identity must have instructions
         let after = identity.get().unwrap();
-        assert!(!after.instructions.is_empty(),
-            "Bootstrap must populate instructions in IdentityStore");
+        assert!(
+            !after.instructions.is_empty(),
+            "Bootstrap must populate instructions in IdentityStore"
+        );
 
         // Verify each module's marker is present
         let all_text: String = after.instructions.join("\n");
-        assert!(all_text.contains("<workflow>"),
-            "Missing engram instructions");
-        assert!(all_text.contains("## Lenses"),
-            "Missing lenses instructions");
-        assert!(all_text.contains("## References"),
-            "Missing reference instructions");
-        assert!(all_text.contains("## Plans"),
-            "Missing plans instructions");
+        assert!(
+            all_text.contains("<workflow>"),
+            "Missing engram instructions"
+        );
+        assert!(
+            all_text.contains("## Lenses"),
+            "Missing lenses instructions"
+        );
+        assert!(
+            all_text.contains("## References"),
+            "Missing reference instructions"
+        );
+        assert!(all_text.contains("## Plans"), "Missing plans instructions");
     }
 
     #[test]
@@ -100,8 +109,10 @@ mod tests {
         let second = identity.get().unwrap();
         let count_after_second = second.instructions.len();
 
-        assert_eq!(count_after_first, count_after_second,
-            "Running bootstrap twice should not duplicate instructions");
+        assert_eq!(
+            count_after_first, count_after_second,
+            "Running bootstrap twice should not duplicate instructions"
+        );
     }
 
     #[test]
@@ -126,13 +137,15 @@ mod tests {
         let has_values = !result.values.is_empty();
         let has_instructions = !result.instructions.is_empty();
 
-        assert!(has_name || has_values || has_instructions,
+        assert!(
+            has_name || has_values || has_instructions,
             "identity_get would return 'No identity configured yet.' \n\
              but bootstrap should ensure at least instructions are present.\n\
              persona.name.empty={}, values.empty={}, instructions.empty={}",
             result.persona.name.is_empty(),
             result.values.is_empty(),
-            result.instructions.is_empty());
+            result.instructions.is_empty()
+        );
     }
 
     #[test]
@@ -161,13 +174,16 @@ content = """
 This is a test plugin instruction.
 """
 "#,
-        ).unwrap();
+        )
+        .unwrap();
 
         bootstrap_all(&mut identity, &lenses_dir, &references, memory_home).unwrap();
 
         let result = identity.get().unwrap();
         let all_text: String = result.instructions.join("\n");
-        assert!(all_text.contains("<!-- plugin:testplugin -->"),
-            "bootstrap_all should pick up plugin manifests from bootstrap.d/");
+        assert!(
+            all_text.contains("<!-- plugin:testplugin -->"),
+            "bootstrap_all should pick up plugin manifests from bootstrap.d/"
+        );
     }
 }

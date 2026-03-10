@@ -124,7 +124,9 @@ fn strip_url_prefix(s: &str) -> &str {
 
     // Strip scheme prefixes (https:, http:, file:)
     // Handle both `https://` and `https:` (colons used as separators)
-    for scheme in &["https://", "http://", "file:///", "file://", "https:", "http:", "file:"] {
+    for scheme in &[
+        "https://", "http://", "file:///", "file://", "https:", "http:", "file:",
+    ] {
         if let Some(rest) = s.strip_prefix(scheme) {
             s = rest;
             break;
@@ -175,10 +177,7 @@ pub fn validate_pdf(path: &Path) -> Result<(), SanitizeError> {
         return Err(SanitizeError::FileNotFound(path.to_path_buf()));
     }
 
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !ext.eq_ignore_ascii_case("pdf") {
         return Err(SanitizeError::NotAPdf);
     }

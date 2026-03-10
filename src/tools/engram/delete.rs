@@ -2,8 +2,8 @@
 
 use crate::engram::EngramId;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -47,8 +47,8 @@ impl Tool<Context> for EngramDeleteTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut brain = context.brain.lock().unwrap();
         let mut output = String::new();
@@ -56,10 +56,12 @@ impl Tool<Context> for EngramDeleteTool {
         let mut not_found_count = 0;
 
         for id_str in &args.ids {
-            let id: EngramId = id_str.parse()
-                .map_err(|e| McpError::InvalidParams(format!("Invalid UUID '{}': {}", id_str, e)))?;
+            let id: EngramId = id_str.parse().map_err(|e| {
+                McpError::InvalidParams(format!("Invalid UUID '{}': {}", id_str, e))
+            })?;
 
-            let existed = brain.delete(id)
+            let existed = brain
+                .delete(id)
                 .map_err(|e| McpError::ToolError(e.to_string()))?;
 
             if existed {

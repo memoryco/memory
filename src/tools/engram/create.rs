@@ -3,8 +3,8 @@
 use crate::embedding::EmbeddingGenerator;
 use crate::engram::EngramId;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -65,8 +65,8 @@ impl Tool<Context> for EngramCreateTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut created: Vec<(EngramId, String)> = Vec::new();
         let mut output = String::new();
@@ -76,18 +76,17 @@ impl Tool<Context> for EngramCreateTool {
             let mut brain = context.brain.lock().unwrap();
             for memory in &args.memories {
                 let id: EngramId = if let Some(ref ts) = memory.created_at {
-                    let epoch = parse_timestamp(ts)
-                        .map_err(|e| McpError::InvalidParams(format!("Invalid created_at '{}': {}", ts, e)))?;
+                    let epoch = parse_timestamp(ts).map_err(|e| {
+                        McpError::InvalidParams(format!("Invalid created_at '{}': {}", ts, e))
+                    })?;
                     brain.create_with_timestamp(&memory.content, epoch)
                 } else {
                     brain.create(&memory.content)
-                }.map_err(|e| McpError::ToolError(e.to_string()))?;
-                
-                output.push_str(&format!(
-                    "ID: {}\nContent: {}\n\n",
-                    id, memory.content
-                ));
-                
+                }
+                .map_err(|e| McpError::ToolError(e.to_string()))?;
+
+                output.push_str(&format!("ID: {}\nContent: {}\n\n", id, memory.content));
+
                 created.push((id, memory.content.clone()));
             }
         } // Lock released here
@@ -109,7 +108,10 @@ impl Tool<Context> for EngramCreateTool {
         }
 
         // Phase 3: Return immediately
-        let header = format!("{} memories created (embeddings generating in background).\n\n", created.len());
+        let header = format!(
+            "{} memories created (embeddings generating in background).\n\n",
+            created.len()
+        );
         Ok(text_response(format!("{}{}", header, output.trim())))
     }
 }
@@ -155,5 +157,7 @@ fn parse_timestamp(s: &str) -> Result<i64, String> {
         return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp());
     }
 
-    Err(format!("Unrecognized timestamp format. Expected unix epoch, ISO 8601 date (YYYY-MM-DD), or ISO 8601 datetime."))
+    Err(format!(
+        "Unrecognized timestamp format. Expected unix epoch, ISO 8601 date (YYYY-MM-DD), or ISO 8601 datetime."
+    ))
 }

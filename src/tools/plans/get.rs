@@ -1,7 +1,7 @@
 //! plan_get - Get a single plan with all its steps
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::plans::PlanId;
@@ -37,15 +37,17 @@ impl Tool<Context> for PlanGetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let id_str = args["id"].as_str()
+        let id_str = args["id"]
+            .as_str()
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("id is required".to_string()))?;
-        
+
         let id = PlanId::parse_str(id_str)
             .map_err(|e| sml_mcps::McpError::InvalidParams(format!("Invalid plan ID: {}", e)))?;
 
         let mut plans = context.plans.lock().unwrap();
-        
-        let plan = plans.get(&id)
+
+        let plan = plans
+            .get(&id)
             .map_err(|e| sml_mcps::McpError::ToolError(e.to_string()))?;
 
         match plan {
@@ -53,7 +55,8 @@ impl Tool<Context> for PlanGetTool {
                 let steps_output = if p.steps.is_empty() {
                     "  (no steps yet)".to_string()
                 } else {
-                    p.steps.iter()
+                    p.steps
+                        .iter()
                         .map(|s| {
                             let check = if s.completed { "✓" } else { " " };
                             format!("  [{}] {}. {}", check, s.index, s.description)
@@ -65,7 +68,8 @@ impl Tool<Context> for PlanGetTool {
                 let progress = if p.steps.is_empty() {
                     "0%".to_string()
                 } else {
-                    format!("{}% ({}/{})", 
+                    format!(
+                        "{}% ({}/{})",
                         (p.progress() * 100.0) as usize,
                         p.completed_count(),
                         p.steps.len()
@@ -74,15 +78,12 @@ impl Tool<Context> for PlanGetTool {
 
                 let output = format!(
                     "Plan: {}\nID: {}\nProgress: {}\n\nSteps:\n{}",
-                    p.description,
-                    p.id,
-                    progress,
-                    steps_output
+                    p.description, p.id, progress, steps_output
                 );
 
                 Ok(text_response(output))
             }
-            None => Ok(text_response(format!("Plan not found: {}", id)))
+            None => Ok(text_response(format!("Plan not found: {}", id))),
         }
     }
 }

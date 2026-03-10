@@ -7,15 +7,15 @@
 //! identity doesn't decay. It's not "remembered" - it just IS.
 
 mod classifier;
-mod types;
-mod store;
 pub mod storage;
+mod store;
+mod types;
 
-pub use classifier::{classify, IdentityField};
+pub use classifier::{IdentityField, classify};
 pub use storage::{DieselIdentityStorage, IdentityItemType};
 pub use store::{IdentityStore, ListedItem, MigrationResult, UpsertResult};
 #[allow(unused_imports)] // Public API surface — used by consumers of the crate
 pub use types::{
-    Identity, Persona, Value, Preference, Relationship,
-    Antipattern, CommunicationStyle, IdentitySearchResults,
+    Antipattern, CommunicationStyle, Identity, IdentitySearchResults, Persona, Preference,
+    Relationship, Value,
 };

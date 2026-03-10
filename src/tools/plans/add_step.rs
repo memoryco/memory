@@ -1,7 +1,7 @@
 //! step_add - Add a step to a plan
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::plans::PlanId;
@@ -41,17 +41,20 @@ impl Tool<Context> for StepAddTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let id_str = args["id"].as_str()
+        let id_str = args["id"]
+            .as_str()
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("id is required".to_string()))?;
-        let description = args["description"].as_str()
-            .ok_or_else(|| sml_mcps::McpError::InvalidParams("description is required".to_string()))?;
-        
+        let description = args["description"].as_str().ok_or_else(|| {
+            sml_mcps::McpError::InvalidParams("description is required".to_string())
+        })?;
+
         let id = PlanId::parse_str(id_str)
             .map_err(|e| sml_mcps::McpError::InvalidParams(format!("Invalid plan ID: {}", e)))?;
 
         let mut plans = context.plans.lock().unwrap();
-        
-        let step_index = plans.add_step(&id, description)
+
+        let step_index = plans
+            .add_step(&id, description)
             .map_err(|e| sml_mcps::McpError::ToolError(e.to_string()))?;
 
         Ok(text_response(format!(

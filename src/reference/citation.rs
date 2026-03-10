@@ -50,12 +50,9 @@ pub struct Citation {
 }
 
 impl Citation {
-
     /// Format as APA 7 full reference.
     pub fn format_reference(&self) -> String {
-        let mut parts = vec![
-            format!("{}. ({}).", self.author, self.year),
-        ];
+        let mut parts = vec![format!("{}. ({}).", self.author, self.year)];
 
         // Title in italics (represented with asterisks for plain text)
         parts.push(format!("*{}*", self.title));
@@ -82,7 +79,10 @@ impl Citation {
         if page_start == page_end {
             format!("({}, {}, p. {})", self.author, self.year, page_start)
         } else {
-            format!("({}, {}, pp. {}-{})", self.author, self.year, page_start, page_end)
+            format!(
+                "({}, {}, pp. {}-{})",
+                self.author, self.year, page_start, page_end
+            )
         }
     }
 
@@ -91,8 +91,6 @@ impl Citation {
         format!("({}, {})", self.author, self.year)
     }
 }
-
-
 
 /// Get the meta.json path for a PDF.
 pub fn meta_path_for(pdf_path: &Path) -> std::path::PathBuf {

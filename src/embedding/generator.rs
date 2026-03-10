@@ -1,8 +1,8 @@
 //! Embedding generator using fastembed (configurable model)
 
 use crate::config;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::sync::Mutex;
-use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 
 /// Global embedding model (lazy-loaded on first use, swappable on model change)
 /// Stores (model_name, TextEmbedding) so we can detect when the model has changed.
@@ -31,7 +31,8 @@ impl EmbeddingGenerator {
         let model_name = active_model_name();
         self.ensure_model_loaded(&model_name)?;
 
-        let mut guard = EMBEDDING_MODEL.lock()
+        let mut guard = EMBEDDING_MODEL
+            .lock()
             .map_err(|e| EmbeddingError::Generation(format!("Lock poisoned: {}", e)))?;
 
         let (_, model) = guard.as_mut().unwrap();
@@ -55,7 +56,8 @@ impl EmbeddingGenerator {
         let model_name = active_model_name();
         self.ensure_model_loaded(&model_name)?;
 
-        let mut guard = EMBEDDING_MODEL.lock()
+        let mut guard = EMBEDDING_MODEL
+            .lock()
             .map_err(|e| EmbeddingError::Generation(format!("Lock poisoned: {}", e)))?;
 
         let (_, model) = guard.as_mut().unwrap();
@@ -70,7 +72,8 @@ impl EmbeddingGenerator {
     /// Ensure the global model is loaded and matches the requested model name.
     /// If the model is stale (different name), drops the old one and loads the new one.
     fn ensure_model_loaded(&self, model_name: &str) -> Result<(), EmbeddingError> {
-        let mut guard = EMBEDDING_MODEL.lock()
+        let mut guard = EMBEDDING_MODEL
+            .lock()
             .map_err(|e| EmbeddingError::Generation(format!("Lock poisoned: {}", e)))?;
 
         // Check if we already have the right model
@@ -79,26 +82,34 @@ impl EmbeddingGenerator {
                 return Ok(());
             }
             // Model changed — drop the old one
-            eprintln!("Embedding model changed from {} to {}, reloading...", current_name, model_name);
+            eprintln!(
+                "Embedding model changed from {} to {}, reloading...",
+                current_name, model_name
+            );
         }
 
         let cache_dir = config::get_model_cache_dir();
         std::fs::create_dir_all(&cache_dir).ok();
-        eprintln!("Loading embedding model {} (cache: {})...", model_name, cache_dir.display());
+        eprintln!(
+            "Loading embedding model {} (cache: {})...",
+            model_name,
+            cache_dir.display()
+        );
 
-        let fastembed_model = model_from_name(model_name)
-            .ok_or_else(|| EmbeddingError::Generation(
-                format!("Unknown embedding model: {}", model_name)
-            ))?;
+        let fastembed_model = model_from_name(model_name).ok_or_else(|| {
+            EmbeddingError::Generation(format!("Unknown embedding model: {}", model_name))
+        })?;
 
         let options = InitOptions::new(fastembed_model)
             .with_cache_dir(cache_dir)
             .with_show_download_progress(true);
 
-        let text_embedding = TextEmbedding::try_new(options)
-            .map_err(|e| EmbeddingError::Generation(
-                format!("Failed to load embedding model {}: {}", model_name, e)
-            ))?;
+        let text_embedding = TextEmbedding::try_new(options).map_err(|e| {
+            EmbeddingError::Generation(format!(
+                "Failed to load embedding model {}: {}",
+                model_name, e
+            ))
+        })?;
 
         *guard = Some((model_name.to_string(), text_embedding));
         Ok(())
@@ -116,9 +127,7 @@ impl Default for EmbeddingGenerator {
 /// This reads from a global state that Brain sets on startup.
 /// Falls back to the default if not yet set or lock is poisoned.
 pub fn active_model_name() -> String {
-    let name = ACTIVE_MODEL.lock()
-        .map(|g| g.clone())
-        .unwrap_or_default();
+    let name = ACTIVE_MODEL.lock().map(|g| g.clone()).unwrap_or_default();
 
     if name.is_empty() {
         default_embedding_model()
@@ -206,20 +215,37 @@ mod tests {
     #[test]
     fn model_name_mapping_covers_all() {
         let names = [
-            "AllMiniLML6V2", "AllMiniLML6V2Q",
-            "AllMiniLML12V2", "AllMiniLML12V2Q",
-            "BGEBaseENV15", "BGEBaseENV15Q",
-            "BGELargeENV15", "BGELargeENV15Q",
-            "BGESmallENV15", "BGESmallENV15Q",
+            "AllMiniLML6V2",
+            "AllMiniLML6V2Q",
+            "AllMiniLML12V2",
+            "AllMiniLML12V2Q",
+            "BGEBaseENV15",
+            "BGEBaseENV15Q",
+            "BGELargeENV15",
+            "BGELargeENV15Q",
+            "BGESmallENV15",
+            "BGESmallENV15Q",
             "NomicEmbedTextV1",
-            "NomicEmbedTextV15", "NomicEmbedTextV15Q",
-            "SnowflakeArcticEmbedM", "SnowflakeArcticEmbedMQ",
-            "SnowflakeArcticEmbedL", "SnowflakeArcticEmbedLQ",
-            "MxbaiEmbedLargeV1", "MxbaiEmbedLargeV1Q",
+            "NomicEmbedTextV15",
+            "NomicEmbedTextV15Q",
+            "SnowflakeArcticEmbedM",
+            "SnowflakeArcticEmbedMQ",
+            "SnowflakeArcticEmbedL",
+            "SnowflakeArcticEmbedLQ",
+            "MxbaiEmbedLargeV1",
+            "MxbaiEmbedLargeV1Q",
         ];
         for name in &names {
-            assert!(model_from_name(name).is_some(), "model_from_name should recognize {}", name);
-            assert!(embedding_dimension(name) > 0, "embedding_dimension should be > 0 for {}", name);
+            assert!(
+                model_from_name(name).is_some(),
+                "model_from_name should recognize {}",
+                name
+            );
+            assert!(
+                embedding_dimension(name) > 0,
+                "embedding_dimension should be > 0 for {}",
+                name
+            );
         }
     }
 
@@ -258,8 +284,11 @@ mod tests {
         ];
         for (base, quantized) in &pairs {
             assert_eq!(
-                embedding_dimension(base), embedding_dimension(quantized),
-                "{} and {} should have the same dimension", base, quantized
+                embedding_dimension(base),
+                embedding_dimension(quantized),
+                "{} and {} should have the same dimension",
+                base,
+                quantized
             );
         }
     }

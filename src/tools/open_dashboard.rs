@@ -1,7 +1,7 @@
 //! Tool: open_dashboard — opens the memoryco dashboard in the user's browser.
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::dashboard::{BIND_HOST, resolve_dashboard_port};

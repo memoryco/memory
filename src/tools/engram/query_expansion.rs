@@ -3,17 +3,14 @@
 
 /// English stop words for conversational queries
 const STOP_WORDS: &[&str] = &[
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "what", "when", "where",
-    "which", "who", "whom", "whose", "why", "how", "that", "this",
-    "these", "those", "i", "you", "he", "she", "it", "we", "they",
-    "me", "him", "her", "us", "them", "my", "your", "his", "its",
-    "our", "their", "not", "no", "and", "but", "or", "so", "yet",
-    "for", "from", "if", "in", "into", "of", "on", "to", "up", "with",
-    "at", "by", "about", "after", "before", "between", "during", "than",
-    "too", "very", "just", "also", "am", "out", "over", "own", "same",
-    "still", "then", "under", "until", "again", "once", "only",
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can",
+    "what", "when", "where", "which", "who", "whom", "whose", "why", "how", "that", "this",
+    "these", "those", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us",
+    "them", "my", "your", "his", "its", "our", "their", "not", "no", "and", "but", "or", "so",
+    "yet", "for", "from", "if", "in", "into", "of", "on", "to", "up", "with", "at", "by", "about",
+    "after", "before", "between", "during", "than", "too", "very", "just", "also", "am", "out",
+    "over", "own", "same", "still", "then", "under", "until", "again", "once", "only",
 ];
 
 /// Maximum number of query variants to generate (including original).
@@ -119,35 +116,56 @@ mod tests {
     #[test]
     fn stop_words_stripped() {
         let result = expand_query("What did Caroline research");
-        assert!(result[0] == "What did Caroline research", "Original must be first");
-        assert!(result.contains(&"Caroline research".to_string()),
-            "Stop-word-stripped variant should be present: {:?}", result);
+        assert!(
+            result[0] == "What did Caroline research",
+            "Original must be first"
+        );
+        assert!(
+            result.contains(&"Caroline research".to_string()),
+            "Stop-word-stripped variant should be present: {:?}",
+            result
+        );
         // Level 2 terms should NOT be in expand_query anymore
-        assert!(!result.contains(&"Caroline".to_string()),
-            "Individual terms should not be in primary expansion: {:?}", result);
+        assert!(
+            !result.contains(&"Caroline".to_string()),
+            "Individual terms should not be in primary expansion: {:?}",
+            result
+        );
     }
 
     #[test]
     fn fallback_terms_extracted() {
         let result = fallback_terms("What did Caroline research");
-        assert!(result.contains(&"Caroline".to_string()),
-            "Capitalized name should be extracted: {:?}", result);
-        assert!(result.contains(&"research".to_string()),
-            "4+ char term should be extracted: {:?}", result);
+        assert!(
+            result.contains(&"Caroline".to_string()),
+            "Capitalized name should be extracted: {:?}",
+            result
+        );
+        assert!(
+            result.contains(&"research".to_string()),
+            "4+ char term should be extracted: {:?}",
+            result
+        );
     }
 
     #[test]
     fn fallback_terms_short_words_skipped() {
         // "go" and "run" are 2-3 chars and lowercase — should not be extracted
         let result = fallback_terms("go run far");
-        assert!(result.is_empty(),
-            "Short generic terms should not produce fallback terms: {:?}", result);
+        assert!(
+            result.is_empty(),
+            "Short generic terms should not produce fallback terms: {:?}",
+            result
+        );
     }
 
     #[test]
     fn fallback_terms_single_word_returns_empty() {
         let result = fallback_terms("Caroline");
-        assert!(result.is_empty(), "Single word should not produce fallback terms");
+        assert!(
+            result.is_empty(),
+            "Single word should not produce fallback terms"
+        );
     }
 
     #[test]
@@ -160,7 +178,11 @@ mod tests {
         ];
         for q in queries {
             let result = expand_query(q);
-            assert_eq!(result[0], q, "Original query must always be first for '{}'", q);
+            assert_eq!(
+                result[0], q,
+                "Original query must always be first for '{}'",
+                q
+            );
         }
     }
 
@@ -181,25 +203,41 @@ mod tests {
     #[test]
     fn max_fallback_terms_capped() {
         let result = fallback_terms("Caroline Melanie Brandon Portland Oregon camping hiking");
-        assert!(result.len() <= MAX_VARIANTS,
-            "Should not exceed {} fallback terms, got {}: {:?}", MAX_VARIANTS, result.len(), result);
+        assert!(
+            result.len() <= MAX_VARIANTS,
+            "Should not exceed {} fallback terms, got {}: {:?}",
+            MAX_VARIANTS,
+            result.len(),
+            result
+        );
     }
 
     #[test]
     fn complex_conversational_query() {
         let result = expand_query("When is Melanie planning on going camping");
         assert_eq!(result[0], "When is Melanie planning on going camping");
-        assert!(result.contains(&"Melanie planning going camping".to_string()),
-            "Stop-word-stripped variant should be present: {:?}", result);
+        assert!(
+            result.contains(&"Melanie planning going camping".to_string()),
+            "Stop-word-stripped variant should be present: {:?}",
+            result
+        );
         // Level 2 terms should NOT be here
-        assert_eq!(result.len(), 2, "Should only have original + stripped: {:?}", result);
+        assert_eq!(
+            result.len(),
+            2,
+            "Should only have original + stripped: {:?}",
+            result
+        );
     }
 
     #[test]
     fn possessive_tokens_are_cleaned() {
         let result = expand_query("What is Caroline's relationship status?");
-        assert!(result.contains(&"Caroline relationship status".to_string()),
-            "Possessive should be cleaned in stripped variant: {:?}", result);
+        assert!(
+            result.contains(&"Caroline relationship status".to_string()),
+            "Possessive should be cleaned in stripped variant: {:?}",
+            result
+        );
 
         let fallback = fallback_terms("What is Caroline's relationship status?");
         assert!(fallback.contains(&"Caroline".to_string()));

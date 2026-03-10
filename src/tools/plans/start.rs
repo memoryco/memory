@@ -1,7 +1,7 @@
 //! plan_start - Start a new plan
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -36,12 +36,14 @@ impl Tool<Context> for PlanStartTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let description = args["description"].as_str()
-            .ok_or_else(|| sml_mcps::McpError::InvalidParams("description is required".to_string()))?;
+        let description = args["description"].as_str().ok_or_else(|| {
+            sml_mcps::McpError::InvalidParams("description is required".to_string())
+        })?;
 
         let mut plans = context.plans.lock().unwrap();
-        
-        let id = plans.start(description)
+
+        let id = plans
+            .start(description)
             .map_err(|e| sml_mcps::McpError::ToolError(e.to_string()))?;
 
         Ok(text_response(format!(

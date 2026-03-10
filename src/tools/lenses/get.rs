@@ -1,7 +1,7 @@
 //! lenses_get - Get a lens by name
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, PromptDef, Content};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Content, PromptDef, Tool, ToolEnv};
 
 use crate::Context;
 use crate::lenses::load_lenses;
@@ -38,14 +38,14 @@ impl Tool<Context> for LensesGetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let name = args.get("name")
+        let name = args
+            .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("Missing 'name' parameter".into()))?;
 
         let lenses = load_lenses(&context.lenses_dir);
-        
-        let lens = lenses.into_iter()
-            .find(|l| l.name() == name);
+
+        let lens = lenses.into_iter().find(|l| l.name() == name);
 
         match lens {
             Some(l) => {

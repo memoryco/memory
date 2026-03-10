@@ -1,7 +1,7 @@
 //! reference_list - List loaded reference sources
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -33,7 +33,7 @@ impl Tool<Context> for ReferenceListTool {
     ) -> sml_mcps::Result<CallToolResult> {
         let references = context.references.lock().unwrap();
         let sources = references.sources();
-        
+
         if sources.is_empty() {
             return Ok(text_response(format!(
                 "No reference sources loaded.\n\nTo add sources, place PDF files in: {}/references/",
@@ -45,7 +45,10 @@ impl Tool<Context> for ReferenceListTool {
         for name in &sources {
             // Try to get citation for richer display
             if let Some(citation) = references.get_citation(name) {
-                output.push_str(&format!("• {} - {} ({})\n", name, citation.title, citation.year));
+                output.push_str(&format!(
+                    "• {} - {} ({})\n",
+                    name, citation.title, citation.year
+                ));
             } else {
                 output.push_str(&format!("• {}\n", name));
             }

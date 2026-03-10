@@ -5,8 +5,8 @@
 
 use chrono::NaiveDate;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::lang::{self, TemporalResult};
@@ -61,11 +61,11 @@ impl Tool<Context> for DateResolveTool {
         _context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let reference = parse_reference_date(&args.reference_date)
-            .map_err(|e| McpError::InvalidParams(e))?;
+        let reference =
+            parse_reference_date(&args.reference_date).map_err(|e| McpError::InvalidParams(e))?;
 
         // Detect language and dispatch to the appropriate resolver
         let resolver = lang::resolver_for_text(&args.expression);
@@ -151,7 +151,10 @@ mod tests {
 
     #[test]
     fn parse_iso_date() {
-        assert_eq!(parse_reference_date("2023-05-25").unwrap(), date(2023, 5, 25));
+        assert_eq!(
+            parse_reference_date("2023-05-25").unwrap(),
+            date(2023, 5, 25)
+        );
     }
 
     #[test]
@@ -184,16 +187,31 @@ mod tests {
                 assert_eq!(*d, expected, "Expected {}, got {}", expected, d)
             }
             TemporalResult::Range(s, e, _) => {
-                panic!("Expected single date {}, got range {} to {}", expected, s, e)
+                panic!(
+                    "Expected single date {}, got range {} to {}",
+                    expected, s, e
+                )
             }
         }
     }
 
-    fn assert_date_range(result: &TemporalResult, expected_start: NaiveDate, expected_end: NaiveDate) {
+    fn assert_date_range(
+        result: &TemporalResult,
+        expected_start: NaiveDate,
+        expected_end: NaiveDate,
+    ) {
         match result {
             TemporalResult::Range(s, e, _) => {
-                assert_eq!(*s, expected_start, "Range start: expected {}, got {}", expected_start, s);
-                assert_eq!(*e, expected_end, "Range end: expected {}, got {}", expected_end, e);
+                assert_eq!(
+                    *s, expected_start,
+                    "Range start: expected {}, got {}",
+                    expected_start, s
+                );
+                assert_eq!(
+                    *e, expected_end,
+                    "Range end: expected {}, got {}",
+                    expected_end, e
+                );
             }
             TemporalResult::Date(d, _) => {
                 panic!(
@@ -482,7 +500,10 @@ mod tests {
             date(2023, 6, 30),
             Some("June 2023".to_string()),
         );
-        assert_eq!(format_result(&result), "2023-06-01 to 2023-06-30 (June 2023)");
+        assert_eq!(
+            format_result(&result),
+            "2023-06-01 to 2023-06-30 (June 2023)"
+        );
     }
 
     #[test]

@@ -17,12 +17,13 @@ impl Dsm5Profile {
         Self {
             // Match disorder titles (Title Case followed by newline and "Diagnostic Criteria")
             disorder_pattern: Regex::new(
-                r"(?m)^([A-Z][a-zA-Z\-\s,()]+(?:Disorder|Syndrome|Episode|Specifier))\s*$"
-            ).unwrap(),
-            
+                r"(?m)^([A-Z][a-zA-Z\-\s,()]+(?:Disorder|Syndrome|Episode|Specifier))\s*$",
+            )
+            .unwrap(),
+
             // Match ICD-10 codes (F##.## pattern)
             icd_code_pattern: Regex::new(r"F\d{2}(?:\.\d{1,2})?").unwrap(),
-            
+
             // Standard DSM section headers
             section_headers: vec![
                 ("Diagnostic Criteria", SectionType::DiagnosticCriteria),
@@ -75,17 +76,18 @@ impl DocumentProfile for Dsm5Profile {
 
     fn matches(&self, filename: &str, sample_text: &str) -> bool {
         let filename_lower = filename.to_lowercase();
-        
+
         // Match by filename
-        if filename_lower.contains("dsm") && 
-           (filename_lower.contains("5") || filename_lower.contains("tr")) {
+        if filename_lower.contains("dsm")
+            && (filename_lower.contains("5") || filename_lower.contains("tr"))
+        {
             return true;
         }
 
         // Match by content
-        sample_text.contains("Diagnostic and Statistical Manual") ||
-        sample_text.contains("DSM-5-TR") ||
-        sample_text.contains("American Psychiatric Association")
+        sample_text.contains("Diagnostic and Statistical Manual")
+            || sample_text.contains("DSM-5-TR")
+            || sample_text.contains("American Psychiatric Association")
     }
 
     fn parse_sections(&self, pages: &[PageText]) -> Option<Vec<Section>> {
@@ -99,14 +101,12 @@ impl DocumentProfile for Dsm5Profile {
         let mut sections = Vec::new();
 
         // Find all disorder entries
-        let disorder_matches: Vec<_> = self.disorder_pattern
-            .find_iter(&full_text)
-            .collect();
+        let disorder_matches: Vec<_> = self.disorder_pattern.find_iter(&full_text).collect();
 
         for (i, disorder_match) in disorder_matches.iter().enumerate() {
             let disorder_name = disorder_match.as_str().trim().to_string();
             let start_pos = disorder_match.start();
-            
+
             // End position is either next disorder or end of text
             let end_pos = disorder_matches
                 .get(i + 1)
@@ -135,7 +135,7 @@ impl DocumentProfile for Dsm5Profile {
 
             // Parse subsections within this disorder
             let boundaries = self.find_section_boundaries(disorder_text);
-            
+
             for (j, (pos, header, section_type)) in boundaries.iter().enumerate() {
                 let section_end = boundaries
                     .get(j + 1)

@@ -3,8 +3,8 @@
 //! Row types for database operations. The IdentityItemType enum
 //! represents all valid identity item types.
 
-use diesel::prelude::*;
 use super::schema::identity_items;
+use diesel::prelude::*;
 use std::fmt;
 use std::str::FromStr;
 
@@ -14,7 +14,7 @@ pub enum IdentityItemType {
     // Persona (singular fields)
     PersonaName,
     PersonaDescription,
-    
+
     // List types
     Trait,
     Value,
@@ -32,9 +32,17 @@ impl IdentityItemType {
     pub fn all() -> &'static [IdentityItemType] {
         use IdentityItemType::*;
         &[
-            PersonaName, PersonaDescription,
-            Trait, Value, Preference, Relationship,
-            Antipattern, Expertise, Instruction, Tone, Directive,
+            PersonaName,
+            PersonaDescription,
+            Trait,
+            Value,
+            Preference,
+            Relationship,
+            Antipattern,
+            Expertise,
+            Instruction,
+            Tone,
+            Directive,
         ]
     }
 }
@@ -60,7 +68,7 @@ impl fmt::Display for IdentityItemType {
 
 impl FromStr for IdentityItemType {
     type Err = String;
-    
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "persona_name" => Ok(IdentityItemType::PersonaName),

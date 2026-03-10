@@ -4,8 +4,8 @@
 //! setting up their identity. Always callable — can be used for first-run
 //! onboarding or to refine an existing identity.
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -120,7 +120,8 @@ impl Tool<Context> for IdentitySetupTool {
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
         let mut store = context.identity.lock().unwrap();
-        let identity = store.get()
+        let identity = store
+            .get()
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         let current = identity.render_persona();
@@ -132,7 +133,7 @@ impl Tool<Context> for IdentitySetupTool {
 
 #[cfg(test)]
 mod tests {
-    use crate::identity::{IdentityStore, DieselIdentityStorage};
+    use crate::identity::{DieselIdentityStorage, IdentityStore};
 
     fn test_store() -> IdentityStore {
         let storage = DieselIdentityStorage::in_memory().unwrap();
@@ -145,52 +146,69 @@ mod tests {
         let identity = store.get().unwrap();
         let persona = identity.render_persona();
 
-        assert_eq!(persona, "No identity currently configured",
-            "Fresh store should render as no identity configured");
+        assert_eq!(
+            persona, "No identity currently configured",
+            "Fresh store should render as no identity configured"
+        );
     }
 
     #[test]
     fn setup_populated_shows_persona_without_instructions() {
         let mut store = test_store();
         store.set_persona_name("Porter").unwrap();
-        store.set_persona_description("A pragmatic assistant").unwrap();
+        store
+            .set_persona_description("A pragmatic assistant")
+            .unwrap();
         store.add_instruction("Always do X").unwrap();
 
         let identity = store.get().unwrap();
         let persona = identity.render_persona();
 
-        assert!(persona.contains("Porter"),
-            "Should include persona name");
-        assert!(persona.contains("pragmatic assistant"),
-            "Should include description");
-        assert!(!persona.contains("Always do X"),
-            "Should NOT include instructions");
+        assert!(persona.contains("Porter"), "Should include persona name");
+        assert!(
+            persona.contains("pragmatic assistant"),
+            "Should include description"
+        );
+        assert!(
+            !persona.contains("Always do X"),
+            "Should NOT include instructions"
+        );
     }
 
     #[test]
     fn setup_guide_contains_tool_references() {
         let guide = super::SETUP_PROMPT;
 
-        assert!(guide.contains("identity_set_persona_name"),
-            "Guide must reference persona name tool");
-        assert!(guide.contains("identity_add_relationship"),
-            "Guide must reference relationship tool");
-        assert!(guide.contains("identity_add_trait"),
-            "Guide must reference trait tool");
-        assert!(guide.contains("identity_get"),
-            "Guide must reference identity_get for showing results");
+        assert!(
+            guide.contains("identity_set_persona_name"),
+            "Guide must reference persona name tool"
+        );
+        assert!(
+            guide.contains("identity_add_relationship"),
+            "Guide must reference relationship tool"
+        );
+        assert!(
+            guide.contains("identity_add_trait"),
+            "Guide must reference trait tool"
+        );
+        assert!(
+            guide.contains("identity_get"),
+            "Guide must reference identity_get for showing results"
+        );
     }
 
     #[test]
     fn setup_template_substitution() {
-        let result = super::SETUP_PROMPT.replace(
-            "{{CURRENT_IDENTITY}}",
-            "No identity currently configured"
-        );
+        let result =
+            super::SETUP_PROMPT.replace("{{CURRENT_IDENTITY}}", "No identity currently configured");
 
-        assert!(result.contains("No identity currently configured"),
-            "Template should substitute current identity");
-        assert!(!result.contains("{{CURRENT_IDENTITY}}"),
-            "Template variable should be replaced");
+        assert!(
+            result.contains("No identity currently configured"),
+            "Template should substitute current identity"
+        );
+        assert!(
+            !result.contains("{{CURRENT_IDENTITY}}"),
+            "Template variable should be replaced"
+        );
     }
 }

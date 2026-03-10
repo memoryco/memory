@@ -4,12 +4,12 @@
 //! and splits them into atomic memories. This improves embedding quality
 //! since each child memory represents a single concept.
 
-use super::brain::Brain;
-use super::association::Association;
-use super::engram::MemoryState;
 use super::EngramId;
-use crate::storage::StorageResult;
+use super::association::Association;
+use super::brain::Brain;
+use super::engram::MemoryState;
 use crate::embedding::EmbeddingGenerator;
+use crate::storage::StorageResult;
 
 /// Report returned after decomposition
 #[derive(Debug, Clone)]
@@ -226,14 +226,20 @@ fn split_numbered(content: &str) -> Vec<String> {
     // Try each pattern family and pick the one that yields the most splits
     let patterns: &[&[&str]] = &[
         // (N) pattern
-        &["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)", "(8)", "(9)", "(10)",
-          "(11)", "(12)", "(13)", "(14)", "(15)"],
+        &[
+            "(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)", "(8)", "(9)", "(10)", "(11)", "(12)",
+            "(13)", "(14)", "(15)",
+        ],
         // N) pattern — only match at word boundary
-        &["1)", "2)", "3)", "4)", "5)", "6)", "7)", "8)", "9)", "10)",
-          "11)", "12)", "13)", "14)", "15)"],
+        &[
+            "1)", "2)", "3)", "4)", "5)", "6)", "7)", "8)", "9)", "10)", "11)", "12)", "13)",
+            "14)", "15)",
+        ],
         // N. pattern
-        &["1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.", "10.",
-          "11.", "12.", "13.", "14.", "15."],
+        &[
+            "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.", "10.", "11.", "12.", "13.",
+            "14.", "15.",
+        ],
     ];
 
     let mut best_result: Vec<String> = Vec::new();
@@ -325,7 +331,11 @@ fn find_pattern_position(text: &str, pattern: &str) -> Option<usize> {
         let absolute_pos = search_from + pos;
         // For patterns like "1)", "2." etc, check word boundary
         let needs_boundary = pattern.len() <= 3
-            && pattern.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false);
+            && pattern
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false);
 
         if needs_boundary {
             let at_start = absolute_pos == 0;
@@ -438,7 +448,18 @@ pub fn decompose_compound_memories(brain: &mut Brain) -> StorageResult<Decompose
     // Collect all engrams first to avoid borrow issues
     let engrams: Vec<_> = brain
         .all_engrams()
-        .map(|e| (e.id, e.content.clone(), e.created_at, e.tags.clone(), e.energy, e.state, e.access_count, e.last_accessed))
+        .map(|e| {
+            (
+                e.id,
+                e.content.clone(),
+                e.created_at,
+                e.tags.clone(),
+                e.energy,
+                e.state,
+                e.access_count,
+                e.last_accessed,
+            )
+        })
         .collect();
 
     report.total_scanned = engrams.len();
@@ -484,10 +505,9 @@ pub fn decompose_compound_memories(brain: &mut Brain) -> StorageResult<Decompose
                 report.total_decomposed += 1;
             }
             Err(e) => {
-                report.errors.push(format!(
-                    "Failed to decompose {}: {}",
-                    parent_id, e
-                ));
+                report
+                    .errors
+                    .push(format!("Failed to decompose {}: {}", parent_id, e));
             }
         }
     }
@@ -515,12 +535,7 @@ fn decompose_one(
     // Collect association info before creating children
     let outbound: Vec<(EngramId, f64, Option<u32>)> = brain
         .associations_from(&parent_id)
-        .map(|assocs| {
-            assocs
-                .iter()
-                .map(|a| (a.to, a.weight, a.ordinal))
-                .collect()
-        })
+        .map(|assocs| assocs.iter().map(|a| (a.to, a.weight, a.ordinal)).collect())
         .unwrap_or_default();
 
     let inbound: Vec<(EngramId, f64, Option<u32>)> = brain
@@ -565,10 +580,9 @@ fn decompose_one(
         Ok(embeddings) => {
             for (id, embedding) in child_ids.iter().zip(embeddings.iter()) {
                 if let Err(e) = brain.set_embedding(id, embedding) {
-                    report.errors.push(format!(
-                        "Failed to set embedding for child {}: {}",
-                        id, e
-                    ));
+                    report
+                        .errors
+                        .push(format!("Failed to set embedding for child {}: {}", id, e));
                 }
             }
         }
@@ -667,7 +681,8 @@ mod tests {
 
     #[test]
     fn score_numbered_items() {
-        let content = "Code review: (1) null pointer in auth (2) missing error handling (3) unused import";
+        let content =
+            "Code review: (1) null pointer in auth (2) missing error handling (3) unused import";
         let score = score_compound(content);
         assert_eq!(score.numbered_items, 3);
         assert!(score.total >= DECOMPOSE_THRESHOLD, "score={}", score.total);
@@ -729,7 +744,11 @@ mod tests {
         assert!(children[2].contains("unused import"));
         // Each should have prefix
         for child in &children {
-            assert!(child.contains("Code review findings"), "child='{}' missing prefix", child);
+            assert!(
+                child.contains("Code review findings"),
+                "child='{}' missing prefix",
+                child
+            );
         }
     }
 
@@ -773,7 +792,11 @@ mod tests {
         assert!(children.len() >= 2, "children={:?}", children);
         // Children should include the prefix
         for child in &children {
-            assert!(child.starts_with("Project setup:"), "child='{}' missing prefix", child);
+            assert!(
+                child.starts_with("Project setup:"),
+                "child='{}' missing prefix",
+                child
+            );
         }
     }
 
@@ -808,7 +831,9 @@ mod tests {
         let mut brain = brain_with_sqlite();
 
         let parent_id = brain
-            .create("Findings: (1) null pointer in auth (2) missing error handling (3) unused import")
+            .create(
+                "Findings: (1) null pointer in auth (2) missing error handling (3) unused import",
+            )
             .unwrap();
 
         // Give it an embedding so we can verify it's replaced
@@ -1013,10 +1038,7 @@ mod tests {
 
     #[test]
     fn count_numbered_paren_pattern() {
-        assert_eq!(
-            count_numbered_items("(1) first (2) second (3) third"),
-            3
-        );
+        assert_eq!(count_numbered_items("(1) first (2) second (3) third"), 3);
     }
 
     #[test]
@@ -1105,6 +1127,9 @@ mod tests {
         let found = &text[pos.unwrap()..pos.unwrap() + 2];
         assert_eq!(found, "1)");
         // The position should be at the standalone "1)"
-        assert!(pos.unwrap() > 15, "Should find the standalone 1), not inside 21)");
+        assert!(
+            pos.unwrap() > 15,
+            "Should find the standalone 1), not inside 21)"
+        );
     }
 }

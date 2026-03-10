@@ -205,7 +205,8 @@ mod tests {
 
     #[test]
     fn remove_between_markers_strips_block() {
-        let content = "# Config\n\n<!-- memoryco:start -->\nstuff\n<!-- memoryco:end -->\n\n# Other\n";
+        let content =
+            "# Config\n\n<!-- memoryco:start -->\nstuff\n<!-- memoryco:end -->\n\n# Other\n";
         let result = remove_between_markers(content);
 
         assert!(!result.contains(MARKER_START));

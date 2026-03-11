@@ -632,6 +632,30 @@ impl Brain {
                 config.query_expansion_enabled = value != 0.0;
                 true
             }
+            "llm_rerank_candidates" => {
+                config.llm_rerank_candidates = value.clamp(1.0, 100.0) as usize;
+                true
+            }
+            "search_min_score" => {
+                config.search_min_score = value.clamp(0.0, 1.0);
+                true
+            }
+            "composite_limit_min" => {
+                config.composite_limit_min = value.clamp(1.0, 100.0) as usize;
+                true
+            }
+            "composite_limit_max" => {
+                config.composite_limit_max = value.clamp(1.0, 200.0) as usize;
+                true
+            }
+            "association_cap_min" => {
+                config.association_cap_min = value.clamp(1.0, 50.0) as usize;
+                true
+            }
+            "association_cap_max" => {
+                config.association_cap_max = value.clamp(1.0, 50.0) as usize;
+                true
+            }
             _ => false,
         };
 

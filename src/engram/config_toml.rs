@@ -103,6 +103,12 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         rerank_candidates: get_usize!(rerank_candidates),
         hybrid_search_enabled: get_bool!(hybrid_search_enabled),
         query_expansion_enabled: get_bool!(query_expansion_enabled),
+        llm_rerank_candidates: get_usize!(llm_rerank_candidates),
+        search_min_score: get_f64!(search_min_score),
+        composite_limit_min: get_usize!(composite_limit_min),
+        composite_limit_max: get_usize!(composite_limit_max),
+        association_cap_min: get_usize!(association_cap_min),
+        association_cap_max: get_usize!(association_cap_max),
         // Runtime state — not stored in TOML
         embedding_model_active: defaults.embedding_model_active,
         // Rarely-changed fields — keep defaults (can be set manually in TOML if needed)
@@ -217,6 +223,24 @@ hybrid_search_enabled = {hybrid_search_enabled}
 
 # Expand queries with variant phrasings before retrieval.
 query_expansion_enabled = {query_expansion_enabled}
+
+# Candidates for LLM rerank stage. Tied to llm_context_length: at 2048 → ~20, at 4096 → 30-40.
+llm_rerank_candidates = {llm_rerank_candidates}
+
+# Default minimum similarity score (0.0-1.0). Used when caller doesn't specify.
+search_min_score = {search_min_score}
+
+# Minimum result limit for list-style queries (e.g. "what activities does X do").
+composite_limit_min = {composite_limit_min}
+
+# Maximum result limit for list-style queries.
+composite_limit_max = {composite_limit_max}
+
+# Minimum association discoveries to merge into search results.
+association_cap_min = {association_cap_min}
+
+# Maximum association discoveries to merge into search results.
+association_cap_max = {association_cap_max}
 "#,
         decay_rate_per_day = d.decay_rate_per_day,
         decay_interval_hours = d.decay_interval_hours,
@@ -232,6 +256,12 @@ query_expansion_enabled = {query_expansion_enabled}
         rerank_candidates = d.rerank_candidates,
         hybrid_search_enabled = d.hybrid_search_enabled,
         query_expansion_enabled = d.query_expansion_enabled,
+        llm_rerank_candidates = d.llm_rerank_candidates,
+        search_min_score = d.search_min_score,
+        composite_limit_min = d.composite_limit_min,
+        composite_limit_max = d.composite_limit_max,
+        association_cap_min = d.association_cap_min,
+        association_cap_max = d.association_cap_max,
     )
 }
 
@@ -285,6 +315,12 @@ rerank_mode = "off"
 rerank_candidates = 50
 hybrid_search_enabled = false
 query_expansion_enabled = false
+llm_rerank_candidates = 35
+search_min_score = 0.25
+composite_limit_min = 20
+composite_limit_max = 40
+association_cap_min = 8
+association_cap_max = 16
 "#;
         std::fs::write(dir.path().join("config.toml"), toml).unwrap();
         let config = load_config_from_toml(dir.path());
@@ -303,6 +339,12 @@ query_expansion_enabled = false
         assert_eq!(config.rerank_candidates, 50);
         assert!(!config.hybrid_search_enabled);
         assert!(!config.query_expansion_enabled);
+        assert_eq!(config.llm_rerank_candidates, 35);
+        assert!((config.search_min_score - 0.25).abs() < f64::EPSILON);
+        assert_eq!(config.composite_limit_min, 20);
+        assert_eq!(config.composite_limit_max, 40);
+        assert_eq!(config.association_cap_min, 8);
+        assert_eq!(config.association_cap_max, 16);
     }
 
     #[test]

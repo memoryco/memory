@@ -119,6 +119,32 @@ pub struct Config {
     /// and runs each through the full retrieval pipeline before merging.
     #[serde(default = "default_query_expansion_enabled")]
     pub query_expansion_enabled: bool,
+
+    /// Maximum candidates fed to the LLM in "llm" rerank mode.
+    /// Separate from rerank_candidates because LLM is context-length constrained.
+    #[serde(default = "default_llm_rerank_candidates")]
+    pub llm_rerank_candidates: usize,
+
+    /// Server-side default minimum similarity score (0.0-1.0).
+    /// Used when caller doesn't specify min_score.
+    #[serde(default = "default_search_min_score")]
+    pub search_min_score: f64,
+
+    /// Minimum effective_limit for composite/list-style queries.
+    #[serde(default = "default_composite_limit_min")]
+    pub composite_limit_min: usize,
+
+    /// Maximum effective_limit for composite/list-style queries.
+    #[serde(default = "default_composite_limit_max")]
+    pub composite_limit_max: usize,
+
+    /// Minimum association discoveries to merge into search results.
+    #[serde(default = "default_association_cap_min")]
+    pub association_cap_min: usize,
+
+    /// Maximum association discoveries to merge into search results.
+    #[serde(default = "default_association_cap_max")]
+    pub association_cap_max: usize,
 }
 
 fn default_max_tag_cardinality() -> usize {
@@ -161,6 +187,30 @@ fn default_query_expansion_enabled() -> bool {
     true
 }
 
+fn default_llm_rerank_candidates() -> usize {
+    20
+}
+
+fn default_search_min_score() -> f64 {
+    0.3
+}
+
+fn default_composite_limit_min() -> usize {
+    15
+}
+
+fn default_composite_limit_max() -> usize {
+    30
+}
+
+fn default_association_cap_min() -> usize {
+    5
+}
+
+fn default_association_cap_max() -> usize {
+    12
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -190,6 +240,12 @@ impl Default for Config {
             rerank_candidates: 30,
             hybrid_search_enabled: true,
             query_expansion_enabled: true,
+            llm_rerank_candidates: 20,
+            search_min_score: 0.3,
+            composite_limit_min: 15,
+            composite_limit_max: 30,
+            association_cap_min: 5,
+            association_cap_max: 12,
         }
     }
 }

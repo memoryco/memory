@@ -26,7 +26,8 @@ impl Tool<Context> for ConfigSetTool {
          propagation_damping, hebbian_learning_rate, recall_strength, \
          search_follow_associations, search_association_depth, embedding_model, \
          rerank_mode, rerank_candidates, hybrid_search_enabled, \
-         query_expansion_enabled"
+         query_expansion_enabled, llm_rerank_candidates, search_min_score, \
+         composite_limit_min, composite_limit_max, association_cap_min, association_cap_max"
     }
 
     fn schema(&self) -> JsonValue {
@@ -47,7 +48,13 @@ impl Tool<Context> for ConfigSetTool {
                         "rerank_mode",
                         "rerank_candidates",
                         "hybrid_search_enabled",
-                        "query_expansion_enabled"
+                        "query_expansion_enabled",
+                        "llm_rerank_candidates",
+                        "search_min_score",
+                        "composite_limit_min",
+                        "composite_limit_max",
+                        "association_cap_min",
+                        "association_cap_max"
                     ],
                     "description": "Configuration key to update."
                 },
@@ -154,7 +161,15 @@ impl Tool<Context> for ConfigSetTool {
         ];
 
         // Integer keys
-        let int_keys = ["search_association_depth", "rerank_candidates"];
+        let int_keys = [
+            "search_association_depth",
+            "rerank_candidates",
+            "llm_rerank_candidates",
+            "composite_limit_min",
+            "composite_limit_max",
+            "association_cap_min",
+            "association_cap_max",
+        ];
 
         // All other keys are numeric (booleans accepted as true/false/0/1 in any form)
         let value = args

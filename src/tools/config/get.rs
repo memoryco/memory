@@ -47,7 +47,13 @@ impl Tool<Context> for ConfigGetTool {
              rerank_mode: {} (reranking mode: off, cross-encoder, or llm)\n\
              rerank_candidates: {} (candidates for re-ranking pass)\n\
              hybrid_search_enabled: {} (BM25+vector fusion via RRF)\n\
-             query_expansion_enabled: {} (expand queries with variants before retrieval)",
+             query_expansion_enabled: {} (expand queries with variants before retrieval)\n\
+             llm_rerank_candidates: {} (candidate cap for LLM rerank stage)\n\
+             search_min_score: {:.2} (default minimum similarity score)\n\
+             composite_limit_min: {} (minimum result limit for list-style queries)\n\
+             composite_limit_max: {} (maximum result limit for list-style queries)\n\
+             association_cap_min: {} (minimum association discoveries to merge)\n\
+             association_cap_max: {} (maximum association discoveries to merge)",
             config.decay_rate_per_day,
             config.decay_rate_per_day * 100.0,
             config.decay_interval_hours,
@@ -61,7 +67,13 @@ impl Tool<Context> for ConfigGetTool {
             config.rerank_mode,
             config.rerank_candidates,
             config.hybrid_search_enabled,
-            config.query_expansion_enabled
+            config.query_expansion_enabled,
+            config.llm_rerank_candidates,
+            config.search_min_score,
+            config.composite_limit_min,
+            config.composite_limit_max,
+            config.association_cap_min,
+            config.association_cap_max
         );
 
         Ok(text_response(output))

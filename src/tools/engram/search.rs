@@ -230,18 +230,10 @@ impl Tool<Context> for EngramSearchTool {
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let limit = args.limit.unwrap_or(10);
-        let min_score = args.min_score.unwrap_or(0.4);
         let include_deep = args.include_deep.unwrap_or(false);
         let include_archived = args.include_archived.unwrap_or(false);
         let composite_query = is_composite_query(&args.query);
         let inferential_query = is_inferential_query(&args.query);
-
-        // List/composite questions often need more context than the nominal limit.
-        let effective_limit = if composite_query {
-            limit.max(15).min(30)
-        } else {
-            limit
-        };
 
         let (
             follow_associations,
@@ -250,6 +242,12 @@ impl Tool<Context> for EngramSearchTool {
             rerank_candidates,
             hybrid_search_enabled,
             query_expansion_enabled,
+            llm_rerank_candidates,
+            search_min_score_config,
+            composite_limit_min,
+            composite_limit_max,
+            association_cap_min,
+            association_cap_max,
         ) = {
             // Phase 0: brief write lock for maintenance + config snapshot.
             // Drop the write lock before expensive embedding generation so enrichment
@@ -268,8 +266,23 @@ impl Tool<Context> for EngramSearchTool {
                 brain.config().rerank_candidates,
                 brain.config().hybrid_search_enabled,
                 brain.config().query_expansion_enabled,
+                brain.config().llm_rerank_candidates,
+                brain.config().search_min_score,
+                brain.config().composite_limit_min,
+                brain.config().composite_limit_max,
+                brain.config().association_cap_min,
+                brain.config().association_cap_max,
             )
         }; // write lock released here
+
+        let min_score = args.min_score.unwrap_or(search_min_score_config as f32);
+
+        // List/composite questions often need more context than the nominal limit.
+        let effective_limit = if composite_query {
+            limit.max(composite_limit_min).min(composite_limit_max)
+        } else {
+            limit
+        };
 
         // Query expansion: generate variant queries
         let variants = if query_expansion_enabled {
@@ -552,8 +565,8 @@ impl Tool<Context> for EngramSearchTool {
         match rerank_mode.as_str() {
             "llm" => {
                 if !scored.is_empty() && context.llm.available() && context.llm.tier() >= LlmTier::Minimal {
-                    // Cap candidates at 20 to fit in context window
-                    let cap = 20.min(scored.len());
+                    // Cap candidates to fit in context window
+                    let cap = llm_rerank_candidates.min(scored.len());
                     let contents: Vec<String> = scored[..cap].iter().map(|r| r.content.clone()).collect();
                     let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
 
@@ -657,7 +670,7 @@ impl Tool<Context> for EngramSearchTool {
             // Scale the cap with requested limit so list/multi-hop questions
             // can merge more associated clues.
             association_discovery_count = discoveries.len();
-            let association_cap = effective_limit.clamp(5, 12);
+            let association_cap = effective_limit.clamp(association_cap_min, association_cap_max);
             let capped: Vec<_> = {
                 let mut sorted = discoveries;
                 sorted.sort_by(|a, b| {

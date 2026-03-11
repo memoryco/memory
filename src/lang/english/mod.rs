@@ -8,13 +8,13 @@
 //! To add a new capability, create a new file in this directory and
 //! wire it into the `LanguageSupport` impl below.
 
-pub(crate) mod temporal;
-pub(crate) mod parsing;
 #[cfg(test)]
 mod bench_cases;
+pub(crate) mod parsing;
+pub(crate) mod temporal;
 
+use super::{Language, LanguageSupport, TemporalResult};
 use chrono::{NaiveDate, Weekday};
-use super::{LanguageSupport, Language, TemporalResult};
 
 /// English language resolver. Stateless unit struct.
 pub struct English;

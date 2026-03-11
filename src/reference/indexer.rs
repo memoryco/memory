@@ -14,7 +14,10 @@ pub struct Indexer<'a> {
 
 impl<'a> Indexer<'a> {
     pub fn new(extractor: &'a dyn PdfExtractor, profiles: &'a ProfileRegistry) -> Self {
-        Self { extractor, profiles }
+        Self {
+            extractor,
+            profiles,
+        }
     }
 
     /// Build an index for a PDF file.
@@ -32,10 +35,7 @@ impl<'a> Indexer<'a> {
         }
 
         // Try to find a matching profile
-        let filename = pdf_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let filename = pdf_path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let sample_text = self.extractor.extract_sample(pdf_path)?;
         let profile = self.profiles.find_profile(filename, &sample_text);
 
@@ -66,14 +66,8 @@ impl<'a> Indexer<'a> {
         }
 
         // Check modification times
-        let pdf_modified = pdf_path
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok();
-        let index_modified = index_path
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok();
+        let pdf_modified = pdf_path.metadata().and_then(|m| m.modified()).ok();
+        let index_modified = index_path.metadata().and_then(|m| m.modified()).ok();
 
         match (pdf_modified, index_modified) {
             (Some(pdf_time), Some(index_time)) => index_time >= pdf_time,
@@ -152,9 +146,8 @@ fn index_sections(conn: &Connection, sections: &[Section], profile_id: &str) -> 
         "#,
     )?;
 
-    let mut insert_fts = conn.prepare(
-        "INSERT INTO fts (rowid, title, content, codes) VALUES (?1, ?2, ?3, ?4)",
-    )?;
+    let mut insert_fts =
+        conn.prepare("INSERT INTO fts (rowid, title, content, codes) VALUES (?1, ?2, ?3, ?4)")?;
 
     for section in sections {
         let codes_json = serde_json::to_string(&section.codes).unwrap_or_default();
@@ -189,13 +182,11 @@ fn index_pages(conn: &Connection, pages: &[PageText]) -> Result<()> {
         [],
     )?;
 
-    let mut insert_page = conn.prepare(
-        "INSERT INTO pages (page_number, content) VALUES (?1, ?2)",
-    )?;
+    let mut insert_page =
+        conn.prepare("INSERT INTO pages (page_number, content) VALUES (?1, ?2)")?;
 
-    let mut insert_fts = conn.prepare(
-        "INSERT INTO fts (rowid, title, content, codes) VALUES (?1, ?2, ?3, ?4)",
-    )?;
+    let mut insert_fts =
+        conn.prepare("INSERT INTO fts (rowid, title, content, codes) VALUES (?1, ?2, ?3, ?4)")?;
 
     for page in pages {
         insert_page.execute(rusqlite::params![page.page_number, page.text])?;

@@ -37,8 +37,7 @@ pub fn ensure_registered(memory_home: &Path) {
 }
 
 fn try_ensure_registered(memory_home: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    let registry_path = get_registry_path()
-        .ok_or("Could not determine home directory")?;
+    let registry_path = get_registry_path().ok_or("Could not determine home directory")?;
     try_register_at(&registry_path, memory_home)
 }
 
@@ -139,7 +138,11 @@ pub fn prune_dead_homes() -> usize {
     let existing: Vec<String> = doc
         .get("homes")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
 
     let live: Vec<String> = existing
@@ -180,7 +183,10 @@ mod tests {
         let doc: DocumentMut = content.parse().unwrap();
         let homes = doc["homes"].as_array().unwrap();
         assert_eq!(homes.len(), 1);
-        assert_eq!(homes.get(0).unwrap().as_str().unwrap(), memory_home.to_string_lossy());
+        assert_eq!(
+            homes.get(0).unwrap().as_str().unwrap(),
+            memory_home.to_string_lossy()
+        );
     }
 
     #[test]
@@ -236,7 +242,10 @@ mod tests {
         let doc: DocumentMut = content.parse().unwrap();
         let homes = doc["homes"].as_array().unwrap();
         assert_eq!(homes.len(), 1, "Dead path should have been pruned");
-        assert_eq!(homes.get(0).unwrap().as_str().unwrap(), live_home.to_string_lossy());
+        assert_eq!(
+            homes.get(0).unwrap().as_str().unwrap(),
+            live_home.to_string_lossy()
+        );
     }
 
     #[test]
@@ -249,9 +258,13 @@ mod tests {
 
         // Temporarily set the env var
         // Safety: single-threaded test, no concurrent env access
-        unsafe { std::env::set_var("MEMORYCO_NO_REGISTER", "1"); }
+        unsafe {
+            std::env::set_var("MEMORYCO_NO_REGISTER", "1");
+        }
         ensure_registered(&memory_home);
-        unsafe { std::env::remove_var("MEMORYCO_NO_REGISTER"); }
+        unsafe {
+            std::env::remove_var("MEMORYCO_NO_REGISTER");
+        }
 
         // Registry should NOT exist because we bailed early
         let registry_path = get_registry_path().unwrap();
@@ -298,7 +311,13 @@ mod tests {
         let registry_path = tmp.path().join("registry.toml");
 
         // Simulate a bench path that actually exists on disk
-        let bench_dir = tmp.path().join("memoryco").join("bench").join("results").join("run_123").join("memory_conv-26");
+        let bench_dir = tmp
+            .path()
+            .join("memoryco")
+            .join("bench")
+            .join("results")
+            .join("run_123")
+            .join("memory_conv-26");
         std::fs::create_dir_all(&bench_dir).unwrap();
         let bench_str = bench_dir.to_string_lossy().to_string();
 
@@ -311,8 +330,15 @@ mod tests {
         let content = std::fs::read_to_string(&registry_path).unwrap();
         let doc: DocumentMut = content.parse().unwrap();
         let homes = doc["homes"].as_array().unwrap();
-        assert_eq!(homes.len(), 1, "Bench path should be pruned even though it exists");
-        assert_eq!(homes.get(0).unwrap().as_str().unwrap(), live_home.to_string_lossy());
+        assert_eq!(
+            homes.len(),
+            1,
+            "Bench path should be pruned even though it exists"
+        );
+        assert_eq!(
+            homes.get(0).unwrap().as_str().unwrap(),
+            live_home.to_string_lossy()
+        );
     }
 
     #[test]

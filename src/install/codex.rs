@@ -10,9 +10,9 @@
 //! MEMORY_HOME = "~/.memoryco"
 //! ```
 
-use super::{McpClient, InstallStatus, InstallError, memoryco_server_entry};
+use super::{InstallError, InstallStatus, McpClient, memoryco_server_entry};
 use std::path::PathBuf;
-use toml_edit::{DocumentMut, Item, Table, Array, value};
+use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 /// OpenAI Codex MCP client.
 pub struct CodexClient {
@@ -33,7 +33,8 @@ impl CodexClient {
         if contents.trim().is_empty() {
             return Ok(DocumentMut::new());
         }
-        contents.parse::<DocumentMut>()
+        contents
+            .parse::<DocumentMut>()
             .map_err(|e| InstallError::Parse(format!("{}: {}", self.config_path.display(), e)))
     }
 
@@ -76,10 +77,7 @@ impl McpClient for CodexClient {
         };
 
         let (our_command, _, _) = memoryco_server_entry();
-        let their_command = entry
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let their_command = entry.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
         if their_command == our_command {
             InstallStatus::Installed
@@ -160,7 +158,16 @@ mod tests {
 
         let entry = doc["mcp_servers"]["memory"].as_table().unwrap();
         assert!(entry.get("command").unwrap().as_str().is_some());
-        assert_eq!(entry["args"].as_array().unwrap().get(0).unwrap().as_str().unwrap(), "serve");
+        assert_eq!(
+            entry["args"]
+                .as_array()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "serve"
+        );
     }
 
     #[test]
@@ -218,7 +225,13 @@ command = "other"
         let contents = std::fs::read_to_string(client.config_path()).unwrap();
         let doc: DocumentMut = contents.parse().unwrap();
 
-        assert!(doc["mcp_servers"].as_table().unwrap().get("memory").is_none());
+        assert!(
+            doc["mcp_servers"]
+                .as_table()
+                .unwrap()
+                .get("memory")
+                .is_none()
+        );
         assert!(doc["mcp_servers"]["other"].as_table().is_some());
     }
 }

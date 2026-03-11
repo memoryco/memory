@@ -15,9 +15,9 @@
 //! During migration, both files exist. Once migration is complete,
 //! `date_resolve.rs` becomes a thin tool wrapper that delegates here.
 
-use chrono::{Datelike, NaiveDate, Weekday, Duration};
 use super::parsing;
 use crate::lang::TemporalResult;
+use chrono::{Datelike, Duration, NaiveDate, Weekday};
 
 /// Resolve an English temporal expression against a reference date.
 pub fn resolve(expression: &str, reference: NaiveDate) -> Result<TemporalResult, String> {
@@ -25,7 +25,12 @@ pub fn resolve(expression: &str, reference: NaiveDate) -> Result<TemporalResult,
 
     // Simple literals
     match expr.as_str() {
-        "today" => return Ok(TemporalResult::Date(reference, Some(parsing::day_name(reference)))),
+        "today" => {
+            return Ok(TemporalResult::Date(
+                reference,
+                Some(parsing::day_name(reference)),
+            ));
+        }
         "yesterday" => {
             let d = reference - Duration::days(1);
             return Ok(TemporalResult::Date(d, Some(parsing::day_name(d))));
@@ -114,7 +119,10 @@ fn try_in_n_units(expr: &str, reference: NaiveDate) -> Option<Result<TemporalRes
 }
 
 /// Match "last/next/this [weekday]"
-fn try_relative_weekday(expr: &str, reference: NaiveDate) -> Option<Result<TemporalResult, String>> {
+fn try_relative_weekday(
+    expr: &str,
+    reference: NaiveDate,
+) -> Option<Result<TemporalResult, String>> {
     let (direction, rest) = split_direction(expr)?;
     let weekday = parsing::weekday_name(rest)?;
 
@@ -165,7 +173,11 @@ fn try_relative_period(expr: &str, reference: NaiveDate) -> Option<Result<Tempor
                 "this" => month_range(reference.year(), reference.month()),
                 _ => return None,
             };
-            let label = format!("{} {}", parsing::month_name_from_number(start.month()), start.year());
+            let label = format!(
+                "{} {}",
+                parsing::month_name_from_number(start.month()),
+                start.year()
+            );
             Some(Ok(TemporalResult::Range(start, end, Some(label))))
         }
         "year" => {
@@ -185,7 +197,10 @@ fn try_relative_period(expr: &str, reference: NaiveDate) -> Option<Result<Tempor
 }
 
 /// Match "the [weekday] before/after [date]" or "the [weekday] before/after"
-fn try_weekday_before_after(expr: &str, reference: NaiveDate) -> Option<Result<TemporalResult, String>> {
+fn try_weekday_before_after(
+    expr: &str,
+    reference: NaiveDate,
+) -> Option<Result<TemporalResult, String>> {
     let rest = expr.strip_prefix("the ")?;
     let parts: Vec<&str> = rest.splitn(3, ' ').collect();
     if parts.len() < 2 {
@@ -221,7 +236,10 @@ fn try_weekday_before_after(expr: &str, reference: NaiveDate) -> Option<Result<T
 }
 
 /// Match "the week/month before/after [date]" or "the week/month before/after"
-fn try_period_before_after(expr: &str, reference: NaiveDate) -> Option<Result<TemporalResult, String>> {
+fn try_period_before_after(
+    expr: &str,
+    reference: NaiveDate,
+) -> Option<Result<TemporalResult, String>> {
     let rest = expr.strip_prefix("the ")?;
     let parts: Vec<&str> = rest.splitn(3, ' ').collect();
     if parts.len() < 2 {
@@ -258,13 +276,21 @@ fn try_period_before_after(expr: &str, reference: NaiveDate) -> Option<Result<Te
         ("month", "before") => {
             let d = add_months(anchor, -1)?;
             let (start, end) = month_range(d.year(), d.month());
-            let label = format!("{} {}", parsing::month_name_from_number(start.month()), start.year());
+            let label = format!(
+                "{} {}",
+                parsing::month_name_from_number(start.month()),
+                start.year()
+            );
             Some(Ok(TemporalResult::Range(start, end, Some(label))))
         }
         ("month", "after") => {
             let d = add_months(anchor, 1)?;
             let (start, end) = month_range(d.year(), d.month());
-            let label = format!("{} {}", parsing::month_name_from_number(start.month()), start.year());
+            let label = format!(
+                "{} {}",
+                parsing::month_name_from_number(start.month()),
+                start.year()
+            );
             Some(Ok(TemporalResult::Range(start, end, Some(label))))
         }
         _ => None,
@@ -272,7 +298,10 @@ fn try_period_before_after(expr: &str, reference: NaiveDate) -> Option<Result<Te
 }
 
 /// Match weekend patterns.
-fn try_weekend_patterns(expr: &str, reference: NaiveDate) -> Option<Result<TemporalResult, String>> {
+fn try_weekend_patterns(
+    expr: &str,
+    reference: NaiveDate,
+) -> Option<Result<TemporalResult, String>> {
     if let Some(result) = try_n_weekends_before_after(expr, reference) {
         return Some(result);
     }
@@ -283,7 +312,10 @@ fn try_weekend_patterns(expr: &str, reference: NaiveDate) -> Option<Result<Tempo
 }
 
 /// Match "weekend before/after [date]" and "X weekends before/after [date]".
-fn try_n_weekends_before_after(expr: &str, reference: NaiveDate) -> Option<Result<TemporalResult, String>> {
+fn try_n_weekends_before_after(
+    expr: &str,
+    reference: NaiveDate,
+) -> Option<Result<TemporalResult, String>> {
     let rest = expr.strip_prefix("the ").unwrap_or(expr);
     let parts: Vec<&str> = rest.split_whitespace().collect();
     let dir_idx = parts.iter().position(|p| *p == "before" || *p == "after")?;
@@ -347,7 +379,12 @@ fn try_nth_weekend_of_month(expr: &str) -> Option<Result<TemporalResult, String>
     Some(Ok(TemporalResult::Range(
         start,
         end,
-        Some(format!("{} weekend of {} {}", ordinal, parsing::month_name_from_number(month), year)),
+        Some(format!(
+            "{} weekend of {} {}",
+            ordinal,
+            parsing::month_name_from_number(month),
+            year
+        )),
     )))
 }
 
@@ -586,9 +623,14 @@ mod tests {
 
     fn assert_date(result: &TemporalResult, expected: NaiveDate) {
         match result {
-            TemporalResult::Date(d, _) => assert_eq!(*d, expected, "Expected {}, got {}", expected, d),
+            TemporalResult::Date(d, _) => {
+                assert_eq!(*d, expected, "Expected {}, got {}", expected, d)
+            }
             TemporalResult::Range(s, e, _) => {
-                panic!("Expected single date {}, got range {} to {}", expected, s, e)
+                panic!(
+                    "Expected single date {}, got range {} to {}",
+                    expected, s, e
+                )
             }
         }
     }
@@ -596,11 +638,22 @@ mod tests {
     fn assert_range(result: &TemporalResult, expected_start: NaiveDate, expected_end: NaiveDate) {
         match result {
             TemporalResult::Range(s, e, _) => {
-                assert_eq!(*s, expected_start, "Range start: expected {}, got {}", expected_start, s);
-                assert_eq!(*e, expected_end, "Range end: expected {}, got {}", expected_end, e);
+                assert_eq!(
+                    *s, expected_start,
+                    "Range start: expected {}, got {}",
+                    expected_start, s
+                );
+                assert_eq!(
+                    *e, expected_end,
+                    "Range end: expected {}, got {}",
+                    expected_end, e
+                );
             }
             TemporalResult::Date(d, _) => {
-                panic!("Expected range {} to {}, got single date {}", expected_start, expected_end, d)
+                panic!(
+                    "Expected range {} to {}, got single date {}",
+                    expected_start, expected_end, d
+                )
             }
         }
     }

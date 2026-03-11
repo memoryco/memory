@@ -1,7 +1,7 @@
 //! config_get - Get current configuration
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;

@@ -29,10 +29,10 @@
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
-    use crate::lang::english::temporal;
-    use crate::lang::english::parsing;
     use crate::lang::TemporalResult;
+    use crate::lang::english::parsing;
+    use crate::lang::english::temporal;
+    use chrono::NaiveDate;
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).unwrap()
@@ -44,16 +44,15 @@ mod tests {
                 assert_eq!(*d, expected, "Expected {}, got {}", expected, d)
             }
             TemporalResult::Range(s, e, _) => {
-                panic!("Expected single date {}, got range {} to {}", expected, s, e)
+                panic!(
+                    "Expected single date {}, got range {} to {}",
+                    expected, s, e
+                )
             }
         }
     }
 
-    fn assert_range(
-        result: &TemporalResult,
-        expected_start: NaiveDate,
-        expected_end: NaiveDate,
-    ) {
+    fn assert_range(result: &TemporalResult, expected_start: NaiveDate, expected_end: NaiveDate) {
         match result {
             TemporalResult::Range(s, e, _) => {
                 assert_eq!(
@@ -99,8 +98,7 @@ mod tests {
     // Also test the gold's phrasing to document what IT resolves to
     #[test]
     fn bench_case_01_gold_phrasing_sunday_before() {
-        let result =
-            temporal::resolve("the sunday before 2023-05-25", date(2023, 5, 25)).unwrap();
+        let result = temporal::resolve("the sunday before 2023-05-25", date(2023, 5, 25)).unwrap();
         assert_date(&result, date(2023, 5, 21)); // Sunday, May 21
     }
 
@@ -197,8 +195,7 @@ mod tests {
     #[test]
     fn bench_case_07_roadtrip_weekend_before() {
         let result =
-            temporal::resolve("the weekend before 20 October 2023", date(2023, 10, 25))
-                .unwrap();
+            temporal::resolve("the weekend before 20 October 2023", date(2023, 10, 25)).unwrap();
         assert_range(&result, date(2023, 10, 14), date(2023, 10, 15));
     }
 
@@ -215,8 +212,7 @@ mod tests {
 
     #[test]
     fn bench_case_09_veterans_party_friday_before() {
-        let result =
-            temporal::resolve("the friday before 20 May 2023", date(2023, 5, 25)).unwrap();
+        let result = temporal::resolve("the friday before 20 May 2023", date(2023, 5, 25)).unwrap();
         assert_date(&result, date(2023, 5, 19));
     }
 
@@ -240,8 +236,7 @@ mod tests {
 
     #[test]
     fn bench_case_11_firefighter_sunday_before() {
-        let result =
-            temporal::resolve("the sunday before 3 July 2023", date(2023, 7, 10)).unwrap();
+        let result = temporal::resolve("the sunday before 3 July 2023", date(2023, 7, 10)).unwrap();
         assert_date(&result, date(2023, 7, 2));
     }
 
@@ -258,8 +253,7 @@ mod tests {
 
     #[test]
     fn bench_case_12_charity_run_first_weekend() {
-        let result =
-            temporal::resolve("first weekend of August 2023", date(2023, 8, 10)).unwrap();
+        let result = temporal::resolve("first weekend of August 2023", date(2023, 8, 10)).unwrap();
         assert_range(&result, date(2023, 8, 5), date(2023, 8, 6));
     }
 }

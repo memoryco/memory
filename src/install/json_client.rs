@@ -7,8 +7,8 @@
 //!
 //! Covers: Claude Desktop, Claude Code, Cursor, Windsurf, VS Code (Copilot).
 
-use super::{McpClient, InstallStatus, InstallError, memoryco_server_entry};
-use serde_json::{json, Map, Value};
+use super::{InstallError, InstallStatus, McpClient, memoryco_server_entry};
+use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 
 /// An MCP client that uses JSON configuration files.
@@ -26,7 +26,11 @@ pub struct JsonClient {
 }
 
 impl JsonClient {
-    pub fn new(name: impl Into<String>, config_path: PathBuf, servers_key: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        config_path: PathBuf,
+        servers_key: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             config_path,
@@ -69,9 +73,7 @@ impl JsonClient {
 
     /// Get the memory entry from the config, if it exists.
     fn get_memory_entry<'a>(&self, config: &'a Value) -> Option<&'a Value> {
-        config
-            .get(&self.servers_key)?
-            .get("memory")
+        config.get(&self.servers_key)?.get("memory")
     }
 
     /// Build the JSON value for our server entry.
@@ -144,7 +146,8 @@ impl McpClient for JsonClient {
         let entry = self.build_entry();
 
         // Ensure the top-level object exists
-        let obj = config.as_object_mut()
+        let obj = config
+            .as_object_mut()
             .ok_or_else(|| InstallError::Parse("Config is not a JSON object".to_string()))?;
 
         // Ensure the servers key exists
@@ -156,9 +159,9 @@ impl McpClient for JsonClient {
         let servers = obj
             .get_mut(&self.servers_key)
             .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| InstallError::Parse(
-                format!("'{}' is not a JSON object", self.servers_key)
-            ))?;
+            .ok_or_else(|| {
+                InstallError::Parse(format!("'{}' is not a JSON object", self.servers_key))
+            })?;
 
         servers.insert("memory".to_string(), entry);
 
@@ -237,7 +240,11 @@ mod tests {
                 }
             }
         });
-        std::fs::write(client.config_path(), serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+        std::fs::write(
+            client.config_path(),
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
 
         client.install().unwrap();
 
@@ -245,7 +252,10 @@ mod tests {
         // Our entry was added
         assert!(config["mcpServers"]["memory"]["command"].is_string());
         // Other entry preserved
-        assert_eq!(config["mcpServers"]["other-server"]["command"], "/usr/bin/other");
+        assert_eq!(
+            config["mcpServers"]["other-server"]["command"],
+            "/usr/bin/other"
+        );
     }
 
     #[test]
@@ -259,7 +269,11 @@ mod tests {
             "fontSize": 14,
             "mcpServers": {}
         });
-        std::fs::write(client.config_path(), serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+        std::fs::write(
+            client.config_path(),
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
 
         client.install().unwrap();
 
@@ -291,7 +305,11 @@ mod tests {
                 }
             }
         });
-        std::fs::write(client.config_path(), serde_json::to_string_pretty(&config).unwrap()).unwrap();
+        std::fs::write(
+            client.config_path(),
+            serde_json::to_string_pretty(&config).unwrap(),
+        )
+        .unwrap();
 
         match client.check_existing() {
             InstallStatus::NeedsUpdate { current_command } => {
@@ -312,7 +330,11 @@ mod tests {
                 "other": { "command": "other", "args": ["run"] }
             }
         });
-        std::fs::write(client.config_path(), serde_json::to_string_pretty(&config).unwrap()).unwrap();
+        std::fs::write(
+            client.config_path(),
+            serde_json::to_string_pretty(&config).unwrap(),
+        )
+        .unwrap();
 
         client.uninstall().unwrap();
 
@@ -348,11 +370,8 @@ mod tests {
         let detect_dir = dir.path().join(".claude");
         std::fs::create_dir(&detect_dir).unwrap();
 
-        let client = JsonClient::new(
-            "Claude Code",
-            dir.path().join(".claude.json"),
-            "mcpServers",
-        ).with_detect_path(detect_dir);
+        let client = JsonClient::new("Claude Code", dir.path().join(".claude.json"), "mcpServers")
+            .with_detect_path(detect_dir);
 
         assert!(client.detect());
     }
@@ -361,11 +380,8 @@ mod tests {
     fn detect_with_detect_path_absent() {
         let dir = TempDir::new().unwrap();
 
-        let client = JsonClient::new(
-            "Claude Code",
-            dir.path().join(".claude.json"),
-            "mcpServers",
-        ).with_detect_path(dir.path().join(".claude"));
+        let client = JsonClient::new("Claude Code", dir.path().join(".claude.json"), "mcpServers")
+            .with_detect_path(dir.path().join(".claude"));
 
         assert!(!client.detect());
     }

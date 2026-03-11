@@ -2,10 +2,10 @@
 //!
 //! Row types for database operations and conversions to domain types.
 
-use diesel::prelude::*;
 use super::schema::{plans, steps};
-use crate::plans::{Plan, Step, PlanId};
+use crate::plans::{Plan, PlanId, Step};
 use crate::storage::StorageResult;
+use diesel::prelude::*;
 
 // ==================
 // PLAN
@@ -32,7 +32,7 @@ impl PlanRow {
     pub fn into_plan(self, steps: Vec<Step>) -> StorageResult<Plan> {
         let id = PlanId::parse_str(&self.id)
             .map_err(|e| crate::storage::StorageError::Serialization(e.to_string()))?;
-        
+
         Ok(Plan {
             id,
             description: self.description,

@@ -50,10 +50,11 @@ mod tests {
     fn save_and_set(key: &str, val: &str) -> Option<String> {
         let original = std::env::var(key).ok();
         // SAFETY: test-only, acceptable race risk
-        unsafe { std::env::set_var(key, val); }
+        unsafe {
+            std::env::set_var(key, val);
+        }
         original
     }
-
 
     fn restore(key: &str, original: Option<String>) {
         // SAFETY: test-only, acceptable race risk
@@ -97,7 +98,10 @@ mod tests {
         let original = save_and_set("MEMORY_HOME", "/tmp/test-memoryco-config");
 
         let cache = get_model_cache_dir();
-        assert_eq!(cache, PathBuf::from("/tmp/test-memoryco-config/cache/models"));
+        assert_eq!(
+            cache,
+            PathBuf::from("/tmp/test-memoryco-config/cache/models")
+        );
 
         restore("MEMORY_HOME", original);
     }

@@ -2,11 +2,11 @@
 
 use crate::engram::EngramId;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::tools::{text_response, format_engram};
+use crate::tools::{format_engram, text_response};
 
 pub struct EngramGetTool;
 
@@ -44,10 +44,12 @@ impl Tool<Context> for EngramGetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let id: EngramId = args.id.parse()
+        let id: EngramId = args
+            .id
+            .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;
 
         let mut brain = context.brain.lock().unwrap();

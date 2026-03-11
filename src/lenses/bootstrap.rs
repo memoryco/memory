@@ -75,7 +75,10 @@ const MARKER: &str = "## Lenses";
 
 /// Bootstrap lenses: add instructions to identity and create directory
 /// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(identity: &mut IdentityStore, lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn bootstrap(
+    identity: &mut IdentityStore,
+    lenses_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Upsert instructions to identity
     match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
         UpsertResult::Added => {
@@ -86,7 +89,7 @@ pub fn bootstrap(identity: &mut IdentityStore, lenses_dir: &Path) -> Result<(), 
         }
         UpsertResult::Unchanged => {}
     }
-    
+
     // Create directory if it doesn't exist
     if !lenses_dir.exists() {
         eprintln!("  Creating lenses directory: {}", lenses_dir.display());
@@ -96,12 +99,7 @@ pub fn bootstrap(identity: &mut IdentityStore, lenses_dir: &Path) -> Result<(), 
     // Check if directory is empty (no .md files)
     let is_empty = std::fs::read_dir(lenses_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("md")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
         .count()
         == 0;
 

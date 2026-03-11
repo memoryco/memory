@@ -1,7 +1,7 @@
 //! identity_remove - Remove an identity item by ID
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -37,13 +37,15 @@ impl Tool<Context> for IdentityRemoveTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let id = args.get("id")
+        let id = args
+            .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| McpError::InvalidParams("id is required".into()))?;
 
         let mut store = context.identity.lock().unwrap();
-        
-        store.remove(id)
+
+        store
+            .remove(id)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         Ok(text_response(format!("Removed identity item: {}", id)))

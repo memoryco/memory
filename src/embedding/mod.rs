@@ -11,7 +11,7 @@ mod similarity;
 pub use generator::EmbeddingGenerator;
 #[allow(unused_imports)]
 pub use generator::{
-    active_model_name, set_active_model, default_embedding_model,
-    model_from_name, embedding_dimension, is_valid_model,
+    active_model_name, default_embedding_model, embedding_dimension, is_valid_model,
+    model_from_name, set_active_model,
 };
 pub use similarity::cosine_similarity;

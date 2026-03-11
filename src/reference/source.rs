@@ -1,9 +1,9 @@
 //! Reference source management - a single PDF + index pair.
 
-use super::citation::{meta_path_for, Citation, SourceMeta};
+use super::citation::{Citation, SourceMeta, meta_path_for};
 use super::error::Result;
 use super::extractor::PdfExtractor;
-use super::indexer::{index_path_for, Indexer};
+use super::indexer::{Indexer, index_path_for};
 use super::profiles::ProfileRegistry;
 use super::searcher::{SearchResult, Searcher};
 use std::path::{Path, PathBuf};
@@ -96,11 +96,11 @@ impl ReferenceSource {
         profiles: &ProfileRegistry,
     ) -> Result<()> {
         let indexer = Indexer::new(extractor, profiles);
-        
+
         if !indexer.index_is_current(&self.pdf_path) {
             self.build_index(extractor, profiles)?;
         }
-        
+
         Ok(())
     }
 

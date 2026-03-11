@@ -37,7 +37,11 @@ pub trait PdfExtractor: Send + Sync {
     /// Default: first 5 pages.
     fn extract_sample(&self, path: &Path) -> Result<String> {
         let pages = self.extract_range(path, 1, 5)?;
-        Ok(pages.into_iter().map(|p| p.text).collect::<Vec<_>>().join("\n"))
+        Ok(pages
+            .into_iter()
+            .map(|p| p.text)
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 }
 

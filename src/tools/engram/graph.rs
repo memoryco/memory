@@ -2,12 +2,12 @@
 
 use crate::engram::EngramId;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use std::collections::HashSet;
 
 use crate::Context;
-use crate::tools::{text_response, truncate_content, GRAPH_TEMPLATE};
+use crate::tools::{GRAPH_TEMPLATE, text_response, truncate_content};
 
 pub struct EngramGraphTool;
 
@@ -54,20 +54,21 @@ impl Tool<Context> for EngramGraphTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let format = args.format.as_deref().unwrap_or("summary");
         let min_weight = args.min_weight.unwrap_or(0.0);
         let mut brain = context.brain.lock().unwrap();
-        
+
         // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();
         let _ = brain.sync_from_storage();
 
         // Collect all associations
         let all_assocs = brain.all_associations();
-        let filtered: Vec<_> = all_assocs.iter()
+        let filtered: Vec<_> = all_assocs
+            .iter()
             .filter(|a| a.weight >= min_weight)
             .collect();
 
@@ -80,26 +81,32 @@ impl Tool<Context> for EngramGraphTool {
 
         if format == "json" {
             // Build JSON structure for visualization
-            let nodes: Vec<JsonValue> = node_ids.iter()
+            let nodes: Vec<JsonValue> = node_ids
+                .iter()
                 .filter_map(|id| brain.get(id))
-                .map(|e| json!({
-                    "id": e.id.to_string(),
-                    "label": truncate_content(&e.content, 30),
-                    "energy": e.energy,
-                    "state": e.state.emoji(),
-                    "access_count": e.access_count
-                }))
+                .map(|e| {
+                    json!({
+                        "id": e.id.to_string(),
+                        "label": truncate_content(&e.content, 30),
+                        "energy": e.energy,
+                        "state": e.state.emoji(),
+                        "access_count": e.access_count
+                    })
+                })
                 .collect();
 
-            let edges: Vec<JsonValue> = filtered.iter()
-                .map(|a| json!({
-                    "from": a.from.to_string(),
-                    "to": a.to.to_string(),
-                    "weight": a.weight,
-                    "co_activations": a.co_activation_count,
-                    "created_at": a.created_at,
-                    "last_activated": a.last_activated
-                }))
+            let edges: Vec<JsonValue> = filtered
+                .iter()
+                .map(|a| {
+                    json!({
+                        "from": a.from.to_string(),
+                        "to": a.to.to_string(),
+                        "weight": a.weight,
+                        "co_activations": a.co_activation_count,
+                        "created_at": a.created_at,
+                        "last_activated": a.last_activated
+                    })
+                })
                 .collect();
 
             let graph = json!({
@@ -115,24 +122,30 @@ impl Tool<Context> for EngramGraphTool {
             Ok(text_response(serde_json::to_string_pretty(&graph).unwrap()))
         } else if format == "html" {
             // HTML visualization - generate file and return path
-            let nodes: Vec<JsonValue> = node_ids.iter()
+            let nodes: Vec<JsonValue> = node_ids
+                .iter()
                 .filter_map(|id| brain.get(id))
-                .map(|e| json!({
-                    "id": e.id.to_string(),
-                    "label": truncate_content(&e.content, 30),
-                    "energy": e.energy,
-                    "state": e.state.emoji(),
-                    "access_count": e.access_count
-                }))
+                .map(|e| {
+                    json!({
+                        "id": e.id.to_string(),
+                        "label": truncate_content(&e.content, 30),
+                        "energy": e.energy,
+                        "state": e.state.emoji(),
+                        "access_count": e.access_count
+                    })
+                })
                 .collect();
 
-            let edges: Vec<JsonValue> = filtered.iter()
-                .map(|a| json!({
-                    "source": a.from.to_string(),
-                    "target": a.to.to_string(),
-                    "weight": a.weight,
-                    "co_activations": a.co_activation_count
-                }))
+            let edges: Vec<JsonValue> = filtered
+                .iter()
+                .map(|a| {
+                    json!({
+                        "source": a.from.to_string(),
+                        "target": a.to.to_string(),
+                        "weight": a.weight,
+                        "co_activations": a.co_activation_count
+                    })
+                })
                 .collect();
 
             let graph = json!({
@@ -172,24 +185,48 @@ impl Tool<Context> for EngramGraphTool {
 
             // Group edges by weight buckets
             let strong: Vec<_> = filtered.iter().filter(|a| a.weight >= 0.7).collect();
-            let medium: Vec<_> = filtered.iter().filter(|a| a.weight >= 0.4 && a.weight < 0.7).collect();
+            let medium: Vec<_> = filtered
+                .iter()
+                .filter(|a| a.weight >= 0.4 && a.weight < 0.7)
+                .collect();
             let weak: Vec<_> = filtered.iter().filter(|a| a.weight < 0.4).collect();
 
             output.push_str(&format!("Strong connections (≥0.7): {}\n", strong.len()));
             for a in strong.iter().take(10) {
-                let from_label = brain.get(&a.from).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
-                let to_label = brain.get(&a.to).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
-                output.push_str(&format!("  {} → {} (w:{:.2}, co:{})\n", from_label, to_label, a.weight, a.co_activation_count));
+                let from_label = brain
+                    .get(&a.from)
+                    .map(|e| truncate_content(&e.content, 25))
+                    .unwrap_or_default();
+                let to_label = brain
+                    .get(&a.to)
+                    .map(|e| truncate_content(&e.content, 25))
+                    .unwrap_or_default();
+                output.push_str(&format!(
+                    "  {} → {} (w:{:.2}, co:{})\n",
+                    from_label, to_label, a.weight, a.co_activation_count
+                ));
             }
             if strong.len() > 10 {
                 output.push_str(&format!("  ... and {} more\n", strong.len() - 10));
             }
 
-            output.push_str(&format!("\nMedium connections (0.4-0.7): {}\n", medium.len()));
+            output.push_str(&format!(
+                "\nMedium connections (0.4-0.7): {}\n",
+                medium.len()
+            ));
             for a in medium.iter().take(10) {
-                let from_label = brain.get(&a.from).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
-                let to_label = brain.get(&a.to).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
-                output.push_str(&format!("  {} → {} (w:{:.2}, co:{})\n", from_label, to_label, a.weight, a.co_activation_count));
+                let from_label = brain
+                    .get(&a.from)
+                    .map(|e| truncate_content(&e.content, 25))
+                    .unwrap_or_default();
+                let to_label = brain
+                    .get(&a.to)
+                    .map(|e| truncate_content(&e.content, 25))
+                    .unwrap_or_default();
+                output.push_str(&format!(
+                    "  {} → {} (w:{:.2}, co:{})\n",
+                    from_label, to_label, a.weight, a.co_activation_count
+                ));
             }
             if medium.len() > 10 {
                 output.push_str(&format!("  ... and {} more\n", medium.len() - 10));
@@ -197,24 +234,40 @@ impl Tool<Context> for EngramGraphTool {
 
             output.push_str(&format!("\nWeak connections (<0.4): {}\n", weak.len()));
             for a in weak.iter().take(5) {
-                let from_label = brain.get(&a.from).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
-                let to_label = brain.get(&a.to).map(|e| truncate_content(&e.content, 25)).unwrap_or_default();
-                output.push_str(&format!("  {} → {} (w:{:.2}, co:{})\n", from_label, to_label, a.weight, a.co_activation_count));
+                let from_label = brain
+                    .get(&a.from)
+                    .map(|e| truncate_content(&e.content, 25))
+                    .unwrap_or_default();
+                let to_label = brain
+                    .get(&a.to)
+                    .map(|e| truncate_content(&e.content, 25))
+                    .unwrap_or_default();
+                output.push_str(&format!(
+                    "  {} → {} (w:{:.2}, co:{})\n",
+                    from_label, to_label, a.weight, a.co_activation_count
+                ));
             }
             if weak.len() > 5 {
                 output.push_str(&format!("  ... and {} more\n", weak.len() - 5));
             }
 
             // Hebbian learning indicator
-            let hebbian_active: Vec<_> = filtered.iter().filter(|a| a.co_activation_count > 0).collect();
+            let hebbian_active: Vec<_> = filtered
+                .iter()
+                .filter(|a| a.co_activation_count > 0)
+                .collect();
             output.push_str(&format!(
                 "\n=== HEBBIAN LEARNING ===\nAssociations with co-activations: {}/{}\n",
                 hebbian_active.len(),
                 filtered.len()
             ));
-            
+
             if !hebbian_active.is_empty() {
-                let max_co = hebbian_active.iter().map(|a| a.co_activation_count).max().unwrap_or(0);
+                let max_co = hebbian_active
+                    .iter()
+                    .map(|a| a.co_activation_count)
+                    .max()
+                    .unwrap_or(0);
                 let total_co: u64 = hebbian_active.iter().map(|a| a.co_activation_count).sum();
                 output.push_str(&format!("Max co-activations: {}\n", max_co));
                 output.push_str(&format!("Total co-activations: {}\n", total_co));

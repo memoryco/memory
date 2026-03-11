@@ -1,7 +1,7 @@
 //! identity_list - List identity items by type with IDs
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::identity::{IdentityItemType, ListedItem};
@@ -43,15 +43,17 @@ impl Tool<Context> for IdentityListTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let type_str = args.get("type")
+        let type_str = args
+            .get("type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| McpError::InvalidParams("type is required".into()))?;
-        
+
         let item_type = parse_item_type(type_str)
             .ok_or_else(|| McpError::InvalidParams(format!("Invalid type: {}", type_str)))?;
 
         let mut store = context.identity.lock().unwrap();
-        let items = store.list(item_type)
+        let items = store
+            .list(item_type)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         if items.is_empty() {
@@ -59,7 +61,7 @@ impl Tool<Context> for IdentityListTool {
         }
 
         let mut output = format!("{} items ({}):\n\n", type_str, items.len());
-        
+
         for item in items {
             let display = format_item(&item);
             output.push_str(&format!("• [{}] {}\n", item.id, display));

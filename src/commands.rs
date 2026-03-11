@@ -2,9 +2,11 @@
 //!
 //! Each subcommand gets its own function.
 
+use crate::cli::LlmCommand;
 use crate::config;
 use crate::install::{self, InstallStatus};
 use std::io::{self, Write};
+use std::path::Path;
 
 /// `memoryco setup` — full first-run experience.
 pub fn setup(yes: bool) {
@@ -80,9 +82,15 @@ pub fn install(yes: bool) {
                     eprintln!("  Skipped {}", client.name());
                 }
             }
-            InstallStatus::NeedsUpdate { ref current_command } => {
+            InstallStatus::NeedsUpdate {
+                ref current_command,
+            } => {
                 found += 1;
-                eprintln!("  {} — outdated (pointing to {})", client.name(), current_command);
+                eprintln!(
+                    "  {} — outdated (pointing to {})",
+                    client.name(),
+                    current_command
+                );
                 if yes || prompt_yes_no("  Update to current binary?") {
                     match client.install() {
                         Ok(()) => {
@@ -109,7 +117,10 @@ pub fn install(yes: bool) {
     }
 
     // Install CLAUDE.md block for Claude Code (automatic prompt injection)
-    if install::claude_md::claude_md_path().parent().is_some_and(|p| p.exists()) {
+    if install::claude_md::claude_md_path()
+        .parent()
+        .is_some_and(|p| p.exists())
+    {
         match install::claude_md::install() {
             Ok(()) => {
                 if install::claude_md::is_installed() {
@@ -121,7 +132,8 @@ pub fn install(yes: bool) {
     }
 
     // Print manual prompt instructions for clients that need it
-    let needs_manual: Vec<&str> = configured_names.iter()
+    let needs_manual: Vec<&str> = configured_names
+        .iter()
         .filter(|name| name.as_str() != "Claude Code")
         .map(|s| s.as_str())
         .collect();
@@ -194,44 +206,76 @@ pub fn doctor() {
     eprintln!("────────────────");
 
     // Home directory
-    check("Home directory", &memory_home.display().to_string(),
-        memory_home.exists());
+    check(
+        "Home directory",
+        &memory_home.display().to_string(),
+        memory_home.exists(),
+    );
 
     // Databases
-    check("Brain database", "brain.db",
-        memory_home.join("brain.db").exists());
-    check("Identity database", "identity.db",
-        memory_home.join("identity.db").exists());
-    check("Plans database", "plans.db",
-        memory_home.join("plans.db").exists());
+    check(
+        "Brain database",
+        "brain.db",
+        memory_home.join("brain.db").exists(),
+    );
+    check(
+        "Identity database",
+        "identity.db",
+        memory_home.join("identity.db").exists(),
+    );
+    check(
+        "Plans database",
+        "plans.db",
+        memory_home.join("plans.db").exists(),
+    );
 
     // Embedding model
     let model_dir = config::get_model_cache_dir();
-    let model_exists = model_dir.exists() && model_dir.read_dir()
-        .map(|mut d| d.next().is_some())
-        .unwrap_or(false);
-    check("Embedding model", &model_dir.display().to_string(), model_exists);
+    let model_exists = model_dir.exists()
+        && model_dir
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false);
+    check(
+        "Embedding model",
+        &model_dir.display().to_string(),
+        model_exists,
+    );
 
     // Lenses
     let lenses_dir = memory_home.join("lenses");
-    let lens_count = lenses_dir.read_dir()
-        .map(|d| d.filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-            .count())
+    let lens_count = lenses_dir
+        .read_dir()
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+                .count()
+        })
         .unwrap_or(0);
-    check("Lenses", &format!("{} loaded", lens_count), lenses_dir.exists());
+    check(
+        "Lenses",
+        &format!("{} loaded", lens_count),
+        lenses_dir.exists(),
+    );
 
     // References
     let refs_dir = memory_home.join("references");
-    let ref_count = refs_dir.read_dir()
+    let ref_count = refs_dir
+        .read_dir()
         .map(|d| d.filter_map(|e| e.ok()).count())
         .unwrap_or(0);
-    check("References", &format!("{} sources", ref_count), refs_dir.exists());
+    check(
+        "References",
+        &format!("{} sources", ref_count),
+        refs_dir.exists(),
+    );
 
     // CLAUDE.md
-    check("CLAUDE.md directive",
+    check(
+        "CLAUDE.md directive",
         &install::claude_md::claude_md_path().display().to_string(),
-        install::claude_md::is_installed());
+        install::claude_md::is_installed(),
+    );
 
     // MCP Clients
     eprintln!();
@@ -269,9 +313,15 @@ pub fn doctor() {
 pub fn reset() {
     let memory_home = config::get_memory_home();
     let db_files = [
-        "brain.db", "brain.db-wal", "brain.db-shm",
-        "identity.db", "identity.db-wal", "identity.db-shm",
-        "plans.db", "plans.db-wal", "plans.db-shm",
+        "brain.db",
+        "brain.db-wal",
+        "brain.db-shm",
+        "identity.db",
+        "identity.db-wal",
+        "identity.db-shm",
+        "plans.db",
+        "plans.db-wal",
+        "plans.db-shm",
     ];
 
     eprintln!("⚠️  This will permanently delete all memories, identity, and plans.");
@@ -353,19 +403,20 @@ pub fn update(dry_run: bool) {
 
     eprintln!("Checking for updates...");
     match updater.update_now("memoryco") {
-        Ok(result) => {
-            match result.action {
-                memoryco_updater::UpdateAction::Applied(_) => {
-                    eprintln!("✓ Updated to version {}", result.new_version);
-                }
-                memoryco_updater::UpdateAction::AlreadyLatest => {
-                    eprintln!("✓ Already on the latest version ({})", current);
-                }
-                memoryco_updater::UpdateAction::Staged(_) => {
-                    eprintln!("⬇ Update {} staged. Will apply on next restart.", result.new_version);
-                }
+        Ok(result) => match result.action {
+            memoryco_updater::UpdateAction::Applied(_) => {
+                eprintln!("✓ Updated to version {}", result.new_version);
             }
-        }
+            memoryco_updater::UpdateAction::AlreadyLatest => {
+                eprintln!("✓ Already on the latest version ({})", current);
+            }
+            memoryco_updater::UpdateAction::Staged(_) => {
+                eprintln!(
+                    "⬇ Update {} staged. Will apply on next restart.",
+                    result.new_version
+                );
+            }
+        },
         Err(e) => {
             eprintln!("✗ Update failed: {}", e);
             eprintln!("  You can update manually: curl -fsSL https://memoryco.ai/install.sh | sh");
@@ -374,9 +425,111 @@ pub fn update(dry_run: bool) {
     }
 }
 
+/// `memoryco llm` — local LLM debug commands.
+pub fn llm(command: LlmCommand) {
+    match command {
+        LlmCommand::Status => llm_status(),
+        LlmCommand::Expand {
+            query,
+            max_variants,
+        } => llm_expand(&query, max_variants),
+        LlmCommand::GeneratePairs { memory, count } => llm_generate_pairs(&memory, count),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn llm_status() {
+    let memory_home = config::get_memory_home();
+    match crate::llm::LlmConfig::load(&memory_home) {
+        Ok(llm_config) => {
+            println!("enabled: {}", llm_config.enabled);
+            match llm_config.model_path {
+                Some(model_path) => println!("configured_model: {}", model_path.display()),
+                None => println!("configured_model: (none)"),
+            }
+        }
+        Err(error) => {
+            println!("enabled: unknown");
+            println!("config_error: {error:?}");
+        }
+    }
+
+    match crate::llm::build_llm_service(&memory_home) {
+        Ok(service) => {
+            println!("available: {}", service.available());
+            println!("tier: {:?}", service.tier());
+            println!("model: {}", service.model_name());
+        }
+        Err(error) => {
+            println!("available: false");
+            println!("init_error: {error:?}");
+        }
+    }
+}
+
+fn llm_expand(query: &str, max_variants: usize) {
+    let service = load_llm_service();
+    if !service.available() {
+        eprintln!("{}", llm_unavailable_hint(&config::get_memory_home()));
+        std::process::exit(1);
+    }
+
+    match service.expand_query(query, max_variants) {
+        Ok(variants) => {
+            eprintln!("model: {}", service.model_name());
+            for variant in variants {
+                println!("{variant}");
+            }
+        }
+        Err(error) => {
+            eprintln!("Failed to expand query: {error:?}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn llm_generate_pairs(memory: &str, count: usize) {
+    let service = load_llm_service();
+    if !service.available() {
+        eprintln!("{}", llm_unavailable_hint(&config::get_memory_home()));
+        std::process::exit(1);
+    }
+
+    match service.generate_training_queries(memory, count) {
+        Ok(queries) => {
+            eprintln!("model: {}", service.model_name());
+            for query in queries {
+                println!("{query}");
+            }
+        }
+        Err(error) => {
+            eprintln!("Failed to generate query pairs: {error:?}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn load_llm_service() -> crate::llm::SharedLlmService {
+    let memory_home = config::get_memory_home();
+    match crate::llm::build_llm_service(&memory_home) {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("Failed to initialize local LLM: {error:?}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn llm_unavailable_hint(memory_home: &Path) -> String {
+    format!(
+        "Local LLM unavailable. Check {config} and set llm_enable = true plus llm_model = \"<path or filename>\". Bare filenames resolve under {models}.",
+        config = memory_home.join("config.toml").display(),
+        models = crate::llm::LlmConfig::managed_model_dir(memory_home).display(),
+    )
+}
 
 /// Print a doctor check line.
 fn check(label: &str, detail: &str, ok: bool) {
@@ -403,7 +556,11 @@ pub fn prune_registry() {
     if pruned == 0 {
         println!("Registry is clean — no stale entries found.");
     } else {
-        println!("Pruned {} stale entr{}.", pruned, if pruned == 1 { "y" } else { "ies" });
+        println!(
+            "Pruned {} stale entr{}.",
+            pruned,
+            if pruned == 1 { "y" } else { "ies" }
+        );
     }
 }
 

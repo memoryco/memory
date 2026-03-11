@@ -61,11 +61,9 @@ impl Searcher {
     /// Get the profile ID if this was profile-indexed.
     pub fn profile(&self) -> Option<String> {
         self.conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'profile'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT value FROM meta WHERE key = 'profile'", [], |row| {
+                row.get(0)
+            })
             .ok()
     }
 
@@ -97,7 +95,7 @@ impl Searcher {
         let mut results = Vec::new();
         for row in rows {
             let (rowid, snippet, rank) = row?;
-            
+
             if let Some(result) = self.fetch_result(rowid, snippet, rank)? {
                 results.push(result);
             }
@@ -107,7 +105,12 @@ impl Searcher {
     }
 
     /// Search within a specific section type (only for section-indexed docs).
-    pub fn search_type(&self, query: &str, section_type: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    pub fn search_type(
+        &self,
+        query: &str,
+        section_type: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
         if self.index_type != "sections" {
             return self.search(query, limit);
         }
@@ -185,9 +188,9 @@ impl Searcher {
             return Ok(Vec::new());
         }
 
-        let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT title FROM sections WHERE parent IS NULL ORDER BY title",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT title FROM sections WHERE parent IS NULL ORDER BY title")?;
 
         let titles = stmt
             .query_map([], |row| row.get(0))?

@@ -73,14 +73,22 @@ pub fn day_number(token: &str) -> Option<u32> {
         .trim_end_matches("rd")
         .trim_end_matches("th");
     let day = stripped.parse::<u32>().ok()?;
-    if (1..=31).contains(&day) { Some(day) } else { None }
+    if (1..=31).contains(&day) {
+        Some(day)
+    } else {
+        None
+    }
 }
 
 /// Parse a year token.
 pub fn year(token: &str) -> Option<i32> {
     let cleaned = token.trim_matches(|c: char| !c.is_ascii_digit());
     let y = cleaned.parse::<i32>().ok()?;
-    if (1000..=9999).contains(&y) { Some(y) } else { None }
+    if (1000..=9999).contains(&y) {
+        Some(y)
+    } else {
+        None
+    }
 }
 
 /// Normalize free-form date text for parsing.

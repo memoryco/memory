@@ -25,18 +25,16 @@ pub fn bootstrap(
     // Create directory if missing
     if !bootstrap_dir.exists() {
         std::fs::create_dir_all(&bootstrap_dir)?;
-        eprintln!("  Created plugin bootstrap directory: {}", bootstrap_dir.display());
+        eprintln!(
+            "  Created plugin bootstrap directory: {}",
+            bootstrap_dir.display()
+        );
     }
 
     // Glob for *.toml files
     let entries: Vec<_> = std::fs::read_dir(&bootstrap_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                == Some("toml")
-        })
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("toml"))
         .collect();
 
     if entries.is_empty() {
@@ -45,7 +43,8 @@ pub fn bootstrap(
 
     for entry in entries {
         let path = entry.path();
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("<unknown>");
 
@@ -77,19 +76,23 @@ fn load_and_upsert(
     let doc: DocumentMut = raw.parse()?;
 
     // Extract [meta] fields
-    let meta = doc.get("meta")
+    let meta = doc
+        .get("meta")
         .and_then(|v| v.as_table())
         .ok_or("missing [meta] table")?;
 
-    let _name = meta.get("name")
+    let _name = meta
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or("missing meta.name")?;
 
-    let _version = meta.get("version")
+    let _version = meta
+        .get("version")
         .and_then(|v| v.as_str())
         .ok_or("missing meta.version")?;
 
-    let marker = meta.get("marker")
+    let marker = meta
+        .get("marker")
         .and_then(|v| v.as_str())
         .ok_or("missing meta.marker")?;
 
@@ -98,15 +101,18 @@ fn load_and_upsert(
         return Err(format!(
             "marker must start with '{}', got: {}",
             MARKER_PREFIX, marker
-        ).into());
+        )
+        .into());
     }
 
     // Extract [instructions] fields
-    let instructions = doc.get("instructions")
+    let instructions = doc
+        .get("instructions")
         .and_then(|v| v.as_table())
         .ok_or("missing [instructions] table")?;
 
-    let content = instructions.get("content")
+    let content = instructions
+        .get("content")
         .and_then(|v| v.as_str())
         .ok_or("missing instructions.content")?;
 
@@ -156,7 +162,7 @@ When exploring codebases, prefer search_semantic over grep.
         let bootstrap_dir = memory_home.join("bootstrap.d");
 
         assert!(!bootstrap_dir.exists());
-        bootstrap(& mut identity, memory_home).unwrap();
+        bootstrap(&mut identity, memory_home).unwrap();
         assert!(bootstrap_dir.exists());
     }
 
@@ -185,7 +191,8 @@ When exploring codebases, prefer search_semantic over grep.
         std::fs::write(
             bootstrap_dir.join("filesystem.toml"),
             valid_manifest("filesystem"),
-        ).unwrap();
+        )
+        .unwrap();
 
         bootstrap(&mut identity, memory_home).unwrap();
 
@@ -206,7 +213,8 @@ When exploring codebases, prefer search_semantic over grep.
         std::fs::write(
             bootstrap_dir.join("filesystem.toml"),
             valid_manifest("filesystem"),
-        ).unwrap();
+        )
+        .unwrap();
 
         bootstrap(&mut identity, memory_home).unwrap();
         let count_first = identity.get().unwrap().instructions.len();
@@ -214,8 +222,10 @@ When exploring codebases, prefer search_semantic over grep.
         bootstrap(&mut identity, memory_home).unwrap();
         let count_second = identity.get().unwrap().instructions.len();
 
-        assert_eq!(count_first, count_second,
-            "Running plugin bootstrap twice should not duplicate instructions");
+        assert_eq!(
+            count_first, count_second,
+            "Running plugin bootstrap twice should not duplicate instructions"
+        );
     }
 
     #[test]
@@ -230,7 +240,8 @@ When exploring codebases, prefer search_semantic over grep.
         std::fs::write(
             bootstrap_dir.join("broken.toml"),
             "this is not valid toml {{{",
-        ).unwrap();
+        )
+        .unwrap();
 
         // Should not crash
         bootstrap(&mut identity, memory_home).unwrap();
@@ -258,8 +269,10 @@ When exploring codebases, prefer search_semantic over grep.
 
         bootstrap(&mut identity, memory_home).unwrap();
         let result = identity.get().unwrap();
-        assert!(result.instructions.is_empty(),
-            "Manifest with non-plugin marker should be rejected");
+        assert!(
+            result.instructions.is_empty(),
+            "Manifest with non-plugin marker should be rejected"
+        );
     }
 
     #[test]
@@ -281,8 +294,10 @@ content = "Some instructions"
 
         bootstrap(&mut identity, memory_home).unwrap();
         let result = identity.get().unwrap();
-        assert!(result.instructions.is_empty(),
-            "Manifest missing meta.name should be skipped");
+        assert!(
+            result.instructions.is_empty(),
+            "Manifest missing meta.name should be skipped"
+        );
     }
 
     #[test]
@@ -302,8 +317,10 @@ marker = "<!-- plugin:incomplete -->"
 
         bootstrap(&mut identity, memory_home).unwrap();
         let result = identity.get().unwrap();
-        assert!(result.instructions.is_empty(),
-            "Manifest missing [instructions] table should be skipped");
+        assert!(
+            result.instructions.is_empty(),
+            "Manifest missing [instructions] table should be skipped"
+        );
     }
 
     #[test]
@@ -325,8 +342,10 @@ marker = "<!-- plugin:nocontent -->"
 
         bootstrap(&mut identity, memory_home).unwrap();
         let result = identity.get().unwrap();
-        assert!(result.instructions.is_empty(),
-            "Manifest missing instructions.content should be skipped");
+        assert!(
+            result.instructions.is_empty(),
+            "Manifest missing instructions.content should be skipped"
+        );
     }
 
     #[test]
@@ -349,8 +368,10 @@ content = ""
 
         bootstrap(&mut identity, memory_home).unwrap();
         let result = identity.get().unwrap();
-        assert!(result.instructions.is_empty(),
-            "Manifest with empty content should be skipped");
+        assert!(
+            result.instructions.is_empty(),
+            "Manifest with empty content should be skipped"
+        );
     }
 
     #[test]
@@ -368,8 +389,10 @@ content = ""
 
         bootstrap(&mut identity, memory_home).unwrap();
         let result = identity.get().unwrap();
-        assert!(result.instructions.is_empty(),
-            "Non-TOML files should be silently ignored");
+        assert!(
+            result.instructions.is_empty(),
+            "Non-TOML files should be silently ignored"
+        );
     }
 
     #[test]
@@ -409,12 +432,19 @@ content = "<!-- plugin:evolving -->\nVersion 2 instructions with new features"
         bootstrap(&mut identity, memory_home).unwrap();
 
         let result = identity.get().unwrap();
-        assert_eq!(result.instructions.len(), 1,
-            "Updated manifest should replace, not duplicate");
-        assert!(result.instructions[0].contains("Version 2"),
-            "Content should reflect the updated manifest");
-        assert!(!result.instructions[0].contains("Version 1"),
-            "Old content should be gone");
+        assert_eq!(
+            result.instructions.len(),
+            1,
+            "Updated manifest should replace, not duplicate"
+        );
+        assert!(
+            result.instructions[0].contains("Version 2"),
+            "Content should reflect the updated manifest"
+        );
+        assert!(
+            !result.instructions[0].contains("Version 1"),
+            "Old content should be gone"
+        );
     }
 
     #[test]
@@ -426,20 +456,21 @@ content = "<!-- plugin:evolving -->\nVersion 2 instructions with new features"
         std::fs::create_dir_all(&bootstrap_dir).unwrap();
 
         // One broken, one valid
-        std::fs::write(
-            bootstrap_dir.join("aaa_broken.toml"),
-            "not valid toml {{{",
-        ).unwrap();
+        std::fs::write(bootstrap_dir.join("aaa_broken.toml"), "not valid toml {{{").unwrap();
         std::fs::write(
             bootstrap_dir.join("zzz_valid.toml"),
             valid_manifest("validplugin"),
-        ).unwrap();
+        )
+        .unwrap();
 
         bootstrap(&mut identity, memory_home).unwrap();
 
         let result = identity.get().unwrap();
-        assert_eq!(result.instructions.len(), 1,
-            "Valid manifest should still be processed despite broken sibling");
+        assert_eq!(
+            result.instructions.len(),
+            1,
+            "Valid manifest should still be processed despite broken sibling"
+        );
         assert!(result.instructions[0].contains("<!-- plugin:validplugin -->"));
     }
 
@@ -454,11 +485,13 @@ content = "<!-- plugin:evolving -->\nVersion 2 instructions with new features"
         std::fs::write(
             bootstrap_dir.join("filesystem.toml"),
             valid_manifest("filesystem"),
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::write(
             bootstrap_dir.join("gittools.toml"),
             valid_manifest("gittools"),
-        ).unwrap();
+        )
+        .unwrap();
 
         bootstrap(&mut identity, memory_home).unwrap();
 

@@ -1,7 +1,7 @@
 //! Reference bootstrap - add instructions and per-source citations to identity
 
-use crate::identity::{IdentityStore, UpsertResult};
 use super::ReferenceManager;
+use crate::identity::{IdentityStore, UpsertResult};
 
 /// General instructions for using reference tools
 const INSTRUCTIONS: &str = r#"## References
@@ -32,7 +32,10 @@ const MARKER: &str = "## References";
 
 /// Bootstrap references: add general instructions and per-source citations to identity
 /// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(identity: &mut IdentityStore, references: &ReferenceManager) -> Result<(), Box<dyn std::error::Error>> {
+pub fn bootstrap(
+    identity: &mut IdentityStore,
+    references: &ReferenceManager,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Upsert general instructions
     match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
         UpsertResult::Added => {
@@ -47,16 +50,19 @@ pub fn bootstrap(identity: &mut IdentityStore, references: &ReferenceManager) ->
     // Upsert per-source citation instructions
     for source_name in references.sources() {
         let marker = format!("reference:{}", source_name);
-        
+
         // Get source metadata
         let meta = match references.get_meta(source_name) {
             Some(m) => m,
             None => {
-                eprintln!("  Reference '{}' has no metadata, skipping bootstrap", source_name);
+                eprintln!(
+                    "  Reference '{}' has no metadata, skipping bootstrap",
+                    source_name
+                );
                 continue;
             }
         };
-        
+
         // Build citation instruction if citation info is available
         if let Some(citation) = &meta.citation {
             let instruction = format!(
@@ -67,18 +73,24 @@ pub fn bootstrap(identity: &mut IdentityStore, references: &ReferenceManager) ->
                 citation.title,
                 citation.format_reference()
             );
-            
+
             match identity.upsert_instruction(&instruction, &marker)? {
                 UpsertResult::Added => {
-                    eprintln!("  Citation instructions for '{}' added to identity", source_name);
+                    eprintln!(
+                        "  Citation instructions for '{}' added to identity",
+                        source_name
+                    );
                 }
                 UpsertResult::Updated => {
-                    eprintln!("  Citation instructions for '{}' updated in identity", source_name);
+                    eprintln!(
+                        "  Citation instructions for '{}' updated in identity",
+                        source_name
+                    );
                 }
                 UpsertResult::Unchanged => {}
             }
         }
     }
-    
+
     Ok(())
 }

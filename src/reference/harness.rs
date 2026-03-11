@@ -12,7 +12,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::reference::extractor::{default_extractor, PdfExtractor};
+    use crate::reference::extractor::{PdfExtractor, default_extractor};
     use crate::reference::indexer::Indexer;
     use crate::reference::profiles::ProfileRegistry;
     use crate::reference::sanitize::{sanitize_filename, validate_pdf};
@@ -182,14 +182,9 @@ mod tests {
         match result {
             Ok(Ok(())) => {
                 let idx_path = dest.with_extension("idx");
-                let idx_size = fs::metadata(&idx_path)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let idx_size = fs::metadata(&idx_path).map(|m| m.len()).unwrap_or(0);
                 (
-                    StageResult::Pass(format!(
-                        "index built ({} bytes)",
-                        idx_size
-                    )),
+                    StageResult::Pass(format!("index built ({} bytes)", idx_size)),
                     Some(idx_path),
                 )
             }
@@ -232,16 +227,12 @@ mod tests {
             source.ensure_index(extractor, profiles)?;
             let sections = source.list_sections()?;
             let search = source.search("the", 3)?;
-            Ok::<(usize, usize), crate::reference::ReferenceError>((
-                sections.len(),
-                search.len(),
-            ))
+            Ok::<(usize, usize), crate::reference::ReferenceError>((sections.len(), search.len()))
         }));
         match result {
-            Ok(Ok((sections, hits))) => StageResult::Pass(format!(
-                "{} sections, {} search hits",
-                sections, hits
-            )),
+            Ok(Ok((sections, hits))) => {
+                StageResult::Pass(format!("{} sections, {} search hits", sections, hits))
+            }
             Ok(Err(e)) => StageResult::Fail(format!("roundtrip error: {}", e)),
             Err(e) => {
                 let msg = panic_message(&e);
@@ -267,8 +258,8 @@ mod tests {
     #[test]
     #[ignore] // slow: processes entire PDF corpus; run explicitly with --ignored
     fn reference_harness() {
-        let corpus_dir = std::env::var("HARNESS_DIR")
-            .unwrap_or_else(|_| DEFAULT_CORPUS.to_string());
+        let corpus_dir =
+            std::env::var("HARNESS_DIR").unwrap_or_else(|_| DEFAULT_CORPUS.to_string());
         let corpus = Path::new(&corpus_dir);
 
         println!("\n{}", "=".repeat(60));
@@ -276,7 +267,11 @@ mod tests {
         println!("  corpus: {}", corpus.display());
         println!("{}", "=".repeat(60));
 
-        assert!(corpus.exists(), "Corpus directory does not exist: {}", corpus.display());
+        assert!(
+            corpus.exists(),
+            "Corpus directory does not exist: {}",
+            corpus.display()
+        );
 
         // Collect all entries (not just .pdf — we want to see what gets filtered)
         let mut entries: Vec<PathBuf> = fs::read_dir(corpus)
@@ -351,7 +346,10 @@ mod tests {
             if !extract_ok {
                 report.add("5. index", StageResult::Skip("extraction failed".into()));
                 report.add("6. search", StageResult::Skip("extraction failed".into()));
-                report.add("7. roundtrip", StageResult::Skip("extraction failed".into()));
+                report.add(
+                    "7. roundtrip",
+                    StageResult::Skip("extraction failed".into()),
+                );
                 reports.push(report);
                 continue;
             }
@@ -364,7 +362,10 @@ mod tests {
 
             if !index_ok || idx_path.is_none() {
                 report.add("6. search", StageResult::Skip("index build failed".into()));
-                report.add("7. roundtrip", StageResult::Skip("index build failed".into()));
+                report.add(
+                    "7. roundtrip",
+                    StageResult::Skip("index build failed".into()),
+                );
                 reports.push(report);
                 continue;
             }
@@ -444,18 +445,13 @@ mod tests {
             let panics: usize = reports
                 .iter()
                 .filter(|r| {
-                    r.stages
-                        .iter()
-                        .any(|(name, result)| {
-                            name == stage && matches!(result, StageResult::Panic(_))
-                        })
+                    r.stages.iter().any(|(name, result)| {
+                        name == stage && matches!(result, StageResult::Panic(_))
+                    })
                 })
                 .count();
             if fails > 0 || panics > 0 {
-                println!(
-                    "  {}: {} failures, {} panics",
-                    stage, fails, panics
-                );
+                println!("  {}: {} failures, {} panics", stage, fails, panics);
             }
         }
 

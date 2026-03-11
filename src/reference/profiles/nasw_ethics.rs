@@ -58,11 +58,12 @@ impl DocumentProfile for NaswEthicsProfile {
 
     fn matches(&self, filename: &str, _sample_text: &str) -> bool {
         let filename_lower = filename.to_lowercase();
-        
+
         // Match NASW ethics documents
-        (filename_lower.contains("nasw") && filename_lower.contains("ethics")) ||
-        (filename_lower.contains("code") && filename_lower.contains("ethics") && 
-         filename_lower.contains("social"))
+        (filename_lower.contains("nasw") && filename_lower.contains("ethics"))
+            || (filename_lower.contains("code")
+                && filename_lower.contains("ethics")
+                && filename_lower.contains("social"))
     }
 
     fn parse_sections(&self, pages: &[PageText]) -> Option<Vec<Section>> {
@@ -95,7 +96,7 @@ impl DocumentProfile for NaswEthicsProfile {
             elements.push((
                 pos,
                 ElementType::MajorSection(num.to_string()),
-                format!("{}. {}", num, title_cased)
+                format!("{}. {}", num, title_cased),
             ));
         }
 
@@ -108,7 +109,7 @@ impl DocumentProfile for NaswEthicsProfile {
             elements.push((
                 pos,
                 ElementType::Standard(section_num.to_string()),
-                format!("{}.{} {}", section_num, standard_num, title)
+                format!("{}.{} {}", section_num, standard_num, title),
             ));
         }
 
@@ -139,9 +140,7 @@ impl DocumentProfile for NaswEthicsProfile {
                     current_major_section = Some(title.clone());
                     None
                 }
-                ElementType::Standard(_) => {
-                    current_major_section.clone()
-                }
+                ElementType::Standard(_) => current_major_section.clone(),
             };
 
             sections.push(Section {
@@ -173,9 +172,9 @@ impl DocumentProfile for NaswEthicsProfile {
 #[allow(dead_code)] // Variant data used for structural context
 #[derive(Debug, Clone)]
 enum ElementType {
-    TopLevel,                // Preamble, Purpose, etc.
-    MajorSection(String),    // 1. Social Workers' Ethical Responsibilities...
-    Standard(String),        // 1.01 Commitment to Clients
+    TopLevel,             // Preamble, Purpose, etc.
+    MajorSection(String), // 1. Social Workers' Ethical Responsibilities...
+    Standard(String),     // 1.01 Commitment to Clients
 }
 
 /// Extract the most recent page number from text with our markers.

@@ -2,8 +2,8 @@
 
 use crate::engram::EngramId;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -63,12 +63,16 @@ impl Tool<Context> for EngramAssociateTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let from: EngramId = args.from.parse()
+        let from: EngramId = args
+            .from
+            .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid 'from' UUID: {}", e)))?;
-        let to: EngramId = args.to.parse()
+        let to: EngramId = args
+            .to
+            .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid 'to' UUID: {}", e)))?;
 
         let weight = args.weight.unwrap_or(0.5);
@@ -76,7 +80,8 @@ impl Tool<Context> for EngramAssociateTool {
 
         let mut brain = context.brain.lock().unwrap();
 
-        brain.associate_with_ordinal(from, to, weight, ordinal)
+        brain
+            .associate_with_ordinal(from, to, weight, ordinal)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         let ordinal_str = match ordinal {

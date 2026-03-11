@@ -10,9 +10,9 @@
 //! signals (for example semantic similarity and energy). Without this,
 //! raw RRF magnitudes (~0.01-0.03 with k=60) get swamped by other terms.
 
-use std::collections::HashMap;
 use super::SimilarityResult;
 use crate::engram::EngramId;
+use std::collections::HashMap;
 
 /// Default k constant from the original RRF paper (Cormack, Clarke, Buettcher 2009).
 pub const DEFAULT_K: f64 = 60.0;
@@ -89,14 +89,8 @@ mod tests {
 
     #[test]
     fn rrf_merges_disjoint_lists() {
-        let list_a = vec![
-            make_result(1, 0.9, "A1"),
-            make_result(2, 0.8, "A2"),
-        ];
-        let list_b = vec![
-            make_result(3, 0.95, "B1"),
-            make_result(4, 0.85, "B2"),
-        ];
+        let list_a = vec![make_result(1, 0.9, "A1"), make_result(2, 0.8, "A2")];
+        let list_b = vec![make_result(3, 0.95, "B1"), make_result(4, 0.85, "B2")];
 
         let merged = reciprocal_rank_fusion(&[&list_a, &list_b], DEFAULT_K);
 
@@ -115,10 +109,7 @@ mod tests {
     #[test]
     fn rrf_merges_overlapping_lists() {
         // Item 1 appears in both lists — should get highest score
-        let list_a = vec![
-            make_result(1, 0.9, "Shared"),
-            make_result(2, 0.8, "A only"),
-        ];
+        let list_a = vec![make_result(1, 0.9, "Shared"), make_result(2, 0.8, "A only")];
         let list_b = vec![
             make_result(1, 0.95, "Shared"),
             make_result(3, 0.85, "B only"),
@@ -175,8 +166,11 @@ mod tests {
         let merged = reciprocal_rank_fusion(&[&list_a, &list_b], DEFAULT_K);
 
         assert_eq!(merged.len(), 1);
-        assert!((merged[0].score - 1.0).abs() < 1e-6,
-            "Expected normalized score 1.0, got {}", merged[0].score);
+        assert!(
+            (merged[0].score - 1.0).abs() < 1e-6,
+            "Expected normalized score 1.0, got {}",
+            merged[0].score
+        );
     }
 
     #[test]

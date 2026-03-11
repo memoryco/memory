@@ -30,7 +30,7 @@ impl IdentityField {
             Self::Antipattern => "antipattern",
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -44,7 +44,7 @@ impl IdentityField {
             _ => None,
         }
     }
-    
+
     /// All field types
     #[allow(dead_code)]
     pub fn all() -> &'static [IdentityField] {
@@ -193,24 +193,26 @@ impl ClassificationResult {
     pub fn matches(&self, expected: IdentityField) -> bool {
         self.predicted == expected
     }
-    
+
     /// Get a warning message if there's a mismatch
     pub fn mismatch_warning(&self, requested: IdentityField) -> Option<String> {
         if self.predicted == requested {
             return None;
         }
-        
+
         // Find the score for the requested field
-        let requested_score = self.scores.iter()
+        let requested_score = self
+            .scores
+            .iter()
             .find(|(f, _)| *f == requested)
             .map(|(_, s)| *s)
             .unwrap_or(0.0);
-        
+
         // Only warn if there's a meaningful difference
         if self.confidence - requested_score < 0.1 {
             return None; // Close enough, don't be pedantic
         }
-        
+
         Some(format!(
             "You specified '{}', but this looks more like a '{}' (confidence: {:.0}% vs {:.0}%). Proceeding anyway.",
             requested,
@@ -225,7 +227,7 @@ impl ClassificationResult {
 fn init_embeddings() -> Vec<LabeledEmbedding> {
     let generator = EmbeddingGenerator::new();
     let mut embeddings = Vec::new();
-    
+
     for field_ex in FIELD_EXAMPLES {
         for example in field_ex.examples {
             if let Ok(emb) = generator.generate(example) {
@@ -236,7 +238,7 @@ fn init_embeddings() -> Vec<LabeledEmbedding> {
             }
         }
     }
-    
+
     embeddings
 }
 
@@ -249,21 +251,21 @@ fn get_embeddings() -> &'static Vec<LabeledEmbedding> {
 pub fn classify(content: &str) -> Option<ClassificationResult> {
     let generator = EmbeddingGenerator::new();
     let content_embedding = generator.generate(content).ok()?;
-    
+
     let examples = get_embeddings();
     if examples.is_empty() {
         return None;
     }
-    
+
     // Calculate similarity to each example
-    let mut field_scores: std::collections::HashMap<IdentityField, Vec<f32>> = 
+    let mut field_scores: std::collections::HashMap<IdentityField, Vec<f32>> =
         std::collections::HashMap::new();
-    
+
     for labeled in examples {
         let sim = cosine_similarity(&content_embedding, &labeled.embedding);
         field_scores.entry(labeled.field).or_default().push(sim);
     }
-    
+
     // Average scores per field
     let mut avg_scores: Vec<(IdentityField, f32)> = field_scores
         .into_iter()
@@ -272,12 +274,12 @@ pub fn classify(content: &str) -> Option<ClassificationResult> {
             (field, avg)
         })
         .collect();
-    
+
     // Sort by score descending
     avg_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    
+
     let (predicted, confidence) = avg_scores.first().cloned()?;
-    
+
     Some(ClassificationResult {
         predicted,
         confidence,
@@ -290,66 +292,69 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
-    
+
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    
+
     if norm_a == 0.0 || norm_b == 0.0 {
         return 0.0;
     }
-    
+
     dot / (norm_a * norm_b)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn field_from_str_works() {
         assert_eq!(IdentityField::from_str("value"), Some(IdentityField::Value));
         assert_eq!(IdentityField::from_str("VALUE"), Some(IdentityField::Value));
-        assert_eq!(IdentityField::from_str("preference"), Some(IdentityField::Preference));
+        assert_eq!(
+            IdentityField::from_str("preference"),
+            Some(IdentityField::Preference)
+        );
         assert_eq!(IdentityField::from_str("unknown"), None);
     }
-    
+
     #[test]
     fn classify_preference() {
         let result = classify("I like vim better than emacs").unwrap();
         assert_eq!(result.predicted, IdentityField::Preference);
     }
-    
+
     #[test]
     fn classify_value() {
         let result = classify("Code quality is more important than shipping fast").unwrap();
         assert_eq!(result.predicted, IdentityField::Value);
     }
-    
+
     #[test]
     fn classify_relationship() {
         let result = classify("Mike is my team lead").unwrap();
         assert_eq!(result.predicted, IdentityField::Relationship);
     }
-    
+
     #[test]
     fn classify_expertise() {
         let result = classify("I'm proficient in Python and Go").unwrap();
         assert_eq!(result.predicted, IdentityField::Expertise);
     }
-    
+
     #[test]
     fn classify_trait() {
         let result = classify("I am meticulous and careful").unwrap();
         assert_eq!(result.predicted, IdentityField::Trait);
     }
-    
+
     #[test]
     fn classify_instruction() {
         let result = classify("Run the test suite before merging pull requests").unwrap();
         assert_eq!(result.predicted, IdentityField::Instruction);
     }
-    
+
     #[test]
     fn classify_antipattern() {
         let result = classify("Avoid using global mutable state").unwrap();

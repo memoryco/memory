@@ -135,9 +135,9 @@ mod tests {
     fn test_lens_from_file_with_heading() {
         let dir = TempDir::new().unwrap();
         create_test_lens(dir.path(), "test", "# My Test Lens\n\nThis is the content.");
-        
+
         let lens = Lens::from_file(&dir.path().join("test.md")).unwrap();
-        
+
         assert_eq!(lens.name, "test");
         assert_eq!(lens.description, Some("My Test Lens".to_string()));
         assert_eq!(lens.content, "This is the content.");
@@ -147,9 +147,9 @@ mod tests {
     fn test_lens_from_file_without_heading() {
         let dir = TempDir::new().unwrap();
         create_test_lens(dir.path(), "plain", "Just some content without a heading.");
-        
+
         let lens = Lens::from_file(&dir.path().join("plain.md")).unwrap();
-        
+
         assert_eq!(lens.name, "plain");
         assert_eq!(lens.description, None);
         assert_eq!(lens.content, "Just some content without a heading.");
@@ -158,10 +158,14 @@ mod tests {
     #[test]
     fn test_lens_from_file_multiline_heading() {
         let dir = TempDir::new().unwrap();
-        create_test_lens(dir.path(), "multi", "## Secondary Heading\n\nParagraph one.\n\nParagraph two.");
-        
+        create_test_lens(
+            dir.path(),
+            "multi",
+            "## Secondary Heading\n\nParagraph one.\n\nParagraph two.",
+        );
+
         let lens = Lens::from_file(&dir.path().join("multi.md")).unwrap();
-        
+
         assert_eq!(lens.name, "multi");
         assert_eq!(lens.description, Some("Secondary Heading".to_string()));
         assert!(lens.content.contains("Paragraph one"));
@@ -180,12 +184,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         create_test_lens(dir.path(), "one", "# First\n\nContent one.");
         create_test_lens(dir.path(), "two", "# Second\n\nContent two.");
-        
+
         // Also create a non-md file that should be ignored
         std::fs::write(dir.path().join("ignore.txt"), "ignored").unwrap();
-        
+
         let lenses = load_lenses(&dir.path().to_path_buf());
-        
+
         assert_eq!(lenses.len(), 2);
         let names: Vec<&str> = lenses.iter().map(|l| l.name.as_str()).collect();
         assert!(names.contains(&"one"));
@@ -205,7 +209,7 @@ mod tests {
             description: Some("A test".to_string()),
             content: "Content here".to_string(),
         };
-        
+
         assert_eq!(lens.name(), "test-lens");
     }
 
@@ -216,7 +220,7 @@ mod tests {
             description: Some("My description".to_string()),
             content: "Content".to_string(),
         };
-        
+
         assert_eq!(lens.description(), Some("My description"));
     }
 
@@ -227,7 +231,7 @@ mod tests {
             description: None,
             content: "Content".to_string(),
         };
-        
+
         assert!(lens.arguments().is_empty());
     }
 
@@ -238,9 +242,9 @@ mod tests {
             description: None,
             content: "The full lens content here.".to_string(),
         };
-        
+
         let messages = lens.get_messages(&HashMap::new()).unwrap();
-        
+
         assert_eq!(messages.len(), 1);
         assert!(matches!(messages[0].role, Role::User));
     }

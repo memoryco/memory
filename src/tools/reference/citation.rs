@@ -1,7 +1,7 @@
 //! reference_citation - Get citation info for a source
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -44,22 +44,31 @@ impl Tool<Context> for ReferenceCitationTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let source_name = args.get("source")
+        let source_name = args
+            .get("source")
             .and_then(|v| v.as_str())
             .ok_or_else(|| sml_mcps::McpError::InvalidParams("source is required".into()))?;
-        
-        let page_start = args.get("page_start").and_then(|v| v.as_u64()).map(|p| p as usize);
-        let page_end = args.get("page_end").and_then(|v| v.as_u64()).map(|p| p as usize);
+
+        let page_start = args
+            .get("page_start")
+            .and_then(|v| v.as_u64())
+            .map(|p| p as usize);
+        let page_end = args
+            .get("page_end")
+            .and_then(|v| v.as_u64())
+            .map(|p| p as usize);
 
         let references = context.references.lock().unwrap();
 
         let citation = match references.get_citation(source_name) {
             Some(c) => c,
-            None => return Ok(text_response(format!(
-                "No citation metadata found for: {}\n\n\
+            None => {
+                return Ok(text_response(format!(
+                    "No citation metadata found for: {}\n\n\
                  To add citation info, create a {}.meta.json file next to the PDF.",
-                source_name, source_name
-            ))),
+                    source_name, source_name
+                )));
+            }
         };
 
         let mut output = String::new();
@@ -73,7 +82,7 @@ impl Tool<Context> for ReferenceCitationTool {
         } else {
             output.push_str(&citation.format_inline_short());
         }
-        
+
         output.push_str("\n\n**Full reference:**\n");
         output.push_str(&citation.format_reference());
 

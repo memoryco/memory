@@ -1,8 +1,8 @@
 //! identity_search - Search identity content
 
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::text_response;
@@ -42,11 +42,12 @@ impl Tool<Context> for IdentitySearchTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let args: Args = serde_json::from_value(args)
-            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+        let args: Args =
+            serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
         let mut store = context.identity.lock().unwrap();
-        let identity = store.get()
+        let identity = store
+            .get()
             .map_err(|e| McpError::ToolError(e.to_string()))?;
         let results = identity.search(&args.query);
 

@@ -1,5 +1,5 @@
 //! MCP tools for the engram memory system.
-//! 
+//!
 //! Tools are organized by category:
 //! - `engram` - Memory CRUD and graph operations
 //! - `identity` - Persona, values, preferences management
@@ -7,81 +7,68 @@
 //! - `lenses` - Task-specific context guides
 //! - `reference` - Authoritative document search and citation
 
+pub mod config;
+pub mod date_resolve;
 pub mod engram;
 pub mod identity;
-pub mod config;
 pub mod lenses;
+pub mod open_dashboard;
 pub mod plans;
 pub mod reference;
-pub mod open_dashboard;
-pub mod date_resolve;
 
 use crate::engram::Engram;
 use sml_mcps::CallToolResult;
 
 // Re-export all tools for easy registration
-pub use engram::{  // tools::engram (tool implementations)
+pub use engram::{
+    EngramAssociateTool,
+    EngramAssociationsTool,
+    // tools::engram (tool implementations)
     EngramCreateTool,
+    EngramDeleteTool,
+    EngramGetTool,
+    EngramGraphTool,
     EngramRecallTool,
     EngramSearchTool,
-    EngramGetTool,
-    EngramDeleteTool,
-    EngramAssociateTool,
     EngramStatsTool,
-    EngramAssociationsTool,
-    EngramGraphTool,
 };
 
 pub use identity::{
-    // Core identity tools
-    IdentityGetTool,
-    IdentitySearchTool,
-    IdentityListTool,
-    IdentityRemoveTool,
-    IdentitySetupTool,
-    // Typed add tools
-    IdentitySetPersonaNameTool,
-    IdentitySetPersonaDescriptionTool,
-    IdentityAddTraitTool,
+    IdentityAddAntipatternTool,
+    IdentityAddDirectiveTool,
     IdentityAddExpertiseTool,
     IdentityAddInstructionTool,
-    IdentityAddToneTool,
-    IdentityAddDirectiveTool,
-    IdentityAddValueTool,
     IdentityAddPreferenceTool,
     IdentityAddRelationshipTool,
-    IdentityAddAntipatternTool,
+    IdentityAddToneTool,
+    IdentityAddTraitTool,
+    IdentityAddValueTool,
+    // Core identity tools
+    IdentityGetTool,
+    IdentityListTool,
+    IdentityRemoveTool,
+    IdentitySearchTool,
+    IdentitySetPersonaDescriptionTool,
+    // Typed add tools
+    IdentitySetPersonaNameTool,
+    IdentitySetupTool,
 };
 
-pub use config::{
-    ConfigGetTool,
-    ConfigSetTool,
-};
+pub use config::{ConfigGetTool, ConfigSetTool};
 
-pub use lenses::{
-    LensesListTool,
-    LensesGetTool,
-};
+pub use lenses::{LensesGetTool, LensesListTool};
 
 pub use reference::{
-    ReferenceListTool,
-    ReferenceSearchTool,
-    ReferenceGetTool,
+    ReferenceCitationTool, ReferenceGetTool, ReferenceListTool, ReferenceSearchTool,
     ReferenceSectionsTool,
-    ReferenceCitationTool,
 };
 
 pub use plans::{
-    PlansListTool,
-    PlanGetTool,
-    PlanStartTool,
-    PlanStopTool,
-    StepAddTool,
-    StepCompleteTool,
+    PlanGetTool, PlanStartTool, PlanStopTool, PlansListTool, StepAddTool, StepCompleteTool,
 };
 
-pub use open_dashboard::OpenDashboardTool;
 pub use date_resolve::DateResolveTool;
+pub use open_dashboard::OpenDashboardTool;
 
 // =============================================================================
 // Common helpers

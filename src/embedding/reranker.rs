@@ -6,9 +6,9 @@
 //!
 //! The reranker model is lazy-loaded on first use (~50MB download).
 
-use std::sync::Mutex;
-use fastembed::{TextRerank, RerankInitOptions, RerankerModel};
 use crate::config;
+use fastembed::{RerankInitOptions, RerankerModel, TextRerank};
+use std::sync::Mutex;
 
 /// Global reranker model (lazy-loaded on first use)
 static RERANKER: Mutex<Option<TextRerank>> = Mutex::new(None);
@@ -35,7 +35,8 @@ pub enum RerankError {
 
 /// Ensure the global reranker model is loaded.
 fn ensure_loaded() -> Result<(), RerankError> {
-    let mut guard = RERANKER.lock()
+    let mut guard = RERANKER
+        .lock()
         .map_err(|e| RerankError::Lock(e.to_string()))?;
 
     if guard.is_some() {
@@ -44,14 +45,17 @@ fn ensure_loaded() -> Result<(), RerankError> {
 
     let cache_dir = config::get_model_cache_dir();
     std::fs::create_dir_all(&cache_dir).ok();
-    eprintln!("[reranker] Loading BGERerankerBase (cache: {})...", cache_dir.display());
+    eprintln!(
+        "[reranker] Loading BGERerankerBase (cache: {})...",
+        cache_dir.display()
+    );
 
     let options = RerankInitOptions::new(RerankerModel::BGERerankerBase)
         .with_cache_dir(cache_dir)
         .with_show_download_progress(true);
 
-    let reranker = TextRerank::try_new(options)
-        .map_err(|e| RerankError::ModelLoad(e.to_string()))?;
+    let reranker =
+        TextRerank::try_new(options).map_err(|e| RerankError::ModelLoad(e.to_string()))?;
 
     *guard = Some(reranker);
     eprintln!("[reranker] BGERerankerBase loaded successfully");
@@ -76,18 +80,23 @@ pub fn rerank(query: &str, documents: &[&str]) -> Result<Vec<RerankScore>, Reran
 
     ensure_loaded()?;
 
-    let mut guard = RERANKER.lock()
+    let mut guard = RERANKER
+        .lock()
         .map_err(|e| RerankError::Lock(e.to_string()))?;
 
     let reranker = guard.as_mut().unwrap();
 
-    let results = reranker.rerank(query, documents, false, None)
+    let results = reranker
+        .rerank(query, documents, false, None)
         .map_err(|e| RerankError::Rerank(e.to_string()))?;
 
-    Ok(results.into_iter().map(|r| RerankScore {
-        index: r.index,
-        score: r.score,
-    }).collect())
+    Ok(results
+        .into_iter()
+        .map(|r| RerankScore {
+            index: r.index,
+            score: r.score,
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -132,13 +141,18 @@ mod tests {
         let results = rerank(query, &documents).unwrap();
 
         // The Rust document (index 1) should be ranked first
-        assert_eq!(results[0].index, 1,
+        assert_eq!(
+            results[0].index, 1,
             "The Rust programming document should be ranked highest, got index {}",
-            results[0].index);
+            results[0].index
+        );
 
         // The Rust doc score should be higher than the others
-        assert!(results[0].score > results[1].score,
+        assert!(
+            results[0].score > results[1].score,
             "Top result score ({}) should be > second ({})",
-            results[0].score, results[1].score);
+            results[0].score,
+            results[1].score
+        );
     }
 }

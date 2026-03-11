@@ -20,15 +20,15 @@
 //! # Ok::<(), reference::ReferenceError>(())
 //! ```
 
+pub mod bootstrap;
 pub mod citation;
 pub mod error;
 pub mod extractor;
 pub mod indexer;
 pub mod profiles;
+pub mod sanitize;
 pub mod searcher;
 pub mod source;
-pub mod bootstrap;
-pub mod sanitize;
 
 #[cfg(test)]
 mod harness;
@@ -147,7 +147,11 @@ impl ReferenceManager {
         }
 
         // Sort by rank across all sources
-        all_results.sort_by(|a, b| a.1.rank.partial_cmp(&b.1.rank).unwrap_or(std::cmp::Ordering::Equal));
+        all_results.sort_by(|a, b| {
+            a.1.rank
+                .partial_cmp(&b.1.rank)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all_results.truncate(limit);
 
         Ok(all_results)
@@ -169,11 +173,7 @@ impl ReferenceManager {
     }
 
     /// Get a section from a specific source.
-    pub fn get_section(
-        &mut self,
-        source_name: &str,
-        title: &str,
-    ) -> Result<Option<SearchResult>> {
+    pub fn get_section(&mut self, source_name: &str, title: &str) -> Result<Option<SearchResult>> {
         let source = self
             .sources
             .get_mut(source_name)
@@ -256,14 +256,21 @@ impl ReferenceManager {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Warning: search failed for related source {}: {}", related_name, e);
+                        eprintln!(
+                            "Warning: search failed for related source {}: {}",
+                            related_name, e
+                        );
                     }
                 }
             }
         }
 
         // Sort by rank across all sources
-        all_results.sort_by(|a, b| a.1.rank.partial_cmp(&b.1.rank).unwrap_or(std::cmp::Ordering::Equal));
+        all_results.sort_by(|a, b| {
+            a.1.rank
+                .partial_cmp(&b.1.rank)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all_results.truncate(limit);
 
         Ok(all_results)

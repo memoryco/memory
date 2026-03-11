@@ -1,7 +1,7 @@
 //! lenses_list - List available lenses
 
-use serde_json::{json, Value as JsonValue};
-use sml_mcps::{Tool, ToolEnv, CallToolResult, PromptDef};
+use serde_json::{Value as JsonValue, json};
+use sml_mcps::{CallToolResult, PromptDef, Tool, ToolEnv};
 
 use crate::Context;
 use crate::lenses::load_lenses;
@@ -33,7 +33,7 @@ impl Tool<Context> for LensesListTool {
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
         let lenses = load_lenses(&context.lenses_dir);
-        
+
         if lenses.is_empty() {
             return Ok(text_response(format!(
                 "No lenses found in {}",
@@ -43,7 +43,8 @@ impl Tool<Context> for LensesListTool {
 
         let mut output = format!("Available lenses ({}):\n\n", lenses.len());
         for lens in &lenses {
-            let desc = lens.description()
+            let desc = lens
+                .description()
                 .map(|d| format!(" - {}", d))
                 .unwrap_or_default();
             output.push_str(&format!("• {}{}\n", lens.name(), desc));

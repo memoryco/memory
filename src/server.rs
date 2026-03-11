@@ -101,8 +101,24 @@ pub fn run() {
         }
     };
 
+    // --- Config ---
+    // Write default config.toml if missing, then load brain config from it.
+    let config_toml_path = memory_home.join("config.toml");
+    if !config_toml_path.exists() {
+        if let Err(e) = crate::engram::config_toml::ensure_default_config_toml(&memory_home) {
+            eprintln!("Warning: Failed to write default config.toml: {}", e);
+        } else {
+            eprintln!("  Config: wrote default config.toml");
+        }
+    }
+    let brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
+    eprintln!(
+        "  Config: embedding_model={}, rerank_enabled={}, hybrid_search={}",
+        brain_config.embedding_model, brain_config.rerank_enabled, brain_config.hybrid_search_enabled
+    );
+
     // --- Brain ---
-    let mut brain = Brain::open_path(&db_path).expect("Failed to open brain");
+    let mut brain = Brain::open_path(&db_path, brain_config).expect("Failed to open brain");
 
     apply_maintenance(&mut brain);
     backfill_embeddings(&mut brain);

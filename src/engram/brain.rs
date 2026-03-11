@@ -31,13 +31,19 @@ pub struct Brain {
 }
 
 impl Brain {
-    /// Create a new Brain with empty identity and substrate
+    /// Create a new Brain with empty identity and substrate.
+    /// `config` is loaded externally (from config.toml) and passed in.
     /// Note: This constructor doesn't create a persistence worker since
     /// we don't have a db path. Use `open_path` for full persistence support.
-    pub fn new<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
+    pub fn new<S: Storage + 'static>(mut storage: S, mut config: Config) -> StorageResult<Self> {
         storage.initialize()?;
 
-        let config = storage.load_config()?.unwrap_or_default();
+        // Load runtime state (embedding_model_active) from SQLite metadata.
+        // This is NOT stored in config.toml — it tracks what model was actually used.
+        if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
+            config.embedding_model_active = Some(active);
+        }
+
         Self::apply_embedding_model_config(&config);
 
         let mut brain = Self {
@@ -53,14 +59,18 @@ impl Brain {
         Ok(brain)
     }
 
-    /// Open an existing Brain from storage, or create new if empty
+    /// Open an existing Brain from storage, or create new if empty.
+    /// `config` is loaded externally (from config.toml) and passed in.
     /// Note: This constructor doesn't create a persistence worker since
     /// we don't have a db path. Use `open_path` for full persistence support.
-    pub fn open<S: Storage + 'static>(mut storage: S) -> StorageResult<Self> {
+    pub fn open<S: Storage + 'static>(mut storage: S, mut config: Config) -> StorageResult<Self> {
         storage.initialize()?;
 
-        // Load config
-        let config = storage.load_config()?.unwrap_or_default();
+        // Load runtime state (embedding_model_active) from SQLite metadata.
+        if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
+            config.embedding_model_active = Some(active);
+        }
+
         Self::apply_embedding_model_config(&config);
 
         // Load identity
@@ -104,17 +114,21 @@ impl Brain {
         Ok(brain)
     }
 
-    /// Open a Brain from a database path with full async persistence support
+    /// Open a Brain from a database path with full async persistence support.
+    /// `config` is loaded externally (from config.toml) and passed in.
     /// This is the preferred way to open a Brain for production use.
-    pub fn open_path(db_path: impl Into<PathBuf>) -> StorageResult<Self> {
+    pub fn open_path(db_path: impl Into<PathBuf>, mut config: Config) -> StorageResult<Self> {
         use super::storage::EngramStorage;
 
         let path = db_path.into();
         let mut storage = EngramStorage::open(&path)?;
         storage.initialize()?;
 
-        // Load config
-        let config = storage.load_config()?.unwrap_or_default();
+        // Load runtime state (embedding_model_active) from SQLite metadata.
+        if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
+            config.embedding_model_active = Some(active);
+        }
+
         Self::apply_embedding_model_config(&config);
 
         // Load identity
@@ -556,10 +570,11 @@ impl Brain {
         self.substrate.config()
     }
 
-    /// Update configuration and persist
+    /// Update the in-memory configuration.
+    /// Callers (e.g. config_set tool) are responsible for persisting to config.toml.
     pub fn set_config(&mut self, config: Config) -> StorageResult<()> {
         self.substrate.config = config;
-        self.storage.save_config(self.substrate.config())
+        Ok(())
     }
 
     /// Update a single config value
@@ -616,15 +631,15 @@ impl Brain {
 
         if updated {
             self.substrate.config = config;
-            self.storage.save_config(self.substrate.config())?;
         }
 
         Ok(updated)
     }
 
-    /// Save config (for manual saves)
+    /// No-op: config is now persisted to config.toml by the config_set tool.
+    /// Kept for API compatibility.
     pub fn save_config(&mut self) -> StorageResult<()> {
-        self.storage.save_config(self.substrate.config())
+        Ok(())
     }
 
     /// Save an engram directly to storage (for bulk operations like decompose)
@@ -916,17 +931,17 @@ impl Brain {
     /// Steps: NULL all embeddings → re-embed in batch → update config.
     pub fn migrate_embeddings(&mut self) -> StorageResult<()> {
         let config = self.substrate.config();
-        let desired = &config.embedding_model;
-        let active = config.embedding_model_active.as_deref();
+        let desired = config.embedding_model.clone();
+        let active = config.embedding_model_active.clone();
 
         // If active matches desired, no migration needed
-        if active == Some(desired.as_str()) {
+        if active.as_deref() == Some(desired.as_str()) {
             return Ok(());
         }
 
         eprintln!(
             "[brain] Embedding model migration: {:?} → {}",
-            active.unwrap_or("(none)"),
+            active.as_deref().unwrap_or("(none)"),
             desired
         );
 
@@ -970,11 +985,12 @@ impl Brain {
             }
         }
 
-        // Step 3: Update config to record the active model
+        // Step 3: Update in-memory config and persist the active model to SQLite metadata.
+        // embedding_model_active is runtime state, not stored in config.toml.
         let mut new_config = self.substrate.config().clone();
         new_config.embedding_model_active = Some(desired.clone());
         self.substrate.config = new_config;
-        self.storage.save_config(self.substrate.config())?;
+        self.storage.set_metadata("embedding_model_active", &desired)?;
 
         eprintln!("[brain] Embedding migration complete");
         Ok(())
@@ -1044,7 +1060,7 @@ mod tests {
     #[test]
     fn create_and_recall() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let id = brain.create("Test memory").unwrap();
 
@@ -1057,7 +1073,7 @@ mod tests {
     fn persistence_survives_reload() {
         // Create brain, add memory, close
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let id = brain
             .create_with_tags("Persistent memory", vec!["test".into()])
@@ -1073,7 +1089,7 @@ mod tests {
     #[test]
     fn recall_persists_energy_changes() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let id = brain.create("Test memory").unwrap();
 
@@ -1090,7 +1106,7 @@ mod tests {
     #[test]
     fn identity_persistence() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         brain.identity_mut().persona.name = "Porter".to_string();
 
@@ -1103,7 +1119,7 @@ mod tests {
     #[test]
     fn search_doesnt_mutate() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let id = brain
             .create_with_tags("Searchable memory", vec!["work".into()])
@@ -1122,7 +1138,7 @@ mod tests {
     #[test]
     fn association_creation() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let a = brain.create("Memory A").unwrap();
         let b = brain.create("Memory B").unwrap();
@@ -1141,7 +1157,7 @@ mod tests {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let id = brain.create("Test memory").unwrap();
         assert_eq!(brain.get(&id).unwrap().energy, 1.0);
@@ -1175,7 +1191,7 @@ mod tests {
     #[test]
     fn decay_skips_when_interval_not_elapsed() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let id = brain.create("Test memory").unwrap();
 
@@ -1199,14 +1215,14 @@ mod tests {
         let db_path = dir.path().join("brain.db");
 
         // "Process A" — create and write a memory
-        let mut brain_a = Brain::open_path(&db_path).unwrap();
+        let mut brain_a = Brain::open_path(&db_path, Config::default()).unwrap();
         let id = brain_a.create("artichokes are delicious").unwrap();
         brain_a.flush().unwrap();
 
         // "Process B" — opened AFTER A's write, but simulating a stale substrate
         // by opening a fresh Brain (its substrate will load the memory).
         // To truly test staleness, we open B, then have A create another memory.
-        let mut brain_b = Brain::open_path(&db_path).unwrap();
+        let mut brain_b = Brain::open_path(&db_path, Config::default()).unwrap();
 
         // B can see the first memory (loaded at startup)
         assert!(
@@ -1241,8 +1257,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("brain.db");
 
-        let mut brain_a = Brain::open_path(&db_path).unwrap();
-        let mut brain_b = Brain::open_path(&db_path).unwrap();
+        let mut brain_a = Brain::open_path(&db_path, Config::default()).unwrap();
+        let mut brain_b = Brain::open_path(&db_path, Config::default()).unwrap();
 
         // A creates several memories after B is already open
         let id1 = brain_a.create("memory one").unwrap();
@@ -1295,7 +1311,7 @@ mod tests {
     fn brain_with_sqlite() -> Brain {
         use super::super::storage::EngramStorage;
         let storage = EngramStorage::in_memory().unwrap();
-        Brain::new(storage).unwrap()
+        Brain::new(storage, Config::default()).unwrap()
     }
 
     #[test]
@@ -1361,14 +1377,16 @@ mod tests {
         assert_eq!(discoveries.len(), 1);
         assert_eq!(discoveries[0].id, id_b);
         assert!(discoveries[0].association_weight > 0.0);
-        // Blended score should include association bonus
-        let expected_sim = crate::embedding::cosine_similarity(&query, &[0.1, 0.9, 0.0]);
-        let expected_base = expected_sim * 0.7 + 1.0_f32 * 0.3; // energy=1.0 for new engram
+        // Blended score should include association bonus on top of base score.
+        // Actual formula: similarity * (0.5 + energy * 0.5) + assoc_weight * 0.1
+        let sim = crate::embedding::cosine_similarity(&query, &[0.1, 0.9, 0.0]);
+        let energy = 1.0_f32; // new engram has full energy
+        let base_without_bonus = sim * (0.5 + energy * 0.5);
         assert!(
-            discoveries[0].blended_score > expected_base,
+            discoveries[0].blended_score > base_without_bonus,
             "blended score {} should be > base {} due to association bonus",
             discoveries[0].blended_score,
-            expected_base
+            base_without_bonus
         );
     }
 
@@ -1535,7 +1553,7 @@ mod tests {
     #[test]
     fn config_search_association_roundtrip() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         // Default: enabled
         assert!(brain.config().search_follow_associations);
@@ -1565,7 +1583,7 @@ mod tests {
     #[test]
     fn associate_without_ordinal_backward_compat() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let a = brain.create("Memory A").unwrap();
         let b = brain.create("Memory B").unwrap();
@@ -1582,7 +1600,7 @@ mod tests {
     #[test]
     fn associate_with_ordinal() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let anchor = brain.create("Deploy procedure").unwrap();
         let step1 = brain.create("Pull latest code").unwrap();
@@ -1614,7 +1632,7 @@ mod tests {
         use super::super::storage::EngramStorage;
 
         let storage = EngramStorage::in_memory().unwrap();
-        let mut brain = Brain::open(storage).unwrap();
+        let mut brain = Brain::open(storage, Config::default()).unwrap();
 
         let a = brain.create("Anchor").unwrap();
         let b = brain.create("Step 1").unwrap();
@@ -1629,7 +1647,7 @@ mod tests {
     #[test]
     fn mixed_ordinal_and_hebbian_associations() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let anchor = brain.create("Procedure anchor").unwrap();
         let step1 = brain.create("Step 1").unwrap();
@@ -1655,7 +1673,7 @@ mod tests {
     #[test]
     fn ordinal_survives_prune_weak_associations() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         let anchor = brain.create("Procedure").unwrap();
         let step1 = brain.create("Strong step").unwrap();
@@ -2038,7 +2056,7 @@ mod tests {
     #[test]
     fn config_rerank_roundtrip() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         // Default: enabled with 30 candidates
         assert!(brain.config().rerank_enabled);
@@ -2102,7 +2120,7 @@ mod tests {
     #[test]
     fn config_hybrid_search_roundtrip() {
         let storage = MemoryStorage::new();
-        let mut brain = Brain::new(storage).unwrap();
+        let mut brain = Brain::new(storage, Config::default()).unwrap();
 
         // Default: enabled
         assert!(brain.config().hybrid_search_enabled);

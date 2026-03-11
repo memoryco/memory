@@ -5,7 +5,7 @@
 //! via feature flags at compile time.
 
 use super::models::*;
-use super::schema::{associations, config, engrams, identity, metadata};
+use super::schema::{associations, engrams, identity, metadata};
 use super::{SimilarityResult, Storage, StorageError, StorageResult};
 use crate::engram::{Association, Config, Engram, EngramId, Identity, MemoryState};
 
@@ -588,30 +588,16 @@ impl Storage for EngramStorage {
     // CONFIG
     // ==================
 
-    fn save_config(&mut self, cfg: &Config) -> StorageResult<()> {
-        let json = serde_json::to_string(cfg)?;
-
-        diesel::replace_into(config::table)
-            .values(NewConfig { id: 1, data: &json })
-            .execute(&mut self.conn)?;
-
+    fn save_config(&mut self, _cfg: &Config) -> StorageResult<()> {
+        // Config is now stored in config.toml, not SQLite.
+        // This is a no-op kept for trait compatibility.
         Ok(())
     }
 
     fn load_config(&mut self) -> StorageResult<Option<Config>> {
-        let result: Option<ConfigRow> = config::table
-            .filter(config::id.eq(1))
-            .select(ConfigRow::as_select())
-            .first(&mut self.conn)
-            .optional()?;
-
-        match result {
-            Some(row) => {
-                let cfg: Config = serde_json::from_str(&row.data)?;
-                Ok(Some(cfg))
-            }
-            None => Ok(None),
-        }
+        // Config is now loaded from config.toml at startup.
+        // This is a no-op kept for trait compatibility.
+        Ok(None)
     }
 
     fn save_last_decay_at(&mut self, timestamp: i64) -> StorageResult<()> {
@@ -1071,25 +1057,22 @@ mod tests {
 
     #[test]
     fn config_persistence() {
+        // Config is now stored in config.toml, not SQLite.
+        // save_config/load_config are no-ops kept for trait compatibility.
         let mut storage = EngramStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         let config = Config {
             decay_rate_per_day: 0.1,
-            decay_interval_hours: 2.0,
-            propagation_damping: 0.6,
-            hebbian_learning_rate: 0.2,
-            recall_strength: 0.3,
             ..Default::default()
         };
 
+        // save_config is a no-op
         storage.save_config(&config).unwrap();
 
+        // load_config always returns None (config lives in config.toml)
         let loaded = storage.load_config().unwrap();
-        assert!(loaded.is_some());
-        let loaded = loaded.unwrap();
-        assert!((loaded.decay_rate_per_day - 0.1).abs() < 0.001);
-        assert!((loaded.recall_strength - 0.3).abs() < 0.001);
+        assert!(loaded.is_none(), "load_config should return None (config is in config.toml)");
     }
 
     #[test]
@@ -1098,7 +1081,7 @@ mod tests {
 
         // Create a brain with Diesel backend
         let storage = EngramStorage::in_memory().unwrap();
-        let mut brain = Brain::open(storage).unwrap();
+        let mut brain = Brain::open(storage, crate::engram::Config::default()).unwrap();
 
         // Create some memories
         let rust_talk = brain

@@ -12,6 +12,7 @@
 pub mod association;
 pub mod bootstrap;
 pub mod brain;
+pub mod config_toml;
 pub mod decompose;
 #[allow(clippy::module_inception)]
 pub mod engram;
@@ -146,7 +147,7 @@ fn default_embedding_model() -> String {
 }
 
 fn default_rerank_enabled() -> bool {
-    false
+    true
 }
 
 fn default_rerank_candidates() -> usize {

@@ -657,7 +657,7 @@ mod tests {
     /// Helper: create a Brain backed by in-memory SQLite
     fn brain_with_sqlite() -> Brain {
         let storage = EngramStorage::in_memory().unwrap();
-        Brain::new(storage).unwrap()
+        Brain::new(storage, crate::engram::Config::default()).unwrap()
     }
 
     // ==================

@@ -5,6 +5,7 @@ use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
+use crate::engram::config_toml::{ConfigValue, write_config_key};
 use crate::tools::text_response;
 
 pub struct ConfigSetTool;
@@ -81,6 +82,15 @@ impl Tool<Context> for ConfigSetTool {
                 )));
             }
 
+            // Write to config.toml (durable)
+            write_config_key(
+                &context.memory_home,
+                "embedding_model",
+                &ConfigValue::Str(model_name.to_string()),
+            )
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
+
+            // Also update in-memory config for the current session
             let mut brain = context.brain.lock().unwrap();
             let mut config = brain.config().clone();
             config.embedding_model = model_name.to_string();
@@ -91,7 +101,8 @@ impl Tool<Context> for ConfigSetTool {
 
             return Ok(text_response(format!(
                 "Configuration updated: embedding_model = {}. \
-                 Migration will occur on next restart (current embeddings: {:?}).",
+                 Migration will occur on next restart (current embeddings: {:?}). \
+                 Change saved to config.toml. Takes full effect on restart.",
                 model_name,
                 brain
                     .config()
@@ -100,6 +111,17 @@ impl Tool<Context> for ConfigSetTool {
                     .unwrap_or("(none)")
             )));
         }
+
+        // Boolean keys
+        let bool_keys = [
+            "search_follow_associations",
+            "rerank_enabled",
+            "hybrid_search_enabled",
+            "query_expansion_enabled",
+        ];
+
+        // Integer keys
+        let int_keys = ["search_association_depth", "rerank_candidates"];
 
         // All other keys are numeric (booleans accepted as true/false/0/1 in any form)
         let value = args
@@ -120,15 +142,28 @@ impl Tool<Context> for ConfigSetTool {
                 )
             })?;
 
-        let mut brain = context.brain.lock().unwrap();
+        // Determine the TOML value type for this key
+        let toml_value = if bool_keys.contains(&args.key.as_str()) {
+            ConfigValue::Bool(value != 0.0)
+        } else if int_keys.contains(&args.key.as_str()) {
+            ConfigValue::Int(value.clamp(0.0, usize::MAX as f64) as usize)
+        } else {
+            ConfigValue::Float(value)
+        };
 
+        // Write to config.toml (durable)
+        write_config_key(&context.memory_home, &args.key, &toml_value)
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
+
+        // Also update in-memory config for the current session
+        let mut brain = context.brain.lock().unwrap();
         let updated = brain
             .configure(&args.key, value)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         if updated {
             Ok(text_response(format!(
-                "Configuration updated: {} = {}",
+                "Configuration updated: {} = {}. Change saved to config.toml. Takes full effect on restart.",
                 args.key, value
             )))
         } else {

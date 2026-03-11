@@ -639,6 +639,95 @@ impl Tool<Context> for EngramSearchTool {
                     }
                 }
             }
+            "hybrid" => {
+                // Two-stage pipeline: cross-encoder narrows the field, LLM refines the top.
+                // Falls back gracefully at each stage.
+                if !scored.is_empty() {
+                    // Stage 1: Cross-encoder scores all candidates (fast, no context limit)
+                    let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
+                    let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+                    let candidate_count = contents.len();
+
+                    match crate::embedding::reranker::rerank(&args.query, &content_refs) {
+                        Ok(reranked) => {
+                            let mut ce_results = Vec::with_capacity(reranked.len());
+                            for rs in &reranked {
+                                if rs.index < scored.len() {
+                                    let orig = &scored[rs.index];
+                                    ce_results.push(ScoredResult {
+                                        id: orig.id,
+                                        content: orig.content.clone(),
+                                        created_at: orig.created_at,
+                                        similarity: orig.similarity,
+                                        energy: orig.energy,
+                                        blended: rs.score,
+                                        state_emoji: orig.state_emoji,
+                                    });
+                                }
+                            }
+                            scored = ce_results;
+                            eprintln!(
+                                "[search] hybrid stage 1: cross-encoder re-ranked {} candidates",
+                                candidate_count
+                            );
+
+                            // Stage 2: LLM reorders the cross-encoder's top N
+                            if context.llm.available() && context.llm.tier() >= LlmTier::Minimal {
+                                let cap = llm_rerank_candidates.min(scored.len());
+                                let llm_contents: Vec<String> =
+                                    scored[..cap].iter().map(|r| r.content.clone()).collect();
+                                let llm_refs: Vec<&str> =
+                                    llm_contents.iter().map(|s| s.as_str()).collect();
+
+                                match context.llm.rerank(&args.query, &llm_refs, effective_limit) {
+                                    Ok(indices) => {
+                                        let mut final_results =
+                                            Vec::with_capacity(indices.len());
+                                        for (rank, &idx) in indices.iter().enumerate() {
+                                            if idx < cap {
+                                                let orig = &scored[idx];
+                                                final_results.push(ScoredResult {
+                                                    id: orig.id,
+                                                    content: orig.content.clone(),
+                                                    created_at: orig.created_at,
+                                                    similarity: orig.similarity,
+                                                    energy: orig.energy,
+                                                    blended: 1.0 - (rank as f32 * 0.05),
+                                                    state_emoji: orig.state_emoji,
+                                                });
+                                            }
+                                        }
+                                        if !final_results.is_empty() {
+                                            scored = final_results;
+                                            eprintln!(
+                                                "[search] hybrid stage 2: LLM re-ranked top {}, selected {}",
+                                                cap,
+                                                scored.len()
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "[search] hybrid stage 2 (LLM) failed, using cross-encoder results: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            } else {
+                                eprintln!(
+                                    "[search] hybrid: LLM not available, using cross-encoder results only"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[search] hybrid stage 1 (cross-encoder) failed, falling back to cosine: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+            }
             _ => {
                 // "off" or unknown — keep cosine order, do nothing
             }

@@ -44,7 +44,7 @@ impl Tool<Context> for ConfigGetTool {
              search_association_depth: {} (hops to follow)\n\
              embedding_model: {} (desired embedding model)\n\
              embedding_model_active: {} (model used for current embeddings)\n\
-             rerank_mode: {} (reranking mode: off, cross-encoder, or llm)\n\
+             rerank_mode: {} (reranking mode: off, cross-encoder, llm, or hybrid)\n\
              rerank_candidates: {} (candidates for re-ranking pass)\n\
              hybrid_search_enabled: {} (BM25+vector fusion via RRF)\n\
              query_expansion_enabled: {} (expand queries with variants before retrieval)\n\

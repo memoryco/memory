@@ -11,7 +11,7 @@ use crate::reference::{self, ReferenceManager};
 use serde_json::{Value as JsonValue, json};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use memoryco_design as design;
 use std::sync::LazyLock;
@@ -39,7 +39,7 @@ pub(crate) fn resolve_dashboard_port() -> u16 {
 /// server so edits in the dashboard are immediately visible via MCP and vice-versa.
 #[allow(dead_code)]
 struct DashboardState {
-    brain: Arc<Mutex<Brain>>,
+    brain: Arc<RwLock<Brain>>,
     identity: Arc<Mutex<IdentityStore>>,
     references: Arc<Mutex<ReferenceManager>>,
     memory_home: PathBuf,
@@ -48,10 +48,11 @@ struct DashboardState {
 
 /// Start the dashboard HTTP server on a background daemon thread.
 ///
-/// Accepts the same shared `Arc<Mutex<>>` instances used by the MCP server so
-/// that edits through the dashboard are immediately visible to tools and vice-versa.
+/// Accepts the same shared `Arc<RwLock<>>` / `Arc<Mutex<>>` instances used by
+/// the MCP server so that edits through the dashboard are immediately visible
+/// to tools and vice-versa.
 pub fn start_dashboard(
-    brain: Arc<Mutex<Brain>>,
+    brain: Arc<RwLock<Brain>>,
     identity: Arc<Mutex<IdentityStore>>,
     references: Arc<Mutex<ReferenceManager>>,
     memory_home: &Path,
@@ -798,7 +799,7 @@ fn handle_list_engrams(
         .unwrap_or(false);
     let state_filter = query_param(&params, "state");
 
-    let mut brain = state.brain.lock().unwrap();
+    let mut brain = state.brain.write().unwrap();
 
     // Sync cross-process writes
     let _ = brain.sync_from_storage();
@@ -1000,7 +1001,7 @@ fn handle_delete_engram(
         Err(e) => return json_response(400, &format!(r#"{{"error":"Invalid UUID: {}"}}"#, e)),
     };
 
-    let mut brain = state.brain.lock().unwrap();
+    let mut brain = state.brain.write().unwrap();
     match brain.delete(engram_id) {
         Ok(true) => json_ok(&json!({"deleted": id})),
         Ok(false) => json_response(404, &format!(r#"{{"error":"Engram '{}' not found"}}"#, id)),
@@ -1021,7 +1022,7 @@ fn handle_graph(
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.0);
 
-    let mut brain = state.brain.lock().unwrap();
+    let mut brain = state.brain.write().unwrap();
     let _ = brain.sync_from_storage();
 
     let all_assocs = brain.all_associations();

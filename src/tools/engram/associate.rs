@@ -78,7 +78,7 @@ impl Tool<Context> for EngramAssociateTool {
         let weight = args.weight.unwrap_or(0.5);
         let ordinal = args.ordinal;
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
 
         brain
             .associate_with_ordinal(from, to, weight, ordinal)

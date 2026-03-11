@@ -30,7 +30,7 @@ impl Tool<Context> for EngramStatsTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
 
         // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();

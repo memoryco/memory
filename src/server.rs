@@ -11,7 +11,7 @@ use crate::plans::{DieselPlanStorage, PlanStore};
 use crate::reference::ReferenceManager;
 use crate::{Context, bootstrap, lenses, tools};
 use sml_mcps::{Server, ServerConfig, StdioTransport};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Initialize all state and run the MCP server over stdio.
 ///
@@ -160,7 +160,7 @@ pub fn run() {
     }
 
     // --- Build shared state ---
-    let brain = Arc::new(Mutex::new(brain));
+    let brain = Arc::new(RwLock::new(brain));
     let identity = Arc::new(Mutex::new(identity));
     let references = Arc::new(Mutex::new(references));
 

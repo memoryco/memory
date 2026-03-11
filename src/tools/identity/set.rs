@@ -111,7 +111,7 @@ impl Tool<Context> for IdentitySetTool {
         let args: Args = serde_json::from_value(args)
             .map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
 
         brain.set_identity(args.identity.clone())
             .map_err(|e| McpError::ToolError(e.to_string()))?;

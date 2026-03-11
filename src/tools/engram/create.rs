@@ -72,9 +72,9 @@ impl Tool<Context> for EngramCreateTool {
         let mut created: Vec<(EngramId, String)> = Vec::new();
         let mut output = String::new();
 
-        // Phase 1: Create memories (holding lock)
+        // Phase 1: Create memories (holding write lock briefly)
         {
-            let mut brain = context.brain.lock().unwrap();
+            let mut brain = context.brain.write().unwrap();
             for memory in &args.memories {
                 let id: EngramId = if let Some(ref ts) = memory.created_at {
                     let epoch = parse_timestamp(ts).map_err(|e| {
@@ -100,8 +100,10 @@ impl Tool<Context> for EngramCreateTool {
 
             std::thread::spawn(move || {
                 let generator = EmbeddingGenerator::new();
+                // Use read lock: set_embedding is &self (storage Mutex internally),
+                // so enrichment can run concurrently with search read locks.
                 if let Ok(embedding) = generator.generate(&content_clone)
-                    && let Ok(mut brain) = brain_clone.lock()
+                    && let Ok(brain) = brain_clone.read()
                 {
                     let _ = brain.set_embedding(&id_clone, &embedding);
                 }
@@ -130,7 +132,8 @@ impl Tool<Context> for EngramCreateTool {
                             .filter_map(|q| generator.generate(q).ok())
                             .collect();
                         if !enrichment_embeddings.is_empty() {
-                            if let Ok(mut brain) = brain_clone.lock() {
+                            // Use read lock: set_enrichment_embeddings is &self.
+                            if let Ok(brain) = brain_clone.read() {
                                 let n = enrichment_embeddings.len();
                                 let preview: String = content.chars().take(50).collect();
                                 let _ = brain.set_enrichment_embeddings(

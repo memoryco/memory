@@ -48,7 +48,7 @@ impl Tool<Context> for IdentityAddInstructionTool {
         
         let marker = args.get("marker").and_then(|v| v.as_str());
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
         
         // Check for duplicate if marker provided
         if let Some(m) = marker {

@@ -52,7 +52,7 @@ impl Tool<Context> for EngramGetTool {
             .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
         let _ = brain.sync_from_storage();
 
         match brain.get_or_load(&id) {

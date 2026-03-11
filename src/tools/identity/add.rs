@@ -80,7 +80,7 @@ impl Tool<Context> for IdentityAddTool {
             None
         };
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
         let mut identity = brain.identity().clone();
 
         // Add to the appropriate field

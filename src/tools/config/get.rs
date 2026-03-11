@@ -30,7 +30,7 @@ impl Tool<Context> for ConfigGetTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let brain = context.brain.lock().unwrap();
+        let brain = context.brain.read().unwrap();
         let config = brain.config();
 
         let output = format!(

@@ -24,7 +24,11 @@ pub struct Brain {
     identity: Identity,
     /// Made pub(crate) for testing decay behavior
     pub(crate) substrate: Substrate,
-    storage: Box<dyn Storage>,
+    /// Interior-mutable storage so read-only Brain methods (&self) can perform
+    /// storage queries without requiring an exclusive borrow. This enables
+    /// Arc<RwLock<Brain>> callers to hold a read lock while still accessing
+    /// SQLite (e.g. during vector search or embedding lookups).
+    storage: std::sync::Mutex<Box<dyn Storage>>,
     /// Background worker for async recall persistence
     /// None for in-memory storage (no persistence needed)
     persistence_worker: Option<PersistenceWorker>,
@@ -49,7 +53,7 @@ impl Brain {
         let mut brain = Self {
             identity: Identity::new(),
             substrate: Substrate::with_config(config),
-            storage: Box::new(storage),
+            storage: std::sync::Mutex::new(Box::new(storage)),
             persistence_worker: None,
         };
 
@@ -104,7 +108,7 @@ impl Brain {
         let mut brain = Self {
             identity,
             substrate,
-            storage: Box::new(storage),
+            storage: std::sync::Mutex::new(Box::new(storage)),
             persistence_worker: None,
         };
 
@@ -165,7 +169,7 @@ impl Brain {
         let mut brain = Self {
             identity,
             substrate,
-            storage: Box::new(storage),
+            storage: std::sync::Mutex::new(Box::new(storage)),
             persistence_worker: Some(persistence_worker),
         };
 
@@ -198,7 +202,7 @@ impl Brain {
 
     /// Persist identity changes to storage
     pub fn save_identity(&mut self) -> StorageResult<()> {
-        self.storage.save_identity(&self.identity)
+        self.storage.lock().unwrap().save_identity(&self.identity)
     }
 
     // ==================
@@ -211,7 +215,7 @@ impl Brain {
 
         // Persist immediately
         if let Some(engram) = self.substrate.get(&id) {
-            self.storage.save_engram(engram)?;
+            self.storage.lock().unwrap().save_engram(engram)?;
         }
 
         Ok(id)
@@ -227,7 +231,7 @@ impl Brain {
 
         // Persist immediately
         if let Some(engram) = self.substrate.get(&id) {
-            self.storage.save_engram(engram)?;
+            self.storage.lock().unwrap().save_engram(engram)?;
         }
 
         Ok(id)
@@ -243,7 +247,7 @@ impl Brain {
 
         // Persist immediately
         if let Some(engram) = self.substrate.get(&id) {
-            self.storage.save_engram(engram)?;
+            self.storage.lock().unwrap().save_engram(engram)?;
         }
 
         Ok(id)
@@ -268,7 +272,7 @@ impl Brain {
         if let Some(assocs) = self.substrate.associations_from(&from)
             && let Some(assoc) = assocs.iter().find(|a| a.to == to)
         {
-            self.storage.save_association(assoc)?;
+            self.storage.lock().unwrap().save_association(assoc)?;
         }
 
         Ok(())
@@ -286,7 +290,7 @@ impl Brain {
         let existed = self.substrate.remove(&id).is_some();
 
         // Remove from storage (also cleans up associations)
-        self.storage.delete_engram(&id)?;
+        self.storage.lock().unwrap().delete_engram(&id)?;
 
         Ok(existed)
     }
@@ -422,7 +426,7 @@ impl Brain {
         }
 
         // Fall back to storage (handles cross-process writes)
-        if let Ok(Some(engram)) = self.storage.load_engram(id) {
+        if let Ok(Some(engram)) = self.storage.lock().unwrap().load_engram(id) {
             self.substrate.insert_engram(engram);
             return self.substrate.get(id);
         }
@@ -468,7 +472,7 @@ impl Brain {
     /// Does a lightweight count check first — only reloads if counts diverge.
     /// Returns true if new engrams were loaded.
     pub fn sync_from_storage(&mut self) -> StorageResult<bool> {
-        let db_count = self.storage.count_engrams()?;
+        let db_count = self.storage.lock().unwrap().count_engrams()?;
         let substrate_count = self.substrate.len();
 
         if db_count <= substrate_count {
@@ -476,7 +480,7 @@ impl Brain {
         }
 
         // New engrams exist in DB that substrate doesn't have — load them
-        let engrams = self.storage.load_all_engrams()?;
+        let engrams = self.storage.lock().unwrap().load_all_engrams()?;
         let mut loaded = 0;
         for engram in engrams {
             if self.substrate.get(&engram.id).is_none() {
@@ -487,7 +491,7 @@ impl Brain {
 
         if loaded > 0 {
             // Also sync associations (new engrams may have associations)
-            let associations = self.storage.load_all_associations()?;
+            let associations = self.storage.lock().unwrap().load_all_associations()?;
             for assoc in associations {
                 let exists = self
                     .substrate
@@ -517,10 +521,12 @@ impl Brain {
                 .all_engrams()
                 .map(|e| (&e.id, e.energy, e.state))
                 .collect();
-            self.storage.save_engram_energies(&updates)?;
+            self.storage.lock().unwrap().save_engram_energies(&updates)?;
 
             // Save the last decay timestamp
             self.storage
+                .lock()
+                .unwrap()
                 .save_last_decay_at(self.substrate.last_decay_at())?;
         }
 
@@ -536,9 +542,9 @@ impl Brain {
         if pruned > 0 {
             // Re-save all associations to storage (the simple approach)
             // A more efficient approach would track which were pruned
-            self.storage.delete_all_associations()?;
+            self.storage.lock().unwrap().delete_all_associations()?;
             let assocs: Vec<&Association> = self.substrate.all_associations();
-            self.storage.save_associations(&assocs)?;
+            self.storage.lock().unwrap().save_associations(&assocs)?;
         }
 
         Ok(pruned)
@@ -556,7 +562,7 @@ impl Brain {
             .all_engrams()
             .map(|e| (&e.id, e.energy, e.state))
             .collect();
-        self.storage.save_engram_energies(&updates)?;
+        self.storage.lock().unwrap().save_engram_energies(&updates)?;
 
         Ok(())
     }
@@ -644,33 +650,33 @@ impl Brain {
 
     /// Save an engram directly to storage (for bulk operations like decompose)
     pub(crate) fn storage_save_engram(&mut self, engram: &Engram) -> StorageResult<()> {
-        self.storage.save_engram(engram)
+        self.storage.lock().unwrap().save_engram(engram)
     }
 
     /// Save an association directly to storage (for bulk operations like decompose)
     pub(crate) fn storage_save_association(&mut self, assoc: &Association) -> StorageResult<()> {
-        self.storage.save_association(assoc)
+        self.storage.lock().unwrap().save_association(assoc)
     }
 
     /// Get a metadata value by key
     pub fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>> {
-        self.storage.get_metadata(key)
+        self.storage.lock().unwrap().get_metadata(key)
     }
 
     /// Set a metadata key/value pair
     pub fn set_metadata(&mut self, key: &str, value: &str) -> StorageResult<()> {
-        self.storage.set_metadata(key, value)
+        self.storage.lock().unwrap().set_metadata(key, value)
     }
 
     /// Flush all pending writes
     pub fn flush(&mut self) -> StorageResult<()> {
-        self.storage.flush()
+        self.storage.lock().unwrap().flush()
     }
 
     /// Close the brain cleanly
     pub fn close(&mut self) -> StorageResult<()> {
         self.flush()?;
-        self.storage.close()
+        self.storage.lock().unwrap().close()
     }
 
     // ==================
@@ -679,13 +685,18 @@ impl Brain {
 
     /// Find engrams semantically similar to the given embedding
     /// Returns (id, score, content) tuples sorted by descending similarity
+    ///
+    /// Takes `&self` so callers holding an RwLock read guard can call this
+    /// without an exclusive borrow. Storage is locked internally.
     pub fn find_similar_by_embedding(
-        &mut self,
+        &self,
         query_embedding: &[f32],
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
         self.storage
+            .lock()
+            .unwrap()
             .find_similar_by_embedding(query_embedding, limit, min_score)
     }
 
@@ -697,8 +708,14 @@ impl Brain {
     ///
     /// Returns a vec of (id, blended_score, similarity, association_weight) for discovered memories.
     /// The caller is responsible for merging these into the final result set.
+    /// Discover memories reachable via associations.
+    ///
+    /// Takes `&self` so callers holding an RwLock read guard can call this.
+    /// Storage is locked internally per embedding lookup.
+    /// After `sync_from_storage()`, all active engrams are in the substrate cache,
+    /// so energy lookups use `get()` (substrate only) rather than `get_or_load`.
     pub fn discover_associated_memories(
-        &mut self,
+        &self,
         query_embedding: &[f32],
         seed_ids: &[EngramId],
         seen_ids: &mut HashSet<EngramId>,
@@ -747,15 +764,16 @@ impl Brain {
 
             // For each candidate, look up embedding and score against query
             for (candidate_id, assoc_weight, _ordinal) in candidates {
-                let embedding = match self.storage.get_embedding(&candidate_id)? {
+                let embedding = match self.storage.lock().unwrap().get_embedding(&candidate_id)? {
                     Some(emb) => emb,
                     None => continue,
                 };
 
                 let similarity = cosine_similarity(query_embedding, &embedding);
 
-                // Get energy from substrate (or load from storage if cross-process)
-                let energy = match self.get_or_load(&candidate_id) {
+                // Get energy from substrate cache (sync_from_storage ensures all
+                // engrams are loaded; use get() to avoid nested storage lock).
+                let energy = match self.get(&candidate_id) {
                     Some(engram) => engram.energy,
                     None => continue,
                 };
@@ -783,48 +801,59 @@ impl Brain {
 
     /// Count engrams that have embeddings
     pub fn count_with_embeddings(&mut self) -> StorageResult<usize> {
-        self.storage.count_with_embeddings()
+        self.storage.lock().unwrap().count_with_embeddings()
     }
 
     /// Count engrams that need embeddings (for backfill progress)
     pub fn count_without_embeddings(&mut self) -> StorageResult<usize> {
-        self.storage.count_without_embeddings()
+        self.storage.lock().unwrap().count_without_embeddings()
     }
 
     /// Get IDs of engrams that need embeddings (for backfill)
     pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
-        self.storage.get_ids_without_embeddings(limit)
+        self.storage.lock().unwrap().get_ids_without_embeddings(limit)
     }
 
-    /// Get embedding for an engram
-    pub fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
-        self.storage.get_embedding(id)
+    /// Get embedding for an engram.
+    ///
+    /// Takes `&self` so callers holding an RwLock read guard can call this
+    /// during diversity shaping without an exclusive borrow.
+    pub fn get_embedding(&self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+        self.storage.lock().unwrap().get_embedding(id)
     }
 
-    /// Set embedding for an engram (used during backfill)
-    pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
-        self.storage.set_embedding(id, embedding)
+    /// Set embedding for an engram (used during backfill).
+    ///
+    /// Takes `&self` so enrichment background threads can write embeddings
+    /// while search holds an RwLock read guard. Storage is locked internally.
+    pub fn set_embedding(&self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+        self.storage.lock().unwrap().set_embedding(id, embedding)
     }
 
     /// Store enrichment embeddings for an engram (multi-vector support).
     /// Replaces any existing enrichments for this engram.
+    ///
+    /// Takes `&self` so enrichment threads can write while search holds a read lock.
     pub fn set_enrichment_embeddings(
-        &mut self,
+        &self,
         id: &EngramId,
         embeddings: &[Vec<f32>],
         source: &str,
     ) -> StorageResult<()> {
-        self.storage.set_enrichment_embeddings(id, embeddings, source)
+        self.storage
+            .lock()
+            .unwrap()
+            .set_enrichment_embeddings(id, embeddings, source)
     }
 
     /// Delete all enrichment embeddings for an engram.
     pub fn delete_enrichments(&mut self, id: &EngramId) -> StorageResult<()> {
-        self.storage.delete_enrichments(id)
+        self.storage.lock().unwrap().delete_enrichments(id)
     }
 
     /// Count total enrichment vectors across all engrams.
     pub fn count_enrichments(&mut self) -> StorageResult<usize> {
-        self.storage.count_enrichments()
+        self.storage.lock().unwrap().count_enrichments()
     }
 
     /// Bootstrap associations based on semantic similarity
@@ -844,13 +873,13 @@ impl Brain {
 
         for id in &all_ids {
             // Get this memory's embedding
-            let embedding = match self.storage.get_embedding(id)? {
+            let embedding = match self.storage.lock().unwrap().get_embedding(id)? {
                 Some(emb) => emb,
                 None => continue, // Skip memories without embeddings
             };
 
             // Find similar memories
-            let similar = self.storage.find_similar_by_embedding(
+            let similar = self.storage.lock().unwrap().find_similar_by_embedding(
                 &embedding,
                 max_associations_per_memory + 1, // +1 because it might include self
                 min_similarity,
@@ -890,13 +919,15 @@ impl Brain {
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        let embedding = match self.storage.get_embedding(id)? {
+        let embedding = match self.storage.lock().unwrap().get_embedding(id)? {
             Some(emb) => emb,
             None => return Ok(vec![]),
         };
 
         let mut results =
             self.storage
+                .lock()
+                .unwrap()
                 .find_similar_by_embedding(&embedding, limit + 1, min_score)?;
 
         // Filter out self
@@ -946,7 +977,7 @@ impl Brain {
         );
 
         // Step 1: Clear all existing embeddings
-        let cleared = self.storage.clear_all_embeddings()?;
+        let cleared = self.storage.lock().unwrap().clear_all_embeddings()?;
         eprintln!("[brain] Cleared {} embeddings", cleared);
 
         // Step 2: Re-embed all engrams
@@ -965,7 +996,7 @@ impl Brain {
             match generator.generate_batch(&content_refs) {
                 Ok(embeddings) => {
                     for (id, embedding) in all_ids.iter().zip(embeddings.iter()) {
-                        if let Err(e) = self.storage.set_embedding(id, embedding) {
+                        if let Err(e) = self.storage.lock().unwrap().set_embedding(id, embedding) {
                             eprintln!("[brain] Failed to set embedding for {}: {}", id, e);
                         }
                     }
@@ -990,7 +1021,10 @@ impl Brain {
         let mut new_config = self.substrate.config().clone();
         new_config.embedding_model_active = Some(desired.clone());
         self.substrate.config = new_config;
-        self.storage.set_metadata("embedding_model_active", &desired)?;
+        self.storage
+            .lock()
+            .unwrap()
+            .set_metadata("embedding_model_active", &desired)?;
 
         eprintln!("[brain] Embedding migration complete");
         Ok(())
@@ -1010,7 +1044,7 @@ impl Brain {
     /// Called during Brain initialization. If the FTS5 table is empty but
     /// engrams exist, backfills the index from the engrams table.
     fn ensure_fts_index(&mut self) -> StorageResult<()> {
-        let backfilled = self.storage.ensure_fts_populated()?;
+        let backfilled = self.storage.lock().unwrap().ensure_fts_populated()?;
         if backfilled > 0 {
             eprintln!("[brain] Backfilled {} engrams into FTS5 index", backfilled);
         }
@@ -1018,12 +1052,15 @@ impl Brain {
     }
 
     /// Search engrams by keyword using FTS5/BM25.
+    ///
+    /// Takes `&self` so callers holding an RwLock read guard can call this
+    /// during hybrid search without an exclusive borrow.
     pub fn keyword_search(
-        &mut self,
+        &self,
         query: &str,
         limit: usize,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        self.storage.keyword_search(query, limit)
+        self.storage.lock().unwrap().keyword_search(query, limit)
     }
 
     // ==================
@@ -1038,6 +1075,8 @@ impl Brain {
         recalled_ids: &[EngramId],
     ) -> StorageResult<()> {
         self.storage
+            .lock()
+            .unwrap()
             .log_access(query_text, result_ids, recalled_ids)
     }
 }
@@ -2019,7 +2058,7 @@ mod tests {
         assert_eq!(brain.count_without_embeddings().unwrap(), 1);
 
         // Clear all embeddings
-        let cleared = brain.storage.clear_all_embeddings().unwrap();
+        let cleared = brain.storage.lock().unwrap().clear_all_embeddings().unwrap();
         assert_eq!(cleared, 2, "Should have cleared 2 embeddings");
 
         // All should now be without embeddings
@@ -2038,7 +2077,7 @@ mod tests {
 
         brain.create("No embedding memory").unwrap();
 
-        let cleared = brain.storage.clear_all_embeddings().unwrap();
+        let cleared = brain.storage.lock().unwrap().clear_all_embeddings().unwrap();
         assert_eq!(cleared, 0);
     }
 

@@ -32,11 +32,11 @@ use crate::plans::PlanStore;
 use crate::reference::ReferenceManager;
 use clap::Parser;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Server context shared across all tool invocations.
 pub struct Context {
-    pub brain: Arc<Mutex<Brain>>,
+    pub brain: Arc<RwLock<Brain>>,
     pub llm: crate::llm::SharedLlmService,
     pub identity: Arc<Mutex<IdentityStore>>,
     pub plans: Arc<Mutex<PlanStore>>,

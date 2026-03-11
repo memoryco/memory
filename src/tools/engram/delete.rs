@@ -50,7 +50,7 @@ impl Tool<Context> for EngramDeleteTool {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
         let mut output = String::new();
         let mut deleted_count = 0;
         let mut not_found_count = 0;

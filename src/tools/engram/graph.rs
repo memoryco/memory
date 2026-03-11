@@ -59,7 +59,7 @@ impl Tool<Context> for EngramGraphTool {
 
         let format = args.format.as_deref().unwrap_or("summary");
         let min_weight = args.min_weight.unwrap_or(0.0);
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
 
         // Lazy maintenance: decay + cross-process sync
         let _ = brain.apply_time_decay();

@@ -88,7 +88,7 @@ impl Tool<Context> for ConfigSetTool {
             )
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-            let mut brain = context.brain.lock().unwrap();
+            let mut brain = context.brain.write().unwrap();
             let mut config = brain.config().clone();
             config.rerank_mode = mode.to_string();
             brain
@@ -124,7 +124,7 @@ impl Tool<Context> for ConfigSetTool {
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
             // Also update in-memory config for the current session
-            let mut brain = context.brain.lock().unwrap();
+            let mut brain = context.brain.write().unwrap();
             let mut config = brain.config().clone();
             config.embedding_model = model_name.to_string();
             // Don't update embedding_model_active — mismatch triggers migration on next startup
@@ -189,7 +189,7 @@ impl Tool<Context> for ConfigSetTool {
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         // Also update in-memory config for the current session
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
         let updated = brain
             .configure(&args.key, value)
             .map_err(|e| McpError::ToolError(e.to_string()))?;

@@ -251,7 +251,10 @@ impl Tool<Context> for EngramSearchTool {
             hybrid_search_enabled,
             query_expansion_enabled,
         ) = {
-            let mut brain = context.brain.lock().unwrap();
+            // Phase 0: brief write lock for maintenance + config snapshot.
+            // Drop the write lock before expensive embedding generation so enrichment
+            // threads can acquire write locks for set_embedding / set_enrichment_embeddings.
+            let mut brain = context.brain.write().unwrap();
 
             // Lazy maintenance: decay + cross-process sync
             let _ = brain.apply_time_decay();
@@ -266,7 +269,7 @@ impl Tool<Context> for EngramSearchTool {
                 brain.config().hybrid_search_enabled,
                 brain.config().query_expansion_enabled,
             )
-        };
+        }; // write lock released here
 
         // Query expansion: generate variant queries
         let variants = if query_expansion_enabled {
@@ -285,7 +288,11 @@ impl Tool<Context> for EngramSearchTool {
         }
 
         let generator = EmbeddingGenerator::new();
-        let mut brain = context.brain.lock().unwrap();
+        // Phase 1+: read lock for the actual search pipeline.
+        // Multiple concurrent searches can hold read locks simultaneously.
+        // Enrichment threads use read locks (set_embedding is &self via storage Mutex),
+        // so they can interleave with search rather than being blocked for 10-15 seconds.
+        let brain = context.brain.read().unwrap();
 
         // Find similar memories (fetch extra to allow for filtering)
         // When reranking is enabled, fetch more candidates for the reranker to work with
@@ -304,10 +311,12 @@ impl Tool<Context> for EngramSearchTool {
         > = std::collections::HashMap::new();
         let mut original_query_embedding: Option<Vec<f32>> = None;
 
-        // Helper: run vector + BM25 for a single query variant and merge into all_results
+        // Helper: run vector + BM25 for a single query variant and merge into all_results.
+        // Takes &Brain (not &mut Brain) because find_similar_by_embedding and keyword_search
+        // are now &self methods that lock storage internally.
         fn run_variant(
             variant_query: &str,
-            brain: &mut crate::engram::Brain,
+            brain: &crate::engram::Brain,
             generator: &EmbeddingGenerator,
             fetch_count: usize,
             min_score: f32,
@@ -389,7 +398,7 @@ impl Tool<Context> for EngramSearchTool {
         for variant_query in &variants {
             run_variant(
                 variant_query,
-                &mut brain,
+                &brain,
                 &generator,
                 fetch_count,
                 min_score,
@@ -423,7 +432,7 @@ impl Tool<Context> for EngramSearchTool {
                 for term in fallback.iter().take(max_fallback_terms) {
                     run_variant(
                         term,
-                        &mut brain,
+                        &brain,
                         &generator,
                         fetch_count,
                         min_score,
@@ -461,7 +470,7 @@ impl Tool<Context> for EngramSearchTool {
                 for rq in &relaxed_queries {
                     run_variant(
                         rq,
-                        &mut brain,
+                        &brain,
                         &generator,
                         fetch_count,
                         relaxed_min_score,
@@ -503,7 +512,7 @@ impl Tool<Context> for EngramSearchTool {
         let mut scored: Vec<ScoredResult> = merged_results
             .iter()
             .filter_map(|r| {
-                let engram = brain.get_or_load(&r.id)?;
+                let engram = brain.get(&r.id)?;
 
                 // State filter
                 let state_ok = if include_archived {
@@ -661,7 +670,8 @@ impl Tool<Context> for EngramSearchTool {
 
             // Merge discovered memories into scored results
             for d in capped {
-                let engram = match brain.get_or_load(&d.id) {
+                // After sync_from_storage, all engrams are in substrate cache.
+                let engram = match brain.get(&d.id) {
                     Some(e) => e,
                     None => continue,
                 };

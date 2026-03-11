@@ -41,7 +41,7 @@ impl Tool<Context> for IdentityRemoveInstructionTool {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| McpError::InvalidParams("index is required".into()))?;
 
-        let mut brain = context.brain.lock().unwrap();
+        let mut brain = context.brain.write().unwrap();
         let mut identity = brain.identity().clone();
         
         let count = identity.instructions.len();

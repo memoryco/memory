@@ -98,14 +98,13 @@ pub struct Config {
     #[serde(default)]
     pub embedding_model_active: Option<String>,
 
-    /// Whether to use cross-encoder re-ranking on search results.
-    /// When enabled, cosine similarity results are re-scored by a cross-encoder
-    /// model for significantly better relevance ordering.
-    #[serde(default = "default_rerank_enabled")]
-    pub rerank_enabled: bool,
+    /// Reranking mode: "off", "cross-encoder", or "llm".
+    /// off = cosine order only, cross-encoder = BGE cross-encoder, llm = local LLM reranking.
+    #[serde(default = "default_rerank_mode")]
+    pub rerank_mode: String,
 
     /// How many candidates to pull from cosine similarity before re-ranking.
-    /// Higher = better recall but slower. Only used when rerank_enabled is true.
+    /// Higher = better recall but slower. Only used when rerank_mode is not "off".
     #[serde(default = "default_rerank_candidates")]
     pub rerank_candidates: usize,
 
@@ -146,8 +145,8 @@ fn default_embedding_model() -> String {
     crate::embedding::default_embedding_model()
 }
 
-fn default_rerank_enabled() -> bool {
-    true
+fn default_rerank_mode() -> String {
+    "cross-encoder".to_string()
 }
 
 fn default_rerank_candidates() -> usize {
@@ -187,7 +186,7 @@ impl Default for Config {
             search_association_depth: 1,      // Direct associations only
             embedding_model: crate::embedding::default_embedding_model(),
             embedding_model_active: None,
-            rerank_enabled: true,
+            rerank_mode: default_rerank_mode(),
             rerank_candidates: 30,
             hybrid_search_enabled: true,
             query_expansion_enabled: true,
@@ -205,5 +204,34 @@ mod tests {
         assert!(config.decay_rate_per_day > 0.0 && config.decay_rate_per_day < 1.0);
         assert!(config.decay_interval_hours > 0.0);
         assert!(config.propagation_damping > 0.0 && config.propagation_damping < 1.0);
+    }
+
+    #[test]
+    fn rerank_mode_serializes_and_deserializes() {
+        let mut config = Config::default();
+        config.rerank_mode = "llm".to_string();
+        let json = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.rerank_mode, "llm");
+    }
+
+    #[test]
+    fn rerank_mode_defaults_to_cross_encoder_when_missing() {
+        // Old configs missing rerank_mode should default to "cross-encoder"
+        let json = r#"{
+            "decay_rate_per_day": 0.05,
+            "decay_interval_hours": 1.0,
+            "propagation_damping": 0.5,
+            "hebbian_learning_rate": 0.1,
+            "recall_strength": 0.2,
+            "blocked_tags": [],
+            "max_tag_cardinality": 20,
+            "association_decay_rate": 1.0,
+            "min_association_weight": 0.05,
+            "search_follow_associations": true,
+            "search_association_depth": 1
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.rerank_mode, "cross-encoder");
     }
 }

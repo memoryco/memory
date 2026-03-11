@@ -25,7 +25,7 @@ impl Tool<Context> for ConfigSetTool {
         "Update a configuration value. Keys: decay_rate_per_day, decay_interval_hours, \
          propagation_damping, hebbian_learning_rate, recall_strength, \
          search_follow_associations, search_association_depth, embedding_model, \
-         rerank_enabled, rerank_candidates, hybrid_search_enabled, \
+         rerank_mode, rerank_candidates, hybrid_search_enabled, \
          query_expansion_enabled"
     }
 
@@ -44,7 +44,7 @@ impl Tool<Context> for ConfigSetTool {
                         "search_follow_associations",
                         "search_association_depth",
                         "embedding_model",
-                        "rerank_enabled",
+                        "rerank_mode",
                         "rerank_candidates",
                         "hybrid_search_enabled",
                         "query_expansion_enabled"
@@ -52,7 +52,7 @@ impl Tool<Context> for ConfigSetTool {
                     "description": "Configuration key to update."
                 },
                 "value": {
-                    "description": "New value. Number for most keys, string for embedding_model."
+                    "description": "New value. Number for most keys, string for embedding_model and rerank_mode."
                 }
             },
             "required": ["key", "value"]
@@ -67,6 +67,39 @@ impl Tool<Context> for ConfigSetTool {
     ) -> sml_mcps::Result<CallToolResult> {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
+
+        // Handle rerank_mode separately (string value)
+        if args.key == "rerank_mode" {
+            let mode = args.value.as_str().ok_or_else(|| {
+                McpError::InvalidParams("rerank_mode value must be a string".to_string())
+            })?;
+
+            if !matches!(mode, "off" | "cross-encoder" | "llm") {
+                return Ok(text_response(format!(
+                    "Invalid rerank_mode: {}. Must be one of: off, cross-encoder, llm",
+                    mode
+                )));
+            }
+
+            write_config_key(
+                &context.memory_home,
+                "rerank_mode",
+                &ConfigValue::Str(mode.to_string()),
+            )
+            .map_err(|e| McpError::ToolError(e.to_string()))?;
+
+            let mut brain = context.brain.lock().unwrap();
+            let mut config = brain.config().clone();
+            config.rerank_mode = mode.to_string();
+            brain
+                .set_config(config)
+                .map_err(|e| McpError::ToolError(e.to_string()))?;
+
+            return Ok(text_response(format!(
+                "Configuration updated: rerank_mode = {}. Change saved to config.toml.",
+                mode
+            )));
+        }
 
         // Handle embedding_model separately (string value)
         if args.key == "embedding_model" {
@@ -115,7 +148,7 @@ impl Tool<Context> for ConfigSetTool {
         // Boolean keys
         let bool_keys = [
             "search_follow_associations",
-            "rerank_enabled",
+
             "hybrid_search_enabled",
             "query_expansion_enabled",
         ];

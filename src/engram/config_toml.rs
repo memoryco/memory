@@ -99,7 +99,7 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         search_follow_associations: get_bool!(search_follow_associations),
         search_association_depth: get_u8!(search_association_depth),
         embedding_model: get_string!(embedding_model),
-        rerank_enabled: get_bool!(rerank_enabled),
+        rerank_mode: get_string!(rerank_mode),
         rerank_candidates: get_usize!(rerank_candidates),
         hybrid_search_enabled: get_bool!(hybrid_search_enabled),
         query_expansion_enabled: get_bool!(query_expansion_enabled),
@@ -206,8 +206,8 @@ search_association_depth = {search_association_depth}
 # Embedding model name. Changing triggers re-embedding on restart.
 embedding_model = "{embedding_model}"
 
-# Cross-encoder re-ranking on search results.
-rerank_enabled = {rerank_enabled}
+# Reranking mode: "off", "cross-encoder", or "llm"
+rerank_mode = "{rerank_mode}"
 
 # Candidates to feed to re-ranker (higher = better recall, slower).
 rerank_candidates = {rerank_candidates}
@@ -228,7 +228,7 @@ query_expansion_enabled = {query_expansion_enabled}
         search_follow_associations = d.search_follow_associations,
         search_association_depth = d.search_association_depth,
         embedding_model = d.embedding_model,
-        rerank_enabled = d.rerank_enabled,
+        rerank_mode = d.rerank_mode,
         rerank_candidates = d.rerank_candidates,
         hybrid_search_enabled = d.hybrid_search_enabled,
         query_expansion_enabled = d.query_expansion_enabled,
@@ -262,7 +262,7 @@ mod tests {
         let defaults = Config::default();
         assert!((config.decay_rate_per_day - defaults.decay_rate_per_day).abs() < f64::EPSILON);
         assert!((config.recall_strength - defaults.recall_strength).abs() < f64::EPSILON);
-        assert_eq!(config.rerank_enabled, defaults.rerank_enabled);
+        assert_eq!(config.rerank_mode, defaults.rerank_mode);
         assert_eq!(config.embedding_model, defaults.embedding_model);
     }
 
@@ -281,7 +281,7 @@ min_association_weight = 0.1
 search_follow_associations = false
 search_association_depth = 2
 embedding_model = "BGELargeENV15"
-rerank_enabled = false
+rerank_mode = "off"
 rerank_candidates = 50
 hybrid_search_enabled = false
 query_expansion_enabled = false
@@ -299,7 +299,7 @@ query_expansion_enabled = false
         assert!(!config.search_follow_associations);
         assert_eq!(config.search_association_depth, 2);
         assert_eq!(config.embedding_model, "BGELargeENV15");
-        assert!(!config.rerank_enabled);
+        assert_eq!(config.rerank_mode, "off");
         assert_eq!(config.rerank_candidates, 50);
         assert!(!config.hybrid_search_enabled);
         assert!(!config.query_expansion_enabled);
@@ -319,7 +319,7 @@ decay_rate_per_day = 0.2
         assert!((config.decay_rate_per_day - 0.2).abs() < f64::EPSILON);
         // Everything else falls back to defaults
         assert!((config.recall_strength - defaults.recall_strength).abs() < f64::EPSILON);
-        assert_eq!(config.rerank_enabled, defaults.rerank_enabled);
+        assert_eq!(config.rerank_mode, defaults.rerank_mode);
     }
 
     #[test]
@@ -362,18 +362,18 @@ decay_rate_per_day = 0.07
 # comment preserved
 [brain]
 decay_rate_per_day = 0.05
-rerank_enabled = true
+rerank_mode = "cross-encoder"
 "#;
         std::fs::write(dir.path().join("config.toml"), toml).unwrap();
 
         // Update only one key
-        write_config_key(dir.path(), "rerank_enabled", &ConfigValue::Bool(false)).unwrap();
+        write_config_key(dir.path(), "rerank_mode", &ConfigValue::Str("off".to_string())).unwrap();
 
         let config = load_config_from_toml(dir.path());
         // The unchanged key should still be there
         assert!((config.decay_rate_per_day - 0.05).abs() < f64::EPSILON);
         // The updated key should reflect the new value
-        assert!(!config.rerank_enabled);
+        assert_eq!(config.rerank_mode, "off");
 
         // The comment should still be in the file
         let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
@@ -430,5 +430,36 @@ decay_rate_per_day = 0.15
         let config = load_config_from_toml(dir.path());
         assert!((config.decay_rate_per_day - 0.15).abs() < f64::EPSILON);
         // Brain::new with an external config is tested in brain.rs tests
+    }
+
+    #[test]
+    fn test_default_toml_includes_rerank_mode() {
+        let content = default_config_toml_content();
+        assert!(content.contains("rerank_mode"), "default TOML should include rerank_mode");
+    }
+
+    #[test]
+    fn test_load_rerank_mode_llm() {
+        let dir = temp_home();
+        let toml = r#"
+[brain]
+rerank_mode = "llm"
+"#;
+        std::fs::write(dir.path().join("config.toml"), toml).unwrap();
+        let config = load_config_from_toml(dir.path());
+        assert_eq!(config.rerank_mode, "llm");
+    }
+
+    #[test]
+    fn test_missing_rerank_mode_defaults_to_cross_encoder() {
+        let dir = temp_home();
+        // No rerank_mode in TOML
+        let toml = r#"
+[brain]
+decay_rate_per_day = 0.05
+"#;
+        std::fs::write(dir.path().join("config.toml"), toml).unwrap();
+        let config = load_config_from_toml(dir.path());
+        assert_eq!(config.rerank_mode, "cross-encoder");
     }
 }

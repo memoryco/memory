@@ -44,7 +44,7 @@ impl Tool<Context> for ConfigGetTool {
              search_association_depth: {} (hops to follow)\n\
              embedding_model: {} (desired embedding model)\n\
              embedding_model_active: {} (model used for current embeddings)\n\
-             rerank_enabled: {} (cross-encoder re-ranking on search)\n\
+             rerank_mode: {} (reranking mode: off, cross-encoder, or llm)\n\
              rerank_candidates: {} (candidates for re-ranking pass)\n\
              hybrid_search_enabled: {} (BM25+vector fusion via RRF)\n\
              query_expansion_enabled: {} (expand queries with variants before retrieval)",
@@ -58,7 +58,7 @@ impl Tool<Context> for ConfigGetTool {
             config.search_association_depth,
             config.embedding_model,
             config.embedding_model_active.as_deref().unwrap_or("(none)"),
-            config.rerank_enabled,
+            config.rerank_mode,
             config.rerank_candidates,
             config.hybrid_search_enabled,
             config.query_expansion_enabled

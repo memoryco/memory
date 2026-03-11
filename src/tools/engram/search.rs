@@ -246,7 +246,7 @@ impl Tool<Context> for EngramSearchTool {
         let (
             follow_associations,
             association_depth,
-            rerank_enabled,
+            rerank_mode,
             rerank_candidates,
             hybrid_search_enabled,
             query_expansion_enabled,
@@ -261,7 +261,7 @@ impl Tool<Context> for EngramSearchTool {
             (
                 brain.config().search_follow_associations,
                 brain.config().search_association_depth,
-                brain.config().rerank_enabled,
+                brain.config().rerank_mode.clone(),
                 brain.config().rerank_candidates,
                 brain.config().hybrid_search_enabled,
                 brain.config().query_expansion_enabled,
@@ -289,7 +289,7 @@ impl Tool<Context> for EngramSearchTool {
 
         // Find similar memories (fetch extra to allow for filtering)
         // When reranking is enabled, fetch more candidates for the reranker to work with
-        let fetch_count = if rerank_enabled {
+        let fetch_count = if rerank_mode != "off" {
             rerank_candidates.max(effective_limit * 3)
         } else {
             effective_limit * 3
@@ -538,40 +538,87 @@ impl Tool<Context> for EngramSearchTool {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Cross-encoder re-ranking: feed (query, content) pairs through a cross-encoder
-        // for significantly better relevance ordering than cosine similarity alone.
+        // Re-ranking: either cross-encoder or LLM-based, based on rerank_mode config.
         // Falls back silently to cosine results if reranking fails.
-        if rerank_enabled && !scored.is_empty() {
-            let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
-            let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-            let candidate_count = contents.len();
+        match rerank_mode.as_str() {
+            "llm" => {
+                if !scored.is_empty() && context.llm.available() && context.llm.tier() >= LlmTier::Minimal {
+                    // Cap candidates at 20 to fit in context window
+                    let cap = 20.min(scored.len());
+                    let contents: Vec<String> = scored[..cap].iter().map(|r| r.content.clone()).collect();
+                    let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
 
-            match crate::embedding::reranker::rerank(&args.query, &content_refs) {
-                Ok(reranked) => {
-                    let mut reranked_results = Vec::with_capacity(reranked.len());
-                    for rs in &reranked {
-                        if rs.index < scored.len() {
-                            let orig = &scored[rs.index];
-                            reranked_results.push(ScoredResult {
-                                id: orig.id,
-                                content: orig.content.clone(),
-                                created_at: orig.created_at,
-                                similarity: orig.similarity,
-                                energy: orig.energy,
-                                blended: rs.score, // Replace blended with reranker score
-                                state_emoji: orig.state_emoji,
-                            });
+                    match context.llm.rerank(&args.query, &content_refs, effective_limit) {
+                        Ok(indices) => {
+                            let mut reranked_results = Vec::with_capacity(indices.len());
+                            for (rank, &idx) in indices.iter().enumerate() {
+                                if idx < cap {
+                                    let orig = &scored[idx];
+                                    reranked_results.push(ScoredResult {
+                                        id: orig.id,
+                                        content: orig.content.clone(),
+                                        created_at: orig.created_at,
+                                        similarity: orig.similarity,
+                                        energy: orig.energy,
+                                        // Synthetic rank-based score so diversity shaping respects LLM order
+                                        blended: 1.0 - (rank as f32 * 0.05),
+                                        state_emoji: orig.state_emoji,
+                                    });
+                                }
+                            }
+                            if !reranked_results.is_empty() {
+                                scored = reranked_results;
+                                eprintln!(
+                                    "[search] LLM re-ranked {} candidates, selected {}",
+                                    cap, scored.len()
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[search] LLM reranking failed, falling back to cosine: {}", e);
                         }
                     }
-                    scored = reranked_results;
-                    eprintln!(
-                        "[search] re-ranked {} candidates with cross-encoder",
-                        candidate_count
-                    );
+                } else if !scored.is_empty() {
+                    eprintln!("[search] LLM reranking requested but LLM not available, using cosine order");
                 }
-                Err(e) => {
-                    eprintln!("[search] reranking failed, falling back to cosine: {}", e);
+            }
+            "cross-encoder" => {
+                if !scored.is_empty() {
+                    let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
+                    let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+                    let candidate_count = contents.len();
+
+                    match crate::embedding::reranker::rerank(&args.query, &content_refs) {
+                        Ok(reranked) => {
+                            let mut reranked_results = Vec::with_capacity(reranked.len());
+                            for rs in &reranked {
+                                if rs.index < scored.len() {
+                                    let orig = &scored[rs.index];
+                                    reranked_results.push(ScoredResult {
+                                        id: orig.id,
+                                        content: orig.content.clone(),
+                                        created_at: orig.created_at,
+                                        similarity: orig.similarity,
+                                        energy: orig.energy,
+                                        blended: rs.score,
+                                        state_emoji: orig.state_emoji,
+                                    });
+                                }
+                            }
+                            scored = reranked_results;
+                            eprintln!(
+                                "[search] re-ranked {} candidates with cross-encoder",
+                                candidate_count
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("[search] reranking failed, falling back to cosine: {}", e);
+                        }
+                    }
                 }
+            }
+            _ => {
+                // "off" or unknown — keep cosine order, do nothing
             }
         }
 

@@ -610,9 +610,9 @@ impl Brain {
                 config.search_association_depth = value.clamp(0.0, 5.0) as u8;
                 true
             }
-            "rerank_enabled" => {
-                config.rerank_enabled = value != 0.0;
-                true
+            "rerank_mode" => {
+                // rerank_mode is a string — handled directly in config_set, not here
+                false
             }
             "rerank_candidates" => {
                 config.rerank_candidates = value.clamp(5.0, 200.0) as usize;
@@ -2047,9 +2047,9 @@ mod tests {
     // ==================
 
     #[test]
-    fn config_defaults_rerank_enabled() {
+    fn config_defaults_rerank_mode() {
         let config = Config::default();
-        assert!(config.rerank_enabled);
+        assert_eq!(config.rerank_mode, "cross-encoder");
         assert_eq!(config.rerank_candidates, 30);
     }
 
@@ -2058,17 +2058,12 @@ mod tests {
         let storage = MemoryStorage::new();
         let mut brain = Brain::new(storage, Config::default()).unwrap();
 
-        // Default: enabled with 30 candidates
-        assert!(brain.config().rerank_enabled);
+        // Default: cross-encoder mode with 30 candidates
+        assert_eq!(brain.config().rerank_mode, "cross-encoder");
         assert_eq!(brain.config().rerank_candidates, 30);
 
-        // Disable via configure()
-        assert!(brain.configure("rerank_enabled", 0.0).unwrap());
-        assert!(!brain.config().rerank_enabled);
-
-        // Re-enable
-        assert!(brain.configure("rerank_enabled", 1.0).unwrap());
-        assert!(brain.config().rerank_enabled);
+        // rerank_mode is a string — configure() returns false for it (handled via set_config)
+        assert!(!brain.configure("rerank_mode", 0.0).unwrap());
 
         // Set candidates
         assert!(brain.configure("rerank_candidates", 50.0).unwrap());
@@ -2100,7 +2095,7 @@ mod tests {
         }"#;
 
         let config: Config = serde_json::from_str(old_json).unwrap();
-        assert!(config.rerank_enabled, "rerank should default to enabled");
+        assert_eq!(config.rerank_mode, "cross-encoder", "rerank should default to cross-encoder");
         assert_eq!(
             config.rerank_candidates, 30,
             "rerank_candidates should default to 30"

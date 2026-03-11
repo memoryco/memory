@@ -113,8 +113,8 @@ pub fn run() {
     }
     let brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
     eprintln!(
-        "  Config: embedding_model={}, rerank_enabled={}, hybrid_search={}",
-        brain_config.embedding_model, brain_config.rerank_enabled, brain_config.hybrid_search_enabled
+        "  Config: embedding_model={}, rerank_mode={}, hybrid_search={}",
+        brain_config.embedding_model, brain_config.rerank_mode, brain_config.hybrid_search_enabled
     );
 
     // --- Brain ---

@@ -150,6 +150,18 @@ impl EngramStorage {
             );
 
             CREATE INDEX IF NOT EXISTS idx_access_log_timestamp ON access_log(timestamp);
+
+            -- Engram enrichment embeddings (multi-vector support)
+            CREATE TABLE IF NOT EXISTS engram_enrichments (
+                engram_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                source TEXT NOT NULL DEFAULT 'llm',
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (engram_id, seq),
+                FOREIGN KEY (engram_id) REFERENCES engrams(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_enrichments_engram ON engram_enrichments(engram_id);
         "#,
             )
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -199,6 +211,47 @@ impl EngramStorage {
         Ok(())
     }
 
+    /// Migrate existing database to add engram_enrichments table if missing (SQLite)
+    #[cfg(feature = "sqlite")]
+    fn migrate_enrichments_table(&mut self) -> StorageResult<()> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let result: Result<CountResult, _> = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='engram_enrichments'",
+        )
+        .get_result(&mut self.conn);
+
+        let has_table = match result {
+            Ok(r) => r.cnt > 0,
+            Err(_) => false,
+        };
+
+        if !has_table {
+            self.conn
+                .batch_execute(
+                    r#"
+                CREATE TABLE IF NOT EXISTS engram_enrichments (
+                    engram_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    embedding BLOB NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'llm',
+                    created_at INTEGER NOT NULL,
+                    PRIMARY KEY (engram_id, seq),
+                    FOREIGN KEY (engram_id) REFERENCES engrams(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_enrichments_engram ON engram_enrichments(engram_id);
+            "#,
+                )
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
     /// Migrate existing database to add ordinal column to associations if missing (SQLite)
     #[cfg(feature = "sqlite")]
     fn migrate_association_ordinal(&mut self) -> StorageResult<()> {
@@ -234,6 +287,7 @@ impl Storage for EngramStorage {
         self.create_schema()?;
         self.migrate_embeddings()?;
         self.migrate_association_ordinal()?;
+        self.migrate_enrichments_table()?;
         Ok(())
     }
 
@@ -714,6 +768,29 @@ impl Storage for EngramStorage {
     #[cfg(feature = "postgres")]
     fn clear_all_embeddings(&mut self) -> StorageResult<usize> {
         Ok(0) // TODO
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn set_enrichment_embeddings(
+        &mut self,
+        id: &EngramId,
+        embeddings: &[Vec<f32>],
+        source: &str,
+    ) -> StorageResult<()> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.set_enrichment_embeddings(id, embeddings, source)
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn delete_enrichments(&mut self, id: &EngramId) -> StorageResult<()> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.delete_enrichments(id)
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn count_enrichments(&mut self) -> StorageResult<usize> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.count_enrichments()
     }
 
     // ==================

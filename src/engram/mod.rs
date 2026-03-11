@@ -146,7 +146,7 @@ fn default_embedding_model() -> String {
 }
 
 fn default_rerank_enabled() -> bool {
-    true
+    false
 }
 
 fn default_rerank_candidates() -> usize {

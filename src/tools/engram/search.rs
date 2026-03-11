@@ -486,8 +486,9 @@ impl Tool<Context> for EngramSearchTool {
         // Use the ORIGINAL query embedding for association discovery and reranking
         let query_embedding = original_query_embedding.expect("at least one variant always exists");
 
-        // Score blending: 70% semantic similarity, 30% energy (recency/relevance)
-        // This boosts recently-used memories even if semantic match is slightly lower
+        // Score blending: multiplicative — energy boosts relevance but can't replace it.
+        // sim * (0.5 + energy * 0.5) means: zero similarity = zero score regardless of energy.
+        // A fully-energized memory gets up to 1.0x boost; a decayed memory gets 0.5x floor.
         #[derive(Clone)]
         struct ScoredResult {
             id: uuid::Uuid,
@@ -516,7 +517,7 @@ impl Tool<Context> for EngramSearchTool {
                     return None;
                 }
 
-                let blended = r.score * 0.7 + (engram.energy as f32) * 0.3;
+                let blended = r.score * (0.5 + (engram.energy as f32) * 0.5);
 
                 Some(ScoredResult {
                     id: r.id,

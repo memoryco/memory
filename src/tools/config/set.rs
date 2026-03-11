@@ -101,10 +101,24 @@ impl Tool<Context> for ConfigSetTool {
             )));
         }
 
-        // All other keys are numeric
-        let value = args.value.as_f64().ok_or_else(|| {
-            McpError::InvalidParams("value must be a number for this config key".to_string())
-        })?;
+        // All other keys are numeric (booleans accepted as true/false/0/1 in any form)
+        let value = args
+            .value
+            .as_f64()
+            .or_else(|| args.value.as_bool().map(|b| if b { 1.0 } else { 0.0 }))
+            .or_else(|| {
+                // Handle string representations: "true", "false", "0", "1", "3.14"
+                args.value.as_str().and_then(|s| match s {
+                    "true" => Some(1.0),
+                    "false" => Some(0.0),
+                    other => other.parse::<f64>().ok(),
+                })
+            })
+            .ok_or_else(|| {
+                McpError::InvalidParams(
+                    "value must be a number (or true/false for boolean keys)".to_string(),
+                )
+            })?;
 
         let mut brain = context.brain.lock().unwrap();
 

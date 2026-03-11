@@ -745,9 +745,8 @@ impl Brain {
                     None => continue,
                 };
 
-                // Blended score: same formula as search + association bonus
-                let blended = (similarity * 0.7)
-                    + (energy as f32 * 0.3)
+                // Blended score: multiplicative (same as search) + association bonus
+                let blended = similarity * (0.5 + energy as f32 * 0.5)
                     + (assoc_weight as f32 * ASSOCIATION_BONUS_FACTOR as f32);
 
                 all_discoveries.push(AssociationDiscovery {
@@ -790,6 +789,27 @@ impl Brain {
     /// Set embedding for an engram (used during backfill)
     pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         self.storage.set_embedding(id, embedding)
+    }
+
+    /// Store enrichment embeddings for an engram (multi-vector support).
+    /// Replaces any existing enrichments for this engram.
+    pub fn set_enrichment_embeddings(
+        &mut self,
+        id: &EngramId,
+        embeddings: &[Vec<f32>],
+        source: &str,
+    ) -> StorageResult<()> {
+        self.storage.set_enrichment_embeddings(id, embeddings, source)
+    }
+
+    /// Delete all enrichment embeddings for an engram.
+    pub fn delete_enrichments(&mut self, id: &EngramId) -> StorageResult<()> {
+        self.storage.delete_enrichments(id)
+    }
+
+    /// Count total enrichment vectors across all engrams.
+    pub fn count_enrichments(&mut self) -> StorageResult<usize> {
+        self.storage.count_enrichments()
     }
 
     /// Bootstrap associations based on semantic similarity

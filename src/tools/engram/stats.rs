@@ -37,6 +37,7 @@ impl Tool<Context> for EngramStatsTool {
         let _ = brain.sync_from_storage();
 
         let stats = brain.stats();
+        let enrichment_count = brain.count_enrichments().unwrap_or(0);
 
         let output = format!(
             "Memory Substrate Statistics:\n\n\
@@ -46,6 +47,7 @@ impl Tool<Context> for EngramStatsTool {
              🌊 Deep: {}\n\
              🧊 Archived: {}\n\n\
              Total associations: {}\n\
+             Enrichment vectors: {}\n\
              Average energy: {:.2}",
             stats.total_engrams,
             stats.active_engrams,
@@ -53,6 +55,7 @@ impl Tool<Context> for EngramStatsTool {
             stats.deep_engrams,
             stats.archived_engrams,
             stats.total_associations,
+            enrichment_count,
             stats.average_energy
         );
 

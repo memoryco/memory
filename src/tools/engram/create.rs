@@ -2,6 +2,7 @@
 
 use crate::embedding::EmbeddingGenerator;
 use crate::engram::EngramId;
+use crate::llm::SharedLlmService;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
@@ -91,7 +92,7 @@ impl Tool<Context> for EngramCreateTool {
             }
         } // Lock released here
 
-        // Phase 2: Spawn background embedding tasks (no lock held)
+        // Phase 2a: Spawn per-memory threads for primary embeddings (fast, parallel)
         for (id, content) in created.iter() {
             let brain_clone = context.brain.clone();
             let id_clone = *id;
@@ -103,6 +104,47 @@ impl Tool<Context> for EngramCreateTool {
                     && let Ok(mut brain) = brain_clone.lock()
                 {
                     let _ = brain.set_embedding(&id_clone, &embedding);
+                }
+            });
+        }
+
+        // Phase 2b: Spawn ONE thread for LLM enrichment (sequential, no contention)
+        // LLM inference serializes internally, so 438 threads just thrash.
+        // One worker processes the queue and avoids the thread storm.
+        {
+            let brain_clone = context.brain.clone();
+            let llm_clone: SharedLlmService = context.llm.clone();
+            let batch: Vec<(EngramId, String)> = created.clone();
+
+            std::thread::spawn(move || {
+                if !llm_clone.available() {
+                    return;
+                }
+
+                let generator = EmbeddingGenerator::new();
+
+                for (id, content) in &batch {
+                    if let Ok(queries) = llm_clone.generate_training_queries(content, 5) {
+                        let enrichment_embeddings: Vec<Vec<f32>> = queries
+                            .iter()
+                            .filter_map(|q| generator.generate(q).ok())
+                            .collect();
+                        if !enrichment_embeddings.is_empty() {
+                            if let Ok(mut brain) = brain_clone.lock() {
+                                let n = enrichment_embeddings.len();
+                                let preview: String = content.chars().take(50).collect();
+                                let _ = brain.set_enrichment_embeddings(
+                                    id,
+                                    &enrichment_embeddings,
+                                    "llm",
+                                );
+                                eprintln!(
+                                    "[create] enrichment: {} vectors for \"{}\"",
+                                    n, preview
+                                );
+                            }
+                        }
+                    }
                 }
             });
         }

@@ -209,6 +209,29 @@ pub trait Storage: Send {
         Ok(0)
     }
 
+    /// Store enrichment embeddings for an engram (multi-vector support).
+    /// Replaces any existing enrichments for this engram.
+    fn set_enrichment_embeddings(
+        &mut self,
+        id: &EngramId,
+        embeddings: &[Vec<f32>],
+        source: &str,
+    ) -> StorageResult<()> {
+        let _ = (id, embeddings, source);
+        Ok(())
+    }
+
+    /// Delete all enrichment embeddings for an engram.
+    fn delete_enrichments(&mut self, id: &EngramId) -> StorageResult<()> {
+        let _ = id;
+        Ok(())
+    }
+
+    /// Count total enrichment vectors across all engrams.
+    fn count_enrichments(&mut self) -> StorageResult<usize> {
+        Ok(0)
+    }
+
     // ==================
     // KEYWORD SEARCH (FTS5)
     // ==================

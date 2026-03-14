@@ -213,6 +213,7 @@ search_association_depth = {search_association_depth}
 embedding_model = "{embedding_model}"
 
 # Reranking mode: "off", "cross-encoder", "llm", or "hybrid" (cross-encoder then LLM)
+# Tip: switch to "hybrid" when enabling [llm] for best retrieval quality.
 rerank_mode = "{rerank_mode}"
 
 # Candidates to feed to re-ranker (higher = better recall, slower).
@@ -224,7 +225,7 @@ hybrid_search_enabled = {hybrid_search_enabled}
 # Expand queries with variant phrasings before retrieval.
 query_expansion_enabled = {query_expansion_enabled}
 
-# Candidates for LLM rerank stage. Tied to llm_context_length: at 2048 → ~20, at 4096 → 30-40.
+# Candidates for LLM rerank stage. Tied to [llm] context_length: at 2048 → ~20, at 4096 → 30-40.
 llm_rerank_candidates = {llm_rerank_candidates}
 
 # Default minimum similarity score (0.0-1.0). Used when caller doesn't specify.

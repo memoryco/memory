@@ -111,6 +111,11 @@ pub fn run() {
             eprintln!("  Config: wrote default config.toml");
         }
     }
+    // Ensure LLM config keys exist (appended by the llm crate, not brain).
+    if let Err(e) = crate::llm::ensure_llm_config_defaults(&memory_home) {
+        eprintln!("Warning: Failed to write LLM config defaults: {}", e);
+    }
+
     let brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
     eprintln!(
         "  Config: embedding_model={}, rerank_mode={}, hybrid_search={}",

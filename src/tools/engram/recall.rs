@@ -25,9 +25,8 @@ struct Args {
     strength: Option<f64>,
     #[serde(default)]
     create_memories: Option<Vec<MemoryInput>>,
-    /// Optional session/conversation ID for context accumulation
-    #[serde(default)]
-    session_id: Option<String>,
+    /// Session ID for context-aware retrieval
+    session_id: String,
 }
 
 impl Tool<Context> for EngramRecallTool {
@@ -75,11 +74,10 @@ impl Tool<Context> for EngramRecallTool {
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "Optional session/conversation ID. When provided, accumulates \
-                        topic context across calls and biases retrieval toward the conversation topic."
+                    "description": "Session ID for context-aware retrieval."
                 }
             },
-            "required": ["ids"]
+            "required": ["ids", "session_id"]
         })
     }
 
@@ -174,15 +172,15 @@ impl Tool<Context> for EngramRecallTool {
 
         // Session accumulation: blend recalled memory embeddings into session centroid.
         // Uses existing embeddings from storage — no new embedding generation needed.
-        if let Some(ref session_id) = args.session_id {
+        {
             let brain = context.brain.read().unwrap();
             let config = brain.config();
             let smoothing = config.session_centroid_smoothing;
 
             let mut session = brain
-                .load_session(session_id)
+                .load_session(&args.session_id)
                 .unwrap_or(None)
-                .unwrap_or_else(|| crate::engram::SessionContext::new(session_id));
+                .unwrap_or_else(|| crate::engram::SessionContext::new(&args.session_id));
 
             session.touch();
 
@@ -195,11 +193,11 @@ impl Tool<Context> for EngramRecallTool {
             }
 
             if let Err(e) = brain.save_session(&session) {
-                eprintln!("[session] Failed to save session {}: {}", session_id, e);
+                eprintln!("[session] Failed to save session {}: {}", &args.session_id, e);
             }
         }
 
-        let mut final_output = format!("{}\n{}", header, output.trim());
+        let mut final_output = format!("session_id: {}\n\n{}\n{}", args.session_id, header, output.trim());
 
         // Phase 2: Create new memories if provided (bounce to EngramCreateTool)
         if let Some(create_memories) = &args.create_memories {
@@ -216,7 +214,7 @@ impl Tool<Context> for EngramRecallTool {
                     })
                     .collect();
 
-                let create_args = json!({ "memories": memories_json });
+                let create_args = json!({ "memories": memories_json, "session_id": args.session_id });
 
                 final_output.push_str("\n\n---\n\n");
                 match create_tool.execute(create_args, context, env) {

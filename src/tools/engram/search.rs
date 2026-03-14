@@ -31,9 +31,8 @@ struct Args {
     /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
     #[serde(default)]
     created_before: Option<String>,
-    /// Optional session/conversation ID for context-aware retrieval
-    #[serde(default)]
-    session_id: Option<String>,
+    /// Session ID for context-aware retrieval
+    session_id: String,
 }
 
 #[derive(Deserialize)]
@@ -58,9 +57,8 @@ struct BatchArgs {
     /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
     #[serde(default)]
     created_before: Option<String>,
-    /// Optional session/conversation ID for context-aware retrieval
-    #[serde(default)]
-    session_id: Option<String>,
+    /// Session ID for context-aware retrieval
+    session_id: String,
 }
 
 impl EngramSearchTool {
@@ -176,19 +174,17 @@ impl EngramSearchTool {
             effective_limit * 3
         };
 
-        // Load session centroid for affinity biasing (if session_id provided)
-        let (session_centroid, session_context_weight) = if let Some(ref session_id) = args.session_id {
+        // Load session centroid for affinity biasing
+        let (session_centroid, session_context_weight) = {
             let config_weight = brain.config().session_context_weight;
             if config_weight > 0.0 {
-                match brain.load_session(session_id) {
+                match brain.load_session(&args.session_id) {
                     Ok(Some(session)) => (session.centroid, config_weight),
                     _ => (None, 0.0),
                 }
             } else {
                 (None, 0.0)
             }
-        } else {
-            (None, 0.0)
         };
 
         let params = crate::engram::search::SearchPipelineParams {
@@ -240,25 +236,27 @@ impl EngramSearchTool {
         drop(brain);
 
         // Session accumulation: feed the query into the session context
-        if let Some(ref session_id) = args.session_id {
-            super::accumulate_session_signal(context, session_id, &args.query);
-        }
+        super::accumulate_session_signal(context, &args.session_id, &args.query);
 
         if scored.is_empty() {
-            let mut output = String::from(
-                "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
+            let mut output = format!(
+                "session_id: {}\n\n\
+                 ⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
                  💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
                  ---\n\n",
+                args.session_id
             );
             output.push_str("No memories found.\n");
             output.push_str("\n💡 Tip: Try a different query or lower min_score.");
             return Ok(text_response(output));
         }
 
-        let mut output = String::from(
-            "⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
+        let mut output = format!(
+            "session_id: {}\n\n\
+             ⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
              💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
              ---\n\n",
+            args.session_id
         );
 
         // Show chain hints before memory listings
@@ -375,10 +373,10 @@ impl Tool<Context> for EngramSearchTool {
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "Optional session/conversation ID. When provided, accumulates \
-                        topic context across calls and biases retrieval toward the conversation topic."
+                    "description": "Session ID for context-aware retrieval."
                 }
-            }
+            },
+            "required": ["queries", "session_id"]
         })
     }
 

@@ -24,9 +24,8 @@ struct MemoryInput {
 #[derive(Deserialize)]
 struct Args {
     memories: Vec<MemoryInput>,
-    /// Optional session/conversation ID for context accumulation
-    #[serde(default)]
-    session_id: Option<String>,
+    /// Session ID for context-aware retrieval
+    session_id: String,
 }
 
 impl Tool<Context> for EngramCreateTool {
@@ -60,11 +59,10 @@ impl Tool<Context> for EngramCreateTool {
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "Optional session/conversation ID. When provided, accumulates \
-                        topic context across calls and biases retrieval toward the conversation topic."
+                    "description": "Session ID for context-aware retrieval."
                 }
             },
-            "required": ["memories"]
+            "required": ["memories", "session_id"]
         })
     }
 
@@ -106,13 +104,11 @@ impl Tool<Context> for EngramCreateTool {
         let mut precomputed_embeddings: std::collections::HashMap<EngramId, Vec<f32>> =
             std::collections::HashMap::new();
 
-        if let Some(ref session_id) = args.session_id {
-            for (id, memory) in created.iter().zip(args.memories.iter()) {
-                if let Some(embedding) =
-                    super::accumulate_session_signal(context, session_id, &memory.content)
-                {
-                    precomputed_embeddings.insert(id.0, embedding);
-                }
+        for (id, memory) in created.iter().zip(args.memories.iter()) {
+            if let Some(embedding) =
+                super::accumulate_session_signal(context, &args.session_id, &memory.content)
+            {
+                precomputed_embeddings.insert(id.0, embedding);
             }
         }
 
@@ -189,7 +185,8 @@ impl Tool<Context> for EngramCreateTool {
 
         // Phase 3: Return immediately
         let header = format!(
-            "{} memories created (embeddings generating in background).\n\n",
+            "session_id: {}\n\n{} memories created (embeddings generating in background).\n\n",
+            args.session_id,
             created.len()
         );
         Ok(text_response(format!("{}{}", header, output.trim())))

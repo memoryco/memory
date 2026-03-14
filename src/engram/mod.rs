@@ -27,6 +27,7 @@ pub use brain::Brain;
 pub use engram::{Engram, MemoryState};
 #[allow(unused_imports)]
 pub use session::SessionContext;
+pub use session::generate_session_id;
 #[cfg(test)]
 pub use storage::memory::MemoryStorage;
 pub use storage::{SimilarityResult, Storage, StorageResult};

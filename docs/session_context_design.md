@@ -53,16 +53,40 @@ across server restarts and conversation boundaries.
 This eliminates the session lifecycle/cleanup problem entirely. There is no "session end" —
 just a hard expiry for sessions that haven't been touched in a long time.
 
-### Who Provides session_id?
+### Who Generates session_id?
 
-The caller (Claude, an agent, a Slack bot) provides a `session_id` string on tool calls.
-This is typically a natural conversation/thread ID that the client already has. If no
-`session_id` is provided, the server falls back to current behavior — no session biasing.
+The **server** generates the `session_id` during `identity_get`, which is the mandatory
+first call of every conversation. The caller never creates session IDs — it receives one
+from identity_get and echoes it back on subsequent calls.
 
-### session_id is Per-Call, Not Per-Connection
+**Format:** 16-character hex string = 8 chars unix timestamp (seconds) + 8 chars random
+(from UUID v4). Example: `67d4a1b2c3f8e901`. This gives natural sort order by creation
+time and effectively zero collision risk — you'd need ~65K sessions in the same second.
 
-**`session_id` must be passed on each individual tool call that feeds into the session.**
-It is NOT stashed on the server's `Context` struct.
+### session_id is Required, Per-Call, and Echoed
+
+`session_id` is a **required parameter** on `engram_recall`, `engram_search`, and
+`engram_create`. Every response from these tools echoes the session_id as the first
+line of output:
+
+```
+session_id: 67d4a1b2c3f8e901
+
+[actual results]
+```
+
+**Why echo?** In long conversations, LLM context compaction discards earlier messages.
+The `identity_get` response from turn 1 is the first thing to disappear. By echoing
+the session_id on every tool response, the most recent result always has it visible,
+so the AI can pass it on the next call regardless of compaction.
+
+**Why required, not optional?** Optional params get dropped when the AI loses context
+(exactly the scenario we're solving). Required params cause a hard failure if missing,
+which the AI self-corrects on. Silent fallback to unbiased retrieval is worse than a
+retryable error.
+
+**Why per-call, not per-connection?** `session_id` is NOT stashed on the server's
+`Context` struct.
 
 Why: In stdio mode (today), one process = one client, so stashing on Context would work.
 But once we support server+port, multiple clients share the same server process. Stashing
@@ -71,15 +95,17 @@ The stateless per-call design works correctly in both transport modes.
 
 ### Which Tools Accept session_id?
 
-`session_id` is an **optional parameter** on these tools:
+`session_id` is a **required parameter** on these tools:
 
 | Tool | Signal contributed | Rationale |
 |------|-------------------|-----------|
-| `engram_recall` | Query string | Direct topic signal — what the user is asking about |
+| `engram_recall` | Recalled memory embeddings | Direct topic signal — what the user is asking about |
 | `engram_search` | Query string | Same as recall — semantic search query = topic signal |
 | `engram_create` | Memory content | If you're creating memories about a topic, strong signal |
 
-That's it. All other tools are excluded:
+`identity_get` **generates** the session_id and passes it to any piggy-backed searches.
+
+All other tools are excluded:
 
 | Tool | Why excluded |
 |------|-------------|
@@ -234,12 +260,15 @@ topic neighborhood — we can prefetch the top N engrams in that neighborhood.
 
 ## Action Items
 
-- [ ] Add `sessions` table to brain.db schema
-- [ ] Add `SessionContext` struct with accumulation + centroid update logic
-- [ ] Add `session_id` as optional param on `engram_recall`, `engram_search`, `engram_create`
-- [ ] Implement centroid update on query/content accumulation
-- [ ] Implement session affinity gate in recall pipeline (after retrieval, before LLM rerank)
-- [ ] Add session config keys to config.toml (`session_context_weight`, `session_max_queries`, `session_centroid_smoothing`, `session_expire_days`)
-- [ ] Add session expiry to `apply_maintenance` startup routine
+- [x] Add `sessions` table to brain.db schema
+- [x] Add `SessionContext` struct with accumulation + centroid update logic
+- [x] ~~Add `session_id` as optional param~~ → Made `session_id` **required** on `engram_recall`, `engram_search`, `engram_create`
+- [x] Add `generate_session_id()` — timestamp-prefixed hex (16 chars), generated in `identity_get`
+- [x] Echo `session_id: <id>` at top of every tool response (survives context compaction)
+- [x] Forward session_id through internal call paths (identity_get→search, recall→create)
+- [x] Implement centroid update on query/content accumulation
+- [x] Implement session affinity gate in recall pipeline (after retrieval, before LLM rerank)
+- [x] Add session config keys to config.toml (`session_context_weight`, `session_max_queries`, `session_centroid_smoothing`, `session_expire_days`)
+- [x] Add session expiry to `apply_maintenance` startup routine
 - [ ] Benchmark with LOCOMO (compare recall quality with/without session context)
 - [ ] Add session stats to dashboard

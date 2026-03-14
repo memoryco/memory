@@ -7,6 +7,24 @@
 //! don't need an explicit "end" — stale sessions are expired at startup via
 //! `session_expire_days` config.
 
+/// Generate a compact, timestamp-prefixed session ID (16 hex chars).
+///
+/// Format: 8 chars unix timestamp (seconds) + 8 chars random from UUID v4.
+/// This gives natural sort order by creation time and effectively zero
+/// collision risk — you'd need ~65K sessions in the same second to worry.
+pub fn generate_session_id() -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as u32;
+    let random_bytes = uuid::Uuid::new_v4();
+    let rand = &random_bytes.as_bytes()[..4];
+    format!(
+        "{:08x}{:02x}{:02x}{:02x}{:02x}",
+        ts, rand[0], rand[1], rand[2], rand[3]
+    )
+}
+
 /// Running context for a single conversation session.
 ///
 /// Accumulates query strings and a rolling centroid embedding representing
@@ -167,6 +185,48 @@ mod tests {
         session.last_seen_at = 0;
         session.touch();
         assert!(session.last_seen_at > 0);
+    }
+
+    #[test]
+    fn test_generate_session_id_format() {
+        let id = generate_session_id();
+        assert_eq!(id.len(), 16, "session ID should be 16 hex chars, got: {}", id);
+        // Must be valid hex
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "session ID should be all hex chars, got: {}",
+            id
+        );
+    }
+
+    #[test]
+    fn test_generate_session_id_uniqueness() {
+        let ids: Vec<String> = (0..100).map(|_| generate_session_id()).collect();
+        let mut deduped = ids.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(ids.len(), deduped.len(), "100 generated IDs should all be unique");
+    }
+
+    #[test]
+    fn test_generate_session_id_timestamp_prefix() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+        let id = generate_session_id();
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+
+        let ts_hex = &id[..8];
+        let ts = u32::from_str_radix(ts_hex, 16).expect("first 8 chars should be valid hex u32");
+        assert!(
+            ts >= before && ts <= after,
+            "timestamp prefix {} should be between {} and {}",
+            ts, before, after
+        );
     }
 
     // Storage round-trip tests use the real SQLite backend.

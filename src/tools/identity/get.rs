@@ -53,8 +53,13 @@ impl Tool<Context> for IdentityGetTool {
     ) -> sml_mcps::Result<CallToolResult> {
         let args: Args = serde_json::from_value(args).unwrap_or_default();
 
+        // Generate a session ID for this conversation. Every subsequent tool
+        // call that accepts session_id will echo it back so it survives compaction.
+        let session_id = crate::engram::generate_session_id();
+
         // Phase 1: Load identity (the framing lens)
-        let mut output = {
+        let mut output = format!("session_id: {}\n\n", session_id);
+        output += &{
             let mut store = context.identity.lock().unwrap();
             let identity = store
                 .get()
@@ -81,7 +86,7 @@ impl Tool<Context> for IdentityGetTool {
                 let search_tool = EngramSearchTool;
                 output.push_str("\n\n---\n\n# Memory Search Results\n\n");
 
-                let search_args = json!({ "queries": queries });
+                let search_args = json!({ "queries": queries, "session_id": session_id });
                 match search_tool.execute(search_args, context, env) {
                     Ok(result) => {
                         output.push_str(&extract_text(&result));

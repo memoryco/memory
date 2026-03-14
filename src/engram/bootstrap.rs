@@ -111,6 +111,18 @@ When the user describes a repeatable multi-step process (3+ steps), create a pro
 3. Wire anchor → each step using `engram_associate` with ordinals 1–N and weight 0.8
 
 This makes the procedure discoverable via search and walkable via `engram_associations`.
+
+## Fixing Broken Procedure Chains
+
+There is no tool to delete individual associations. If a procedure chain has incorrect ordinals, duplicate steps, or stale associations, the fix is:
+
+1. Delete the anchor memory AND all its step memories using `engram_delete`
+   - Deleting a memory automatically removes all associations from/to it
+2. Recreate the anchor and all steps fresh with `engram_create`
+3. Rewire the chain with `engram_associate` using correct ordinals 1–N
+4. Verify with `engram_associations` (direction: outbound) on the new anchor
+
+Do NOT try to patch a broken chain by adding new associations — `engram_associate` adds, it does not replace existing ordinals. The result is duplicate associations at the same ordinal with different weights, which is ambiguous.
 </associations_and_procedures>
 
 <what_to_store>

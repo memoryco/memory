@@ -17,6 +17,7 @@ pub mod decompose;
 #[allow(clippy::module_inception)]
 pub mod engram;
 pub mod persistence;
+pub mod search;
 pub mod storage;
 pub mod substrate;
 

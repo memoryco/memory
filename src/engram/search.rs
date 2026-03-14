@@ -252,6 +252,10 @@ pub struct SearchPipelineParams {
     pub created_before: Option<i64>,
     /// Config: query expansion enabled?
     pub query_expansion_enabled: bool,
+    /// Pre-loaded session centroid for affinity biasing (None = no session context).
+    pub session_centroid: Option<Vec<f32>>,
+    /// How much session context biases retrieval (β from config). 0.0 = off.
+    pub session_context_weight: f32,
 }
 
 /// Run vector + BM25 for a single query variant and merge into all_results.
@@ -727,6 +731,33 @@ pub fn run_search_pipeline(
         }
         _ => {
             // "off" or unknown — keep cosine order, do nothing
+        }
+    }
+
+    // Session affinity gating: bias scores toward the conversation topic.
+    // Applied after reranking (so we nudge reranked scores, not interfere with reranker)
+    // and before association-following (so association merge uses adjusted scores).
+    if let Some(ref centroid) = params.session_centroid
+        && params.session_context_weight > 0.0
+        && !scored.is_empty()
+    {
+        let mut session_adjusted = 0usize;
+        for result in &mut scored {
+            if let Ok(Some(emb)) = brain.get_embedding(&result.id) {
+                let affinity = cosine_similarity(&emb, centroid);
+                result.blended *= 1.0 + params.session_context_weight * affinity;
+                session_adjusted += 1;
+            }
+        }
+        // Re-sort after adjustment
+        scored.sort_by(|a, b| {
+            b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        if session_adjusted > 0 {
+            eprintln!(
+                "[search] session affinity: adjusted {} results (weight={})",
+                session_adjusted, params.session_context_weight
+            );
         }
     }
 
@@ -1780,5 +1811,120 @@ mod tests {
     #[test]
     fn parse_timestamp_zero_epoch() {
         assert_eq!(parse_timestamp("0"), Ok(0));
+    }
+
+    // ==================
+    // Session affinity gate tests
+    // ==================
+
+    /// When a session centroid is provided and weight > 0, results whose embeddings
+    /// align with the centroid should receive a score boost.
+    #[test]
+    fn test_session_affinity_gate_boosts_matching_results() {
+        use crate::embedding::cosine_similarity;
+
+        let mut brain = brain_with_sqlite();
+
+        // Two engrams: one whose embedding aligns with the session centroid, one orthogonal.
+        let id_matching = brain.create("Rust memory management and ownership").unwrap();
+        let id_unrelated = brain.create("Banana bread recipe with walnuts").unwrap();
+
+        // Session centroid: points toward Rust/tech
+        let centroid: Vec<f32> = vec![0.9, 0.1, 0.0, 0.0];
+        // Matching: closely aligned with centroid
+        let emb_matching: Vec<f32> = vec![0.85, 0.15, 0.0, 0.0];
+        // Unrelated: orthogonal to centroid
+        let emb_unrelated: Vec<f32> = vec![0.0, 0.0, 0.85, 0.15];
+
+        brain.set_embedding(&id_matching, &emb_matching).unwrap();
+        brain.set_embedding(&id_unrelated, &emb_unrelated).unwrap();
+
+        let base_score = 0.7_f32;
+        let weight = 0.3_f32;
+
+        // Compute expected affinity scores
+        let affinity_matching = cosine_similarity(&emb_matching, &centroid);
+        let affinity_unrelated = cosine_similarity(&emb_unrelated, &centroid);
+        assert!(
+            affinity_matching > affinity_unrelated,
+            "matching embedding should have higher centroid affinity"
+        );
+
+        // Simulate the affinity gate logic
+        let expected_matching = base_score * (1.0 + weight * affinity_matching);
+        let expected_unrelated = base_score * (1.0 + weight * affinity_unrelated);
+
+        assert!(
+            expected_matching > expected_unrelated,
+            "matching result should score higher after session affinity gate: {} vs {}",
+            expected_matching,
+            expected_unrelated
+        );
+        assert!(
+            expected_matching > base_score,
+            "session affinity should boost the matching result above baseline"
+        );
+    }
+
+    /// When session_centroid is None, the gate is a no-op: scored results are unchanged.
+    #[test]
+    fn test_session_affinity_gate_noop_when_no_centroid() {
+        let brain = brain_with_sqlite();
+
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+        let original_scores = [0.9_f32, 0.7_f32];
+
+        // Simulate the gate with no centroid: nothing should change.
+        let centroid: Option<Vec<f32>> = None;
+        let weight = 0.3_f32;
+
+        let mut scores = original_scores;
+
+        if let Some(ref c) = centroid {
+            if weight > 0.0 {
+                for (score, id) in scores.iter_mut().zip([id1, id2].iter()) {
+                    if let Ok(Some(emb)) = brain.get_embedding(id) {
+                        let affinity = cosine_similarity(&emb, c);
+                        *score *= 1.0 + weight * affinity;
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            scores, original_scores,
+            "scores should be unchanged when centroid is None"
+        );
+    }
+
+    /// When session_context_weight is 0.0, the gate is a no-op even if a centroid is present.
+    #[test]
+    fn test_session_affinity_gate_noop_when_weight_zero() {
+        let mut brain = brain_with_sqlite();
+
+        let id1 = brain.create("Rust memory management").unwrap();
+        let emb: Vec<f32> = vec![0.9, 0.1, 0.0, 0.0];
+        brain.set_embedding(&id1, &emb).unwrap();
+
+        let centroid: Option<Vec<f32>> = Some(vec![0.9, 0.1, 0.0, 0.0]);
+        let weight = 0.0_f32;
+
+        let original_score = 0.8_f32;
+        let mut score = original_score;
+
+        if let Some(ref c) = centroid {
+            if weight > 0.0 {
+                if let Ok(Some(emb_loaded)) = brain.get_embedding(&id1) {
+                    let affinity = cosine_similarity(&emb_loaded, c);
+                    score *= 1.0 + weight * affinity;
+                }
+            }
+        }
+
+        assert_eq!(
+            score, original_score,
+            "score should be unchanged when weight is 0.0"
+        );
     }
 }

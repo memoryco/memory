@@ -31,6 +31,9 @@ struct Args {
     /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
     #[serde(default)]
     created_before: Option<String>,
+    /// Optional session/conversation ID for context-aware retrieval
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -55,6 +58,9 @@ struct BatchArgs {
     /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
     #[serde(default)]
     created_before: Option<String>,
+    /// Optional session/conversation ID for context-aware retrieval
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 impl EngramSearchTool {
@@ -170,6 +176,21 @@ impl EngramSearchTool {
             effective_limit * 3
         };
 
+        // Load session centroid for affinity biasing (if session_id provided)
+        let (session_centroid, session_context_weight) = if let Some(ref session_id) = args.session_id {
+            let config_weight = brain.config().session_context_weight;
+            if config_weight > 0.0 {
+                match brain.load_session(session_id) {
+                    Ok(Some(session)) => (session.centroid, config_weight),
+                    _ => (None, 0.0),
+                }
+            } else {
+                (None, 0.0)
+            }
+        } else {
+            (None, 0.0)
+        };
+
         let params = crate::engram::search::SearchPipelineParams {
             query: args.query.clone(),
             variants,
@@ -191,6 +212,8 @@ impl EngramSearchTool {
             created_after,
             created_before,
             query_expansion_enabled,
+            session_centroid,
+            session_context_weight,
         };
 
         let pipeline_result =
@@ -211,6 +234,14 @@ impl EngramSearchTool {
             if let Ok(mut r) = context.last_search_result_ids.lock() {
                 *r = result_ids;
             }
+        }
+
+        // Drop read lock before session accumulation (accumulate_session_signal acquires its own read lock)
+        drop(brain);
+
+        // Session accumulation: feed the query into the session context
+        if let Some(ref session_id) = args.session_id {
+            super::accumulate_session_signal(context, session_id, &args.query);
         }
 
         if scored.is_empty() {
@@ -341,6 +372,11 @@ impl Tool<Context> for EngramSearchTool {
                     "description": "Only include memories created before this time. \
                         Accepts ISO 8601 (e.g. 2026-03-14, 2026-03-14T19:00:00Z) \
                         or unix epoch seconds."
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session/conversation ID. When provided, accumulates \
+                        topic context across calls and biases retrieval toward the conversation topic."
                 }
             }
         })
@@ -370,6 +406,7 @@ impl Tool<Context> for EngramSearchTool {
                 "include_archived": batch.include_archived,
                 "created_after": batch.created_after,
                 "created_before": batch.created_before,
+                "session_id": batch.session_id,
             });
 
             match self.search_for_query(single_args, context, env) {

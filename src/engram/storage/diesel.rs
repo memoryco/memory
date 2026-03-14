@@ -7,6 +7,7 @@
 use super::models::*;
 use super::schema::{associations, engrams, identity, metadata};
 use super::{SimilarityResult, Storage, StorageError, StorageResult};
+use crate::engram::session::SessionContext;
 use crate::engram::{Association, Config, Engram, EngramId, Identity, MemoryState};
 
 use diesel::connection::SimpleConnection;
@@ -279,6 +280,46 @@ impl EngramStorage {
 
         Ok(())
     }
+
+    /// Migrate existing database to add the sessions table if missing (SQLite)
+    #[cfg(feature = "sqlite")]
+    fn migrate_sessions_table(&mut self) -> StorageResult<()> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let result: Result<CountResult, _> = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='sessions'",
+        )
+        .get_result(&mut self.conn);
+
+        let has_table = match result {
+            Ok(r) => r.cnt > 0,
+            Err(_) => false,
+        };
+
+        if !has_table {
+            self.conn
+                .batch_execute(
+                    r#"
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id    TEXT PRIMARY KEY,
+                    queries       TEXT NOT NULL DEFAULT '[]',
+                    centroid      BLOB,
+                    query_count   INTEGER NOT NULL DEFAULT 0,
+                    created_at    INTEGER NOT NULL,
+                    last_seen_at  INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen_at);
+            "#,
+                )
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Storage for EngramStorage {
@@ -288,6 +329,7 @@ impl Storage for EngramStorage {
         self.migrate_embeddings()?;
         self.migrate_association_ordinal()?;
         self.migrate_enrichments_table()?;
+        self.migrate_sessions_table()?;
         Ok(())
     }
 
@@ -922,6 +964,88 @@ impl Storage for EngramStorage {
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
         Ok(())
+    }
+
+    // ==================
+    // SESSIONS
+    // ==================
+
+    #[cfg(feature = "sqlite")]
+    fn load_session(&mut self, session_id: &str) -> StorageResult<Option<SessionContext>> {
+        #[derive(QueryableByName)]
+        struct SessionRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            session_id: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            queries: String,
+            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Blob>)]
+            centroid: Option<Vec<u8>>,
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            query_count: i64,
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            created_at: i64,
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            last_seen_at: i64,
+        }
+
+        let result: Option<SessionRow> = diesel::sql_query(
+            "SELECT session_id, queries, centroid, query_count, created_at, last_seen_at \
+             FROM sessions WHERE session_id = ?1",
+        )
+        .bind::<diesel::sql_types::Text, _>(session_id)
+        .get_result::<SessionRow>(&mut self.conn)
+        .optional()
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        match result {
+            None => Ok(None),
+            Some(row) => {
+                let queries: Vec<String> =
+                    serde_json::from_str(&row.queries).unwrap_or_default();
+                let centroid = row.centroid.as_deref().and_then(bytes_to_embedding);
+                Ok(Some(SessionContext {
+                    session_id: row.session_id,
+                    queries,
+                    centroid,
+                    query_count: row.query_count as usize,
+                    created_at: row.created_at,
+                    last_seen_at: row.last_seen_at,
+                }))
+            }
+        }
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn save_session(&mut self, session: &SessionContext) -> StorageResult<()> {
+        let queries_json = serde_json::to_string(&session.queries)
+            .unwrap_or_else(|_| "[]".to_string());
+        let centroid_bytes: Option<Vec<u8>> =
+            session.centroid.as_deref().map(embedding_to_bytes);
+
+        diesel::sql_query(
+            "INSERT OR REPLACE INTO sessions \
+             (session_id, queries, centroid, query_count, created_at, last_seen_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind::<diesel::sql_types::Text, _>(&session.session_id)
+        .bind::<diesel::sql_types::Text, _>(&queries_json)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Blob>, _>(centroid_bytes)
+        .bind::<diesel::sql_types::BigInt, _>(session.query_count as i64)
+        .bind::<diesel::sql_types::BigInt, _>(session.created_at)
+        .bind::<diesel::sql_types::BigInt, _>(session.last_seen_at)
+        .execute(&mut self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn delete_expired_sessions(&mut self, expire_before: i64) -> StorageResult<usize> {
+        let count = diesel::sql_query("DELETE FROM sessions WHERE last_seen_at < ?1")
+            .bind::<diesel::sql_types::BigInt, _>(expire_before)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(count)
     }
 }
 

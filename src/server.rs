@@ -126,6 +126,7 @@ pub fn run() {
     let mut brain = Brain::open_path(&db_path, brain_config).expect("Failed to open brain");
 
     apply_maintenance(&mut brain);
+    expire_sessions(&mut brain);
     backfill_embeddings(&mut brain);
     bootstrap_associations(&mut brain);
     run_decomposition(&mut brain);
@@ -207,6 +208,31 @@ pub fn run() {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Delete sessions that have not been accessed within `session_expire_days`.
+///
+/// Skipped if `session_expire_days` is 0 (expiry disabled).
+fn expire_sessions(brain: &mut Brain) {
+    let expire_days = brain.config().session_expire_days;
+    if expire_days == 0 {
+        return;
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let cutoff = now - (expire_days as i64 * 86400);
+
+    match brain.delete_expired_sessions(cutoff) {
+        Ok(0) => {}
+        Ok(count) => eprintln!(
+            "Expired {} session(s) not accessed in {} day(s)",
+            count, expire_days
+        ),
+        Err(e) => eprintln!("Warning: Failed to expire sessions: {}", e),
+    }
+}
 
 /// Apply time-based decay and prune weak associations.
 fn apply_maintenance(brain: &mut Brain) {

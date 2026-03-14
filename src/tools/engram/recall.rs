@@ -25,6 +25,9 @@ struct Args {
     strength: Option<f64>,
     #[serde(default)]
     create_memories: Option<Vec<MemoryInput>>,
+    /// Optional session/conversation ID for context accumulation
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 impl Tool<Context> for EngramRecallTool {
@@ -69,6 +72,11 @@ impl Tool<Context> for EngramRecallTool {
                         },
                         "required": ["content"]
                     }
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session/conversation ID. When provided, accumulates \
+                        topic context across calls and biases retrieval toward the conversation topic."
                 }
             },
             "required": ["ids"]
@@ -163,6 +171,33 @@ impl Tool<Context> for EngramRecallTool {
 
             (header, output)
         }; // brain write lock dropped here
+
+        // Session accumulation: blend recalled memory embeddings into session centroid.
+        // Uses existing embeddings from storage — no new embedding generation needed.
+        if let Some(ref session_id) = args.session_id {
+            let brain = context.brain.read().unwrap();
+            let config = brain.config();
+            let smoothing = config.session_centroid_smoothing;
+
+            let mut session = brain
+                .load_session(session_id)
+                .unwrap_or(None)
+                .unwrap_or_else(|| crate::engram::SessionContext::new(session_id));
+
+            session.touch();
+
+            for id_str in &args.ids {
+                if let Ok(id) = id_str.parse::<crate::engram::EngramId>()
+                    && let Ok(Some(embedding)) = brain.get_embedding(&id)
+                {
+                    session.update_centroid(&embedding, smoothing);
+                }
+            }
+
+            if let Err(e) = brain.save_session(&session) {
+                eprintln!("[session] Failed to save session {}: {}", session_id, e);
+            }
+        }
 
         let mut final_output = format!("{}\n{}", header, output.trim());
 

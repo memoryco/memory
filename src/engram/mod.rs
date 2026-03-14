@@ -18,12 +18,15 @@ pub mod decompose;
 pub mod engram;
 pub mod persistence;
 pub mod search;
+pub mod session;
 pub mod storage;
 pub mod substrate;
 
 pub use association::Association;
 pub use brain::Brain;
 pub use engram::{Engram, MemoryState};
+#[allow(unused_imports)]
+pub use session::SessionContext;
 #[cfg(test)]
 pub use storage::memory::MemoryStorage;
 pub use storage::{SimilarityResult, Storage, StorageResult};
@@ -146,6 +149,24 @@ pub struct Config {
     /// Maximum association discoveries to merge into search results.
     #[serde(default = "default_association_cap_max")]
     pub association_cap_max: usize,
+
+    // ── Session Context ─────────────────────────────────────────────────────
+
+    /// How much session context biases retrieval (0.0 = off, higher = stronger bias).
+    #[serde(default = "default_session_context_weight")]
+    pub session_context_weight: f32,
+
+    /// Maximum queries to retain per session history.
+    #[serde(default = "default_session_max_queries")]
+    pub session_max_queries: usize,
+
+    /// EMA smoothing factor for session centroid (higher = more recency bias).
+    #[serde(default = "default_session_centroid_smoothing")]
+    pub session_centroid_smoothing: f32,
+
+    /// Delete sessions not accessed in this many days (0 = never expire).
+    #[serde(default = "default_session_expire_days")]
+    pub session_expire_days: usize,
 }
 
 fn default_max_tag_cardinality() -> usize {
@@ -212,6 +233,22 @@ fn default_association_cap_max() -> usize {
     12
 }
 
+fn default_session_context_weight() -> f32 {
+    0.3
+}
+
+fn default_session_max_queries() -> usize {
+    50
+}
+
+fn default_session_centroid_smoothing() -> f32 {
+    0.1
+}
+
+fn default_session_expire_days() -> usize {
+    90
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -247,6 +284,10 @@ impl Default for Config {
             composite_limit_max: 30,
             association_cap_min: 5,
             association_cap_max: 12,
+            session_context_weight: 0.3,
+            session_max_queries: 50,
+            session_centroid_smoothing: 0.1,
+            session_expire_days: 90,
         }
     }
 }

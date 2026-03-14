@@ -19,6 +19,7 @@ pub use vector::{SimilarityResult, VectorSearch};
 pub use crate::storage::{StorageError, StorageResult};
 
 use super::{Association, Config, Engram, EngramId, MemoryState};
+use crate::engram::session::SessionContext;
 use crate::identity::Identity;
 
 /// The storage contract
@@ -267,5 +268,28 @@ pub trait Storage: Send {
     ) -> StorageResult<()> {
         let _ = (query_text, result_ids, recalled_ids);
         Ok(())
+    }
+
+    // ==================
+    // SESSIONS
+    // ==================
+
+    /// Load a session by ID. Returns None if the session does not exist.
+    fn load_session(&mut self, session_id: &str) -> StorageResult<Option<SessionContext>> {
+        let _ = session_id;
+        Ok(None)
+    }
+
+    /// Save (upsert) a session.
+    fn save_session(&mut self, session: &SessionContext) -> StorageResult<()> {
+        let _ = session;
+        Ok(())
+    }
+
+    /// Delete sessions whose `last_seen_at` is strictly less than `expire_before`.
+    /// Returns the number of sessions deleted.
+    fn delete_expired_sessions(&mut self, expire_before: i64) -> StorageResult<usize> {
+        let _ = expire_before;
+        Ok(0)
     }
 }

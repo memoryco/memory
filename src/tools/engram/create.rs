@@ -24,6 +24,9 @@ struct MemoryInput {
 #[derive(Deserialize)]
 struct Args {
     memories: Vec<MemoryInput>,
+    /// Optional session/conversation ID for context accumulation
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 impl Tool<Context> for EngramCreateTool {
@@ -54,6 +57,11 @@ impl Tool<Context> for EngramCreateTool {
                         },
                         "required": ["content"]
                     }
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session/conversation ID. When provided, accumulates \
+                        topic context across calls and biases retrieval toward the conversation topic."
                 }
             },
             "required": ["memories"]
@@ -92,22 +100,49 @@ impl Tool<Context> for EngramCreateTool {
             }
         } // Lock released here
 
-        // Phase 2a: Spawn per-memory threads for primary embeddings (fast, parallel)
-        for (id, content) in created.iter() {
-            let brain_clone = context.brain.clone();
-            let id_clone = *id;
-            let content_clone = content.clone();
+        // Session accumulation: feed each memory's content into the session context.
+        // Collect any embeddings generated here so we can reuse them for storage
+        // instead of regenerating them in the background thread.
+        let mut precomputed_embeddings: std::collections::HashMap<EngramId, Vec<f32>> =
+            std::collections::HashMap::new();
 
-            std::thread::spawn(move || {
-                let generator = EmbeddingGenerator::new();
-                // Use read lock: set_embedding is &self (storage Mutex internally),
-                // so enrichment can run concurrently with search read locks.
-                if let Ok(embedding) = generator.generate(&content_clone)
-                    && let Ok(brain) = brain_clone.read()
+        if let Some(ref session_id) = args.session_id {
+            for (id, memory) in created.iter().zip(args.memories.iter()) {
+                if let Some(embedding) =
+                    super::accumulate_session_signal(context, session_id, &memory.content)
                 {
-                    let _ = brain.set_embedding(&id_clone, &embedding);
+                    precomputed_embeddings.insert(id.0, embedding);
                 }
-            });
+            }
+        }
+
+        // Phase 2a: Spawn per-memory threads for primary embeddings (fast, parallel).
+        // If session accumulation already generated the embedding, store it directly
+        // instead of regenerating — same model, same text, deterministic output.
+        for (id, content) in created.iter() {
+            if let Some(embedding) = precomputed_embeddings.remove(id) {
+                // Reuse the embedding from session accumulation
+                let brain_clone = context.brain.clone();
+                let id_clone = *id;
+                std::thread::spawn(move || {
+                    if let Ok(brain) = brain_clone.read() {
+                        let _ = brain.set_embedding(&id_clone, &embedding);
+                    }
+                });
+            } else {
+                // No session or embedding generation failed — generate fresh
+                let brain_clone = context.brain.clone();
+                let id_clone = *id;
+                let content_clone = content.clone();
+                std::thread::spawn(move || {
+                    let generator = EmbeddingGenerator::new();
+                    if let Ok(embedding) = generator.generate(&content_clone)
+                        && let Ok(brain) = brain_clone.read()
+                    {
+                        let _ = brain.set_embedding(&id_clone, &embedding);
+                    }
+                });
+            }
         }
 
         // Phase 2b: Spawn ONE thread for LLM enrichment (sequential, no contention)

@@ -88,6 +88,16 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         };
     }
 
+    macro_rules! get_f32 {
+        ($field:ident) => {
+            brain
+                .and_then(|t| t.get(stringify!($field)))
+                .and_then(|v| v.as_float())
+                .map(|n| n as f32)
+                .unwrap_or(defaults.$field)
+        };
+    }
+
     Config {
         decay_rate_per_day: get_f64!(decay_rate_per_day),
         decay_interval_hours: get_f64!(decay_interval_hours),
@@ -109,6 +119,10 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         composite_limit_max: get_usize!(composite_limit_max),
         association_cap_min: get_usize!(association_cap_min),
         association_cap_max: get_usize!(association_cap_max),
+        session_context_weight: get_f32!(session_context_weight),
+        session_max_queries: get_usize!(session_max_queries),
+        session_centroid_smoothing: get_f32!(session_centroid_smoothing),
+        session_expire_days: get_usize!(session_expire_days),
         // Runtime state — not stored in TOML
         embedding_model_active: defaults.embedding_model_active,
         // Rarely-changed fields — keep defaults (can be set manually in TOML if needed)
@@ -242,6 +256,22 @@ association_cap_min = {association_cap_min}
 
 # Maximum association discoveries to merge into search results.
 association_cap_max = {association_cap_max}
+
+# ── Session Context ─────────────────────────────────────────────────
+# Session-based retrieval biasing. When a session_id is provided on tool calls,
+# accumulated query context biases memory recall toward the conversation topic.
+
+# How much session context biases retrieval (0.0 = off, higher = stronger bias).
+session_context_weight = {session_context_weight}
+
+# Maximum queries to retain per session history.
+session_max_queries = {session_max_queries}
+
+# EMA smoothing factor for session centroid (higher = more recency bias).
+session_centroid_smoothing = {session_centroid_smoothing}
+
+# Delete sessions not accessed in this many days (0 = never expire).
+session_expire_days = {session_expire_days}
 "#,
         decay_rate_per_day = d.decay_rate_per_day,
         decay_interval_hours = d.decay_interval_hours,
@@ -263,6 +293,10 @@ association_cap_max = {association_cap_max}
         composite_limit_max = d.composite_limit_max,
         association_cap_min = d.association_cap_min,
         association_cap_max = d.association_cap_max,
+        session_context_weight = d.session_context_weight,
+        session_max_queries = d.session_max_queries,
+        session_centroid_smoothing = d.session_centroid_smoothing,
+        session_expire_days = d.session_expire_days,
     )
 }
 

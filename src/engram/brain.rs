@@ -692,6 +692,15 @@ impl Brain {
         self.storage.lock().unwrap().set_metadata(key, value)
     }
 
+    /// Delete sessions whose `last_seen_at` is strictly less than `expire_before`.
+    /// Returns the number of sessions deleted.
+    pub fn delete_expired_sessions(&mut self, expire_before: i64) -> StorageResult<usize> {
+        self.storage
+            .lock()
+            .unwrap()
+            .delete_expired_sessions(expire_before)
+    }
+
     /// Flush all pending writes
     pub fn flush(&mut self) -> StorageResult<()> {
         self.storage.lock().unwrap().flush()
@@ -878,6 +887,30 @@ impl Brain {
     /// Count total enrichment vectors across all engrams.
     pub fn count_enrichments(&mut self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_enrichments()
+    }
+
+    // ── Session Context ──────────────────────────────────────────────────────
+
+    /// Load a session by ID. Returns None if the session does not exist.
+    ///
+    /// Takes `&self` (uses internal Mutex) so callers holding an RwLock read
+    /// guard can load session state without upgrading to a write lock.
+    pub fn load_session(
+        &self,
+        session_id: &str,
+    ) -> StorageResult<Option<crate::engram::session::SessionContext>> {
+        self.storage.lock().unwrap().load_session(session_id)
+    }
+
+    /// Save (upsert) a session.
+    ///
+    /// Takes `&self` (uses internal Mutex) following the same pattern as
+    /// `set_embedding` and `set_enrichment_embeddings`.
+    pub fn save_session(
+        &self,
+        session: &crate::engram::session::SessionContext,
+    ) -> StorageResult<()> {
+        self.storage.lock().unwrap().save_session(session)
     }
 
     /// Bootstrap associations based on semantic similarity

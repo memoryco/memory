@@ -9,6 +9,35 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
+/// Parse a timestamp string into unix epoch seconds.
+/// Accepts ISO 8601 datetime (e.g. "2026-03-14T19:00:00Z", "2026-03-14") or
+/// unix epoch seconds as a plain integer string (e.g. "1710432000").
+fn parse_timestamp(s: &str) -> Result<i64, String> {
+    let trimmed = s.trim();
+
+    // Try unix epoch (plain integer)
+    if let Ok(epoch) = trimmed.parse::<i64>() {
+        return Ok(epoch);
+    }
+
+    // Try full ISO 8601 with timezone
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(dt.timestamp());
+    }
+
+    // Try ISO 8601 without timezone (assume UTC)
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
+        return Ok(dt.and_utc().timestamp());
+    }
+
+    // Try date-only ("2026-03-14") — treat as start of day UTC
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp());
+    }
+
+    Err(format!("Cannot parse timestamp: '{}'. Expected ISO 8601 (e.g. 2026-03-14, 2026-03-14T19:00:00Z) or unix epoch seconds.", trimmed))
+}
+
 /// Cosine similarity threshold for semantic deduplication in the diversity shaping pass.
 /// Embeddings with similarity >= this value are considered near-duplicates.
 /// This catches semantic overlap that Jaccard token overlap misses — e.g. two memories
@@ -34,6 +63,12 @@ struct Args {
     /// Include archived memories (default: false)
     #[serde(default)]
     include_archived: Option<bool>,
+    /// Only include memories created after this time (ISO 8601 or unix epoch seconds)
+    #[serde(default)]
+    created_after: Option<String>,
+    /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
+    #[serde(default)]
+    created_before: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +87,12 @@ struct BatchArgs {
     /// Include archived memories (default: false)
     #[serde(default)]
     include_archived: Option<bool>,
+    /// Only include memories created after this time (ISO 8601 or unix epoch seconds)
+    #[serde(default)]
+    created_after: Option<String>,
+    /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
+    #[serde(default)]
+    created_before: Option<String>,
 }
 
 /// Heuristic: list/multi-hop style queries often need broader recall.
@@ -212,6 +253,20 @@ impl EngramSearchTool {
         let include_archived = args.include_archived.unwrap_or(false);
         let composite_query = is_composite_query(&args.query);
         let inferential_query = is_inferential_query(&args.query);
+
+        // Parse optional date-range filters
+        let created_after: Option<i64> = args
+            .created_after
+            .as_deref()
+            .map(parse_timestamp)
+            .transpose()
+            .map_err(|e| McpError::InvalidParams(e))?;
+        let created_before: Option<i64> = args
+            .created_before
+            .as_deref()
+            .map(parse_timestamp)
+            .transpose()
+            .map_err(|e| McpError::InvalidParams(e))?;
 
         let (
             follow_associations,
@@ -517,6 +572,18 @@ impl EngramSearchTool {
                     return None;
                 }
 
+                // Date-range filter
+                if let Some(after) = created_after {
+                    if engram.created_at <= after {
+                        return None;
+                    }
+                }
+                if let Some(before) = created_before {
+                    if engram.created_at >= before {
+                        return None;
+                    }
+                }
+
                 let blended = r.score * (0.5 + (engram.energy as f32) * 0.5);
 
                 Some(ScoredResult {
@@ -766,6 +833,18 @@ impl EngramSearchTool {
                 };
                 if !state_ok {
                     continue;
+                }
+
+                // Date-range filter (same as above)
+                if let Some(after) = created_after {
+                    if engram.created_at <= after {
+                        continue;
+                    }
+                }
+                if let Some(before) = created_before {
+                    if engram.created_at >= before {
+                        continue;
+                    }
                 }
 
                 scored.push(ScoredResult {
@@ -1072,6 +1151,8 @@ impl Tool<Context> for EngramSearchTool {
         "Search memories by semantic similarity using vector embeddings. \
          Accepts an array of queries to batch multiple searches in a single call. \
          Finds memories with similar meaning even if they don't share exact keywords. \
+         Supports date-range filtering via created_after/created_before to narrow \
+         results by when memories were stored. \
          If results seem weak or irrelevant, try decomposing abstract queries into \
          concrete related terms. For example, instead of 'relationship status', \
          try 'breakup', 'dating', 'partner', or 'married'. Search for actions \
@@ -1104,6 +1185,18 @@ impl Tool<Context> for EngramSearchTool {
                 "include_archived": {
                     "type": "boolean",
                     "description": "Include archived memories. Default: false"
+                },
+                "created_after": {
+                    "type": "string",
+                    "description": "Only include memories created after this time. \
+                        Accepts ISO 8601 (e.g. 2026-03-14, 2026-03-14T19:00:00Z) \
+                        or unix epoch seconds."
+                },
+                "created_before": {
+                    "type": "string",
+                    "description": "Only include memories created before this time. \
+                        Accepts ISO 8601 (e.g. 2026-03-14, 2026-03-14T19:00:00Z) \
+                        or unix epoch seconds."
                 }
             }
         })
@@ -1131,6 +1224,8 @@ impl Tool<Context> for EngramSearchTool {
                 "min_score": batch.min_score,
                 "include_deep": batch.include_deep,
                 "include_archived": batch.include_archived,
+                "created_after": batch.created_after,
+                "created_before": batch.created_before,
             });
 
             match self.search_for_query(single_args, context, env) {
@@ -1900,5 +1995,75 @@ mod tests {
             (SEMANTIC_DEDUP_THRESHOLD - 0.85).abs() < f32::EPSILON,
             "threshold should be 0.85"
         );
+    }
+
+    // ==================
+    // parse_timestamp tests
+    // ==================
+
+    #[test]
+    fn parse_timestamp_unix_epoch() {
+        assert_eq!(parse_timestamp("1710432000"), Ok(1710432000));
+    }
+
+    #[test]
+    fn parse_timestamp_unix_epoch_with_whitespace() {
+        assert_eq!(parse_timestamp("  1710432000  "), Ok(1710432000));
+    }
+
+    #[test]
+    fn parse_timestamp_iso8601_full_utc() {
+        // 2026-03-14T19:00:00Z
+        let result = parse_timestamp("2026-03-14T19:00:00Z").unwrap();
+        let dt = chrono::DateTime::from_timestamp(result, 0).unwrap();
+        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-03-14 19:00:00");
+    }
+
+    #[test]
+    fn parse_timestamp_iso8601_with_offset() {
+        // 2026-03-14T12:00:00-07:00 = 2026-03-14T19:00:00Z
+        let result = parse_timestamp("2026-03-14T12:00:00-07:00").unwrap();
+        let dt = chrono::DateTime::from_timestamp(result, 0).unwrap();
+        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-03-14 19:00:00");
+    }
+
+    #[test]
+    fn parse_timestamp_iso8601_no_timezone() {
+        // Treated as UTC
+        let result = parse_timestamp("2026-03-14T19:00:00").unwrap();
+        let dt = chrono::DateTime::from_timestamp(result, 0).unwrap();
+        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-03-14 19:00:00");
+    }
+
+    #[test]
+    fn parse_timestamp_date_only() {
+        // "2026-03-14" → start of day UTC
+        let result = parse_timestamp("2026-03-14").unwrap();
+        let dt = chrono::DateTime::from_timestamp(result, 0).unwrap();
+        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-03-14 00:00:00");
+    }
+
+    #[test]
+    fn parse_timestamp_invalid_string() {
+        let result = parse_timestamp("not-a-date");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot parse timestamp"));
+    }
+
+    #[test]
+    fn parse_timestamp_empty_string() {
+        let result = parse_timestamp("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_timestamp_negative_epoch() {
+        // Before unix epoch (e.g. 1969)
+        assert_eq!(parse_timestamp("-86400"), Ok(-86400));
+    }
+
+    #[test]
+    fn parse_timestamp_zero_epoch() {
+        assert_eq!(parse_timestamp("0"), Ok(0));
     }
 }

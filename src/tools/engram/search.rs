@@ -36,6 +36,24 @@ struct Args {
     include_archived: Option<bool>,
 }
 
+#[derive(Deserialize)]
+struct BatchArgs {
+    /// Array of search queries to run
+    queries: Vec<String>,
+    /// Maximum results per query (default: 10)
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Minimum similarity score (0.0-1.0, default: 0.4)
+    #[serde(default)]
+    min_score: Option<f32>,
+    /// Include deep storage memories (default: false)
+    #[serde(default)]
+    include_deep: Option<bool>,
+    /// Include archived memories (default: false)
+    #[serde(default)]
+    include_archived: Option<bool>,
+}
+
 /// Heuristic: list/multi-hop style queries often need broader recall.
 // TODO: English-specific keyword heuristic — should be revisited for i18n support.
 fn is_composite_query(query: &str) -> bool {
@@ -177,50 +195,10 @@ fn normalize_variants(original: &str, generated: Vec<String>) -> Vec<String> {
     }
 }
 
-impl Tool<Context> for EngramSearchTool {
-    fn name(&self) -> &str {
-        "engram_search"
-    }
-
-    fn description(&self) -> &str {
-        "Search memories by semantic similarity using vector embeddings. \
-         Finds memories with similar meaning even if they don't share exact keywords. \
-         If results seem weak or irrelevant, try decomposing abstract queries into \
-         concrete related terms. For example, instead of 'relationship status', \
-         try 'breakup', 'dating', 'partner', or 'married'. Search for actions \
-         and events rather than abstract states."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "required": ["query"],
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Text to search for semantically. Finds memories with similar meaning."
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum results to return. Default: 10"
-                },
-                "min_score": {
-                    "type": "number",
-                    "description": "Minimum similarity score (0.0-1.0). Default: 0.4"
-                },
-                "include_deep": {
-                    "type": "boolean",
-                    "description": "Include deep storage memories. Default: false"
-                },
-                "include_archived": {
-                    "type": "boolean",
-                    "description": "Include archived memories. Default: false"
-                }
-            }
-        })
-    }
-
-    fn execute(
+impl EngramSearchTool {
+    /// Run a single search query through the full pipeline.
+    /// Called by the batch `execute` wrapper and by `identity_get`.
+    pub fn search_for_query(
         &self,
         args: JsonValue,
         context: &mut Context,
@@ -1079,6 +1057,90 @@ impl Tool<Context> for EngramSearchTool {
                  - Search for specific events or actions rather than status or state\n\
                  - Try [person's name] + a related action, event, or feeling\n",
             );
+        }
+
+        Ok(text_response(output))
+    }
+}
+
+impl Tool<Context> for EngramSearchTool {
+    fn name(&self) -> &str {
+        "engram_search"
+    }
+
+    fn description(&self) -> &str {
+        "Search memories by semantic similarity using vector embeddings. \
+         Accepts an array of queries to batch multiple searches in a single call. \
+         Finds memories with similar meaning even if they don't share exact keywords. \
+         If results seem weak or irrelevant, try decomposing abstract queries into \
+         concrete related terms. For example, instead of 'relationship status', \
+         try 'breakup', 'dating', 'partner', or 'married'. Search for actions \
+         and events rather than abstract states."
+    }
+
+    fn schema(&self) -> JsonValue {
+        json!({
+            "type": "object",
+            "required": ["queries"],
+            "properties": {
+                "queries": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Array of search queries. Each query runs through the \
+                        full search pipeline independently."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results per query. Default: 10"
+                },
+                "min_score": {
+                    "type": "number",
+                    "description": "Minimum similarity score (0.0-1.0). Default: 0.4"
+                },
+                "include_deep": {
+                    "type": "boolean",
+                    "description": "Include deep storage memories. Default: false"
+                },
+                "include_archived": {
+                    "type": "boolean",
+                    "description": "Include archived memories. Default: false"
+                }
+            }
+        })
+    }
+
+    fn execute(
+        &self,
+        args: JsonValue,
+        context: &mut Context,
+        env: &ToolEnv,
+    ) -> sml_mcps::Result<CallToolResult> {
+        let batch: BatchArgs = serde_json::from_value(args)
+            .map_err(|e| McpError::InvalidParams(e.to_string()))?;
+
+        let mut output = String::new();
+
+        for (i, query) in batch.queries.iter().enumerate() {
+            if batch.queries.len() > 1 {
+                output.push_str(&format!("\n## Query {}: {:?}\n\n", i + 1, query));
+            }
+
+            let single_args = json!({
+                "query": query,
+                "limit": batch.limit,
+                "min_score": batch.min_score,
+                "include_deep": batch.include_deep,
+                "include_archived": batch.include_archived,
+            });
+
+            match self.search_for_query(single_args, context, env) {
+                Ok(result) => {
+                    output.push_str(&crate::tools::extract_text(&result));
+                }
+                Err(e) => {
+                    output.push_str(&format!("Search failed for {:?}: {}\n", query, e));
+                }
+            }
         }
 
         Ok(text_response(output))

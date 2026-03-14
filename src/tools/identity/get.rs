@@ -2,11 +2,11 @@
 
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
-use sml_mcps::{CallToolResult, Content, McpError, Tool, ToolEnv};
+use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
 use crate::tools::engram::EngramSearchTool;
-use crate::tools::text_response;
+use crate::tools::{extract_text, text_response};
 
 pub struct IdentityGetTool;
 
@@ -15,19 +15,6 @@ struct Args {
     /// Optional search queries to run alongside identity loading
     #[serde(default)]
     queries: Option<Vec<String>>,
-}
-
-/// Extract text content from a CallToolResult
-fn extract_text(result: &CallToolResult) -> String {
-    result
-        .content
-        .iter()
-        .filter_map(|c| match c {
-            Content::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 impl Tool<Context> for IdentityGetTool {
@@ -92,23 +79,15 @@ impl Tool<Context> for IdentityGetTool {
         if let Some(queries) = &args.queries {
             if !queries.is_empty() {
                 let search_tool = EngramSearchTool;
-                output.push_str("\n\n---\n\n# Memory Search Results\n");
+                output.push_str("\n\n---\n\n# Memory Search Results\n\n");
 
-                for (i, query) in queries.iter().enumerate() {
-                    if queries.len() > 1 {
-                        output.push_str(&format!("\n## Query {}: {:?}\n\n", i + 1, query));
-                    } else {
-                        output.push('\n');
+                let search_args = json!({ "queries": queries });
+                match search_tool.execute(search_args, context, env) {
+                    Ok(result) => {
+                        output.push_str(&extract_text(&result));
                     }
-
-                    let search_args = json!({ "query": query });
-                    match search_tool.execute(search_args, context, env) {
-                        Ok(result) => {
-                            output.push_str(&extract_text(&result));
-                        }
-                        Err(e) => {
-                            output.push_str(&format!("Search failed: {}\n", e));
-                        }
+                    Err(e) => {
+                        output.push_str(&format!("Search failed: {}\n", e));
                     }
                 }
             }
@@ -122,6 +101,7 @@ impl Tool<Context> for IdentityGetTool {
 mod tests {
     use super::*;
     use crate::identity::{DieselIdentityStorage, IdentityStore};
+    use sml_mcps::Content;
 
     fn test_store() -> IdentityStore {
         let storage = DieselIdentityStorage::in_memory().unwrap();

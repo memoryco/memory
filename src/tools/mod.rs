@@ -17,7 +17,7 @@ pub mod plans;
 pub mod reference;
 
 use crate::engram::Engram;
-use sml_mcps::CallToolResult;
+use sml_mcps::{CallToolResult, Content};
 
 // Re-export all tools for easy registration
 pub use engram::{
@@ -80,6 +80,19 @@ pub const GRAPH_TEMPLATE: &str = include_str!("../../templates/graph.html");
 /// Create a simple text response
 pub fn text_response(text: String) -> CallToolResult {
     CallToolResult::text(text)
+}
+
+/// Extract text content from a CallToolResult
+pub fn extract_text(result: &CallToolResult) -> String {
+    result
+        .content
+        .iter()
+        .filter_map(|c| match c {
+            Content::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Format an engram for display

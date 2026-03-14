@@ -29,7 +29,7 @@ Before creating a memory, check:
 - If it lists items like (1), (2), (3) — split each into its own memory
 - If it has more than 2 sentences, check whether it contains multiple facts. If so, split.
 - If removing half the content would leave a complete, useful memory, split it
-- Does it use a date as a prefix or label? Remove it — `created_at` captures this automatically. Only keep dates that ARE the fact (deadlines, scheduled events).
+- Does it use a date as a prefix or label? Remove it — `created_at` captures this automatically, and `engram_search` supports `created_after`/`created_before` params for time-based filtering. Only keep dates that ARE the fact (deadlines, birthdays, scheduled events).
 
 <example type="bad" label="compound memory that dilutes search">
 "Design team meeting: Three decisions made. (1) Switching to PostgreSQL for the new service. (2) API versioning will use URL path style, not headers. (3) Auth will use OAuth2 with PKCE flow. Also discussed timeline — targeting end of Q2. 15 action items assigned."
@@ -63,6 +63,8 @@ Skip storing: exact duplicates of existing memories, ephemeral task state (e.g.,
 Search before responding. Use keywords and concepts from the user's message as your query.
 
 If search results seem weak, decompose abstract queries into concrete related terms. For example, instead of "relationship status", try "breakup", "dating", "partner", or "married". Search for actions and events rather than abstract states.
+
+For time-based queries ("what did I work on last week?", "show me recent memories"), use `created_after` and/or `created_before` params with ISO 8601 dates or unix epoch seconds. These filter on memory creation metadata, not content text.
 
 If results include a 🔗 procedure chain hint, call `engram_associations` on the anchor with direction: outbound to get the full ordered steps before proceeding.
 </searching_memories>

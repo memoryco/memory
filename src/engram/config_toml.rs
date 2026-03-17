@@ -226,7 +226,9 @@ search_association_depth = {search_association_depth}
 # Embedding model name. Changing triggers re-embedding on restart.
 embedding_model = "{embedding_model}"
 
-# Reranking mode: "off", "cross-encoder", "llm", or "hybrid" (cross-encoder then LLM)
+# Reranking mode: "off", "cross-encoder", "llm", or "hybrid" (cross-encoder then LLM).
+# "hybrid" requires [llm] enabled = true — auto-degrades to "cross-encoder" if LLM is off.
+# "llm" requires [llm] enabled = true — auto-degrades to "off" if LLM is off.
 # Tip: switch to "hybrid" when enabling [llm] for best retrieval quality.
 rerank_mode = "{rerank_mode}"
 

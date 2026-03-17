@@ -116,7 +116,8 @@ pub fn run() {
         eprintln!("Warning: Failed to write LLM config defaults: {}", e);
     }
 
-    let brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
+    let mut brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
+    validate_config(&mut brain_config, &llm);
     eprintln!(
         "  Config: embedding_model={}, rerank_mode={}, hybrid_search={}",
         brain_config.embedding_model, brain_config.rerank_mode, brain_config.hybrid_search_enabled
@@ -367,6 +368,30 @@ fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
     }
 }
 
+/// Validate cross-crate config dependencies and degrade gracefully if needed.
+///
+/// Called after both the LLM service and brain config are loaded, before Brain::open_path().
+/// Degrades LLM-dependent rerank modes to safe fallbacks when no LLM is available.
+fn validate_config(config: &mut crate::engram::Config, llm: &crate::llm::SharedLlmService) {
+    if !llm.available() {
+        match config.rerank_mode.as_str() {
+            "hybrid" => {
+                eprintln!(
+                    "⚠ rerank_mode=\"hybrid\" requires [llm] but none is available — degrading to \"cross-encoder\""
+                );
+                config.rerank_mode = "cross-encoder".to_string();
+            }
+            "llm" => {
+                eprintln!(
+                    "⚠ rerank_mode=\"llm\" requires [llm] but none is available — degrading to \"off\""
+                );
+                config.rerank_mode = "off".to_string();
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Create the MCP server with all tools registered.
 fn build_server() -> Server<Context> {
     let mut server = Server::new(ServerConfig {
@@ -498,4 +523,97 @@ fn build_server() -> Server<Context> {
         .expect("open_dashboard");
 
     server
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use memoryco_llm::{LlmError, LlmService, LlmTier};
+    use std::sync::Arc;
+
+    struct MockLlmAvailable;
+
+    impl LlmService for MockLlmAvailable {
+        fn available(&self) -> bool {
+            true
+        }
+        fn tier(&self) -> LlmTier {
+            LlmTier::Standard
+        }
+        fn model_name(&self) -> &str {
+            "mock"
+        }
+        fn expand_query(&self, _: &str, _: usize) -> Result<Vec<String>, LlmError> {
+            Ok(vec![])
+        }
+        fn generate_training_queries(&self, _: &str, _: usize) -> Result<Vec<String>, LlmError> {
+            Ok(vec![])
+        }
+        fn rerank(&self, _: &str, _: &[&str], _: usize) -> Result<Vec<usize>, LlmError> {
+            Ok(vec![])
+        }
+    }
+
+    fn no_llm() -> crate::llm::SharedLlmService {
+        Arc::new(crate::llm::NoLlmService)
+    }
+
+    fn available_llm() -> crate::llm::SharedLlmService {
+        Arc::new(MockLlmAvailable)
+    }
+
+    fn config_with_rerank(mode: &str) -> crate::engram::Config {
+        let mut c = crate::engram::Config::default();
+        c.rerank_mode = mode.to_string();
+        c
+    }
+
+    #[test]
+    fn hybrid_degrades_to_cross_encoder_when_no_llm() {
+        let mut config = config_with_rerank("hybrid");
+        validate_config(&mut config, &no_llm());
+        assert_eq!(config.rerank_mode, "cross-encoder");
+    }
+
+    #[test]
+    fn llm_mode_degrades_to_off_when_no_llm() {
+        let mut config = config_with_rerank("llm");
+        validate_config(&mut config, &no_llm());
+        assert_eq!(config.rerank_mode, "off");
+    }
+
+    #[test]
+    fn cross_encoder_unchanged_when_no_llm() {
+        let mut config = config_with_rerank("cross-encoder");
+        validate_config(&mut config, &no_llm());
+        assert_eq!(config.rerank_mode, "cross-encoder");
+    }
+
+    #[test]
+    fn off_unchanged_when_no_llm() {
+        let mut config = config_with_rerank("off");
+        validate_config(&mut config, &no_llm());
+        assert_eq!(config.rerank_mode, "off");
+    }
+
+    #[test]
+    fn hybrid_unchanged_when_llm_available() {
+        let mut config = config_with_rerank("hybrid");
+        validate_config(&mut config, &available_llm());
+        assert_eq!(config.rerank_mode, "hybrid");
+    }
+
+    #[test]
+    fn llm_mode_unchanged_when_llm_available() {
+        let mut config = config_with_rerank("llm");
+        validate_config(&mut config, &available_llm());
+        assert_eq!(config.rerank_mode, "llm");
+    }
+
+    #[test]
+    fn cross_encoder_unchanged_when_llm_available() {
+        let mut config = config_with_rerank("cross-encoder");
+        validate_config(&mut config, &available_llm());
+        assert_eq!(config.rerank_mode, "cross-encoder");
+    }
 }

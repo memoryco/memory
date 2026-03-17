@@ -50,6 +50,9 @@ fn ensure_loaded() -> Result<(), RerankError> {
         cache_dir.display()
     );
 
+    // CPU-only: ort is compiled with `default-features = false` and no GPU execution
+    // provider features (cuda, coreml, directml, etc.), so this will always run on CPU
+    // even if a CUDA/Metal-capable device is present on the host.
     let options = RerankInitOptions::new(RerankerModel::BGERerankerBase)
         .with_cache_dir(cache_dir)
         .with_show_download_progress(true);

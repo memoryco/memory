@@ -33,8 +33,6 @@ memoryco_updater = { path = "../updater" }
 memoryco-llm = { path = "../llm" }
 memoryco_design = { git = "ssh://git@github.com/memoryco/design.git" }
 tiny_http = "0.12"
-fastembed = { version = "5.8", default-features = false, features = ["hf-hub-rustls-tls", "image-models"] }
-ort = { version = "2.0.0-rc", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "tls-rustls"] }
 chrono = "0.4"
 whatlang = "0.16"
 

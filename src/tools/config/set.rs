@@ -114,13 +114,8 @@ impl Tool<Context> for ConfigSetTool {
                 McpError::InvalidParams("embedding_model value must be a string".to_string())
             })?;
 
-            if !crate::embedding::is_valid_model(model_name) {
-                return Ok(text_response(format!(
-                    "Unknown embedding model: {}. Use a valid model name like \
-                     SnowflakeArcticEmbedL, AllMiniLML6V2, BGELargeENV15, etc.",
-                    model_name
-                )));
-            }
+            // Note: embedding model is hardcoded in appliance mode (nemotron-embed-1b-v2).
+            // This config value is only used for migration tracking.
 
             // Write to config.toml (durable)
             write_config_key(

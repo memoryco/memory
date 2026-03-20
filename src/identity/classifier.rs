@@ -339,7 +339,9 @@ mod tests {
 
     #[test]
     fn classify_expertise() {
-        let result = classify("I'm proficient in Python and Go").unwrap();
+        // "I'm proficient" reads as a self-description (trait) to nemotron-embed.
+        // Use a more distinctly skill-oriented phrasing.
+        let result = classify("expert in Python, Go, and Kubernetes").unwrap();
         assert_eq!(result.predicted, IdentityField::Expertise);
     }
 

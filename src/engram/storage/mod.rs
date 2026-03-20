@@ -233,6 +233,12 @@ pub trait Storage: Send {
         Ok(0)
     }
 
+    /// Clear all enrichment embeddings for migration purposes.
+    /// Returns the number of affected rows.
+    fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
+        Ok(0)
+    }
+
     // ==================
     // KEYWORD SEARCH (FTS5)
     // ==================

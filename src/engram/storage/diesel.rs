@@ -821,6 +821,17 @@ impl Storage for EngramStorage {
         vs.count_enrichments()
     }
 
+    #[cfg(feature = "sqlite")]
+    fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.clear_all_enrichments()
+    }
+
+    #[cfg(feature = "postgres")]
+    fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
+        Ok(0) // TODO
+    }
+
     // ==================
     // KEYWORD SEARCH (FTS5)
     // ==================

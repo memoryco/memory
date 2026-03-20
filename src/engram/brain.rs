@@ -48,8 +48,6 @@ impl Brain {
             config.embedding_model_active = Some(active);
         }
 
-        Self::apply_embedding_model_config(&config);
-
         let mut brain = Self {
             identity: Identity::new(),
             substrate: Substrate::with_config(config),
@@ -74,8 +72,6 @@ impl Brain {
         if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
             config.embedding_model_active = Some(active);
         }
-
-        Self::apply_embedding_model_config(&config);
 
         // Load identity
         let identity = storage.load_identity()?.unwrap_or_default();
@@ -132,8 +128,6 @@ impl Brain {
         if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
             config.embedding_model_active = Some(active);
         }
-
-        Self::apply_embedding_model_config(&config);
 
         // Load identity
         let identity = storage.load_identity()?.unwrap_or_default();
@@ -1033,9 +1027,10 @@ impl Brain {
             desired
         );
 
-        // Step 1: Clear all existing embeddings
+        // Step 1: Clear all existing embeddings and enrichments
         let cleared = self.storage.lock().unwrap().clear_all_embeddings()?;
-        eprintln!("[brain] Cleared {} embeddings", cleared);
+        let cleared_enrichments = self.storage.lock().unwrap().clear_all_enrichments()?;
+        eprintln!("[brain] Cleared {} embeddings, {} enrichments", cleared, cleared_enrichments);
 
         // Step 2: Re-embed all engrams
         let all_ids: Vec<super::EngramId> = self.substrate.all_engrams().map(|e| e.id).collect();
@@ -1087,11 +1082,6 @@ impl Brain {
         Ok(())
     }
 
-    /// Set the active embedding model name in the global state.
-    /// Called during initialization so the EmbeddingGenerator knows which model to load.
-    fn apply_embedding_model_config(config: &Config) {
-        crate::embedding::set_active_model(&config.embedding_model);
-    }
 
     // ==================
     // FTS5 KEYWORD SEARCH

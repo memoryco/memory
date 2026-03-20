@@ -321,6 +321,15 @@ impl<'a> VectorSearch<'a> {
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(row.cnt as usize)
     }
+
+    /// Clear all enrichment embeddings for migration purposes.
+    /// Returns the number of affected rows.
+    pub fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
+        let result = sql_query("DELETE FROM engram_enrichments")
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -652,5 +661,38 @@ mod tests {
             0,
             "Enrichments should be cascade-deleted with the parent engram"
         );
+    }
+
+    #[test]
+    fn clear_all_enrichments() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Memory one");
+        let e2 = Engram::new("Memory two");
+        storage.save_engram(&e1).unwrap();
+        storage.save_engram(&e2).unwrap();
+
+        let mut vs = VectorSearch::new(storage.connection());
+
+        vs.set_enrichment_embeddings(&e1.id, &[vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]], "llm")
+            .unwrap();
+        vs.set_enrichment_embeddings(&e2.id, &[vec![0.0, 0.0, 1.0]], "llm")
+            .unwrap();
+        assert_eq!(vs.count_enrichments().unwrap(), 3);
+
+        let cleared = vs.clear_all_enrichments().unwrap();
+        assert_eq!(cleared, 3, "Should clear all 3 enrichment vectors");
+        assert_eq!(vs.count_enrichments().unwrap(), 0);
+    }
+
+    #[test]
+    fn clear_all_enrichments_empty_db() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut vs = VectorSearch::new(storage.connection());
+        let cleared = vs.clear_all_enrichments().unwrap();
+        assert_eq!(cleared, 0);
     }
 }

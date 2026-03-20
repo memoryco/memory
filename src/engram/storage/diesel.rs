@@ -1058,6 +1058,13 @@ impl Storage for EngramStorage {
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(count)
     }
+
+    fn clear_all_sessions(&mut self) -> StorageResult<usize> {
+        let count = diesel::sql_query("DELETE FROM sessions")
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(count)
+    }
 }
 
 /// Sanitize a user query for FTS5 MATCH syntax.

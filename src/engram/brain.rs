@@ -1027,10 +1027,17 @@ impl Brain {
             desired
         );
 
-        // Step 1: Clear all existing embeddings and enrichments
+        // Step 1: Clear all existing embeddings, enrichments, and sessions.
+        // Session centroids contain vectors with the old model's dimensions —
+        // comparing them against new-dimension query embeddings produces garbage
+        // affinity scores (or debug_assert panics).
         let cleared = self.storage.lock().unwrap().clear_all_embeddings()?;
         let cleared_enrichments = self.storage.lock().unwrap().clear_all_enrichments()?;
-        eprintln!("[brain] Cleared {} embeddings, {} enrichments", cleared, cleared_enrichments);
+        let cleared_sessions = self.storage.lock().unwrap().clear_all_sessions()?;
+        eprintln!(
+            "[brain] Cleared {} embeddings, {} enrichments, {} sessions",
+            cleared, cleared_enrichments, cleared_sessions
+        );
 
         // Step 2: Re-embed all engrams
         let all_ids: Vec<super::EngramId> = self.substrate.all_engrams().map(|e| e.id).collect();

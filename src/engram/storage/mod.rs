@@ -298,4 +298,11 @@ pub trait Storage: Send {
         let _ = expire_before;
         Ok(0)
     }
+
+    /// Delete all sessions. Used during embedding model migration since session
+    /// centroids have wrong dimensions after a model switch.
+    /// Returns the number of sessions deleted.
+    fn clear_all_sessions(&mut self) -> StorageResult<usize> {
+        Ok(0)
+    }
 }

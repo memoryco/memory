@@ -132,6 +132,11 @@ pub fn run() {
     bootstrap_associations(&mut brain);
     run_decomposition(&mut brain);
 
+    // Check if enrichments need backfilling (e.g. after embedding model migration
+    // which clears all enrichments). We detect this BEFORE wrapping Brain in Arc.
+    let needs_enrichment_backfill = brain.count_with_embeddings().unwrap_or(0) > 0
+        && brain.count_enrichments().unwrap_or(0) == 0;
+
     // --- Identity ---
     let identity_storage =
         DieselIdentityStorage::open(&identity_db_path).expect("Failed to open identity database");
@@ -170,6 +175,18 @@ pub fn run() {
     let brain = Arc::new(RwLock::new(brain));
     let identity = Arc::new(Mutex::new(identity));
     let references = Arc::new(Mutex::new(references));
+
+    // --- Background enrichment backfill ---
+    // After an embedding model migration, enrichments are cleared but not
+    // regenerated (requires LLM inference which is too expensive to block startup).
+    // Spawn a background thread that re-enriches all engrams incrementally.
+    if needs_enrichment_backfill && llm.available() {
+        let brain_clone = Arc::clone(&brain);
+        let llm_clone = Arc::clone(&llm);
+        std::thread::spawn(move || {
+            backfill_enrichments(brain_clone, llm_clone);
+        });
+    }
 
     // --- Build context ---
     let context = Context {
@@ -301,6 +318,58 @@ fn backfill_embeddings(brain: &mut Brain) {
         }
         Err(e) => eprintln!("Warning: Failed to check embedding status: {}", e),
     }
+}
+
+/// Regenerate enrichment embeddings for all engrams in the background.
+///
+/// Called after an embedding model migration clears all enrichments.
+/// Runs on a background thread so it doesn't block server startup.
+/// Uses read locks only — compatible with concurrent tool use.
+fn backfill_enrichments(
+    brain: Arc<RwLock<Brain>>,
+    llm: crate::llm::SharedLlmService,
+) {
+    let engrams: Vec<(crate::engram::EngramId, String)> = {
+        let brain = brain.read().unwrap();
+        brain.all_engrams().map(|e| (e.id, e.content.clone())).collect()
+    };
+
+    if engrams.is_empty() {
+        return;
+    }
+
+    eprintln!(
+        "[enrichment] Backfilling enrichments for {} engrams in background...",
+        engrams.len()
+    );
+
+    let generator = EmbeddingGenerator::new();
+    let mut enriched = 0;
+    let total = engrams.len();
+
+    for (id, content) in &engrams {
+        if let Ok(queries) = llm.generate_training_queries(content, 5) {
+            let embeddings: Vec<Vec<f32>> = queries
+                .iter()
+                .filter_map(|q| generator.generate(q).ok())
+                .collect();
+            if !embeddings.is_empty() {
+                if let Ok(brain) = brain.read() {
+                    let _ = brain.set_enrichment_embeddings(id, &embeddings, "llm");
+                    enriched += 1;
+                }
+            }
+        }
+
+        if enriched > 0 && enriched % 50 == 0 {
+            eprintln!("[enrichment] Progress: {}/{}", enriched, total);
+        }
+    }
+
+    eprintln!(
+        "[enrichment] Backfill complete: {}/{} engrams enriched",
+        enriched, total
+    );
 }
 
 /// Create semantic associations between similar memories.

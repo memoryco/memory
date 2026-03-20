@@ -279,10 +279,10 @@ fn apply_maintenance(brain: &mut Brain) {
 
 /// Generate embeddings for any memories missing them (background-safe).
 ///
-/// Acquires write locks briefly to query IDs, then read locks to store results.
+/// Uses only read locks — compatible with concurrent tool use.
 /// Runs on a background thread so it doesn't block the MCP initialize handshake.
 fn backfill_embeddings_bg(brain: Arc<RwLock<Brain>>) {
-    let count = brain.write().ok().and_then(|mut b| b.count_without_embeddings().ok()).unwrap_or(0);
+    let count = brain.read().ok().and_then(|b| b.count_without_embeddings().ok()).unwrap_or(0);
     if count == 0 {
         return;
     }
@@ -293,8 +293,8 @@ fn backfill_embeddings_bg(brain: Arc<RwLock<Brain>>) {
     let mut errors = 0;
 
     loop {
-        // Brief write lock to get next batch of IDs
-        let ids = match brain.write().ok().and_then(|mut b| b.get_ids_without_embeddings(50).ok()) {
+        // Brief read lock to get next batch of IDs
+        let ids = match brain.read().ok().and_then(|b| b.get_ids_without_embeddings(50).ok()) {
             Some(ids) if ids.is_empty() => break,
             Some(ids) => ids,
             None => break,

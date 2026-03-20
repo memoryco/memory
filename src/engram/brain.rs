@@ -827,17 +827,17 @@ impl Brain {
     }
 
     /// Count engrams that have embeddings
-    pub fn count_with_embeddings(&mut self) -> StorageResult<usize> {
+    pub fn count_with_embeddings(&self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_with_embeddings()
     }
 
     /// Count engrams that need embeddings (for backfill progress)
-    pub fn count_without_embeddings(&mut self) -> StorageResult<usize> {
+    pub fn count_without_embeddings(&self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_without_embeddings()
     }
 
     /// Get IDs of engrams that need embeddings (for backfill)
-    pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
+    pub fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
         self.storage.lock().unwrap().get_ids_without_embeddings(limit)
     }
 
@@ -879,7 +879,7 @@ impl Brain {
     }
 
     /// Count total enrichment vectors across all engrams.
-    pub fn count_enrichments(&mut self) -> StorageResult<usize> {
+    pub fn count_enrichments(&self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_enrichments()
     }
 

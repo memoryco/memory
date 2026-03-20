@@ -310,6 +310,9 @@ fn backfill_embeddings_bg(brain: Arc<RwLock<Brain>>) {
         };
 
         // No lock held during embedding generation
+        if processed == 0 && errors == 0 {
+            eprintln!("[embedding] First batch: {} items, loading model...", items.len());
+        }
         let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
         match generator.generate_batch(&texts) {
             Ok(embeddings) => {
@@ -324,7 +327,14 @@ fn backfill_embeddings_bg(brain: Arc<RwLock<Brain>>) {
                     }
                 }
             }
-            Err(_) => errors += items.len(),
+            Err(e) => {
+                eprintln!("[embedding] Batch failed: {}", e);
+                errors += items.len();
+                if errors > 100 {
+                    eprintln!("[embedding] Too many errors, aborting backfill");
+                    break;
+                }
+            }
         }
 
         if processed > 0 && processed % 100 == 0 {

@@ -1039,41 +1039,9 @@ impl Brain {
             cleared, cleared_enrichments, cleared_sessions
         );
 
-        // Step 2: Re-embed all engrams
-        let all_ids: Vec<super::EngramId> = self.substrate.all_engrams().map(|e| e.id).collect();
-
-        if !all_ids.is_empty() {
-            let contents: Vec<String> = all_ids
-                .iter()
-                .filter_map(|id| self.substrate.get(id))
-                .map(|e| e.content.clone())
-                .collect();
-
-            let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-
-            let generator = crate::embedding::EmbeddingGenerator::new();
-            match generator.generate_batch(&content_refs) {
-                Ok(embeddings) => {
-                    for (id, embedding) in all_ids.iter().zip(embeddings.iter()) {
-                        if let Err(e) = self.storage.lock().unwrap().set_embedding(id, embedding) {
-                            eprintln!("[brain] Failed to set embedding for {}: {}", id, e);
-                        }
-                    }
-                    eprintln!(
-                        "[brain] Re-embedded {} engrams with {}",
-                        all_ids.len(),
-                        desired
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[brain] Batch embedding failed: {}. Embeddings cleared but not regenerated.",
-                        e
-                    );
-                    eprintln!("[brain] They will be regenerated on next search/create.");
-                }
-            }
-        }
+        // Step 2: Re-embedding happens in the background after server startup.
+        // backfill_embeddings() in server.rs detects memories without embeddings
+        // and generates them without blocking the MCP initialize handshake.
 
         // Step 3: Update in-memory config and persist the active model to SQLite metadata.
         // embedding_model_active is runtime state, not stored in config.toml.

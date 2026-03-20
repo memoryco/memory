@@ -128,14 +128,14 @@ pub fn run() {
 
     apply_maintenance(&mut brain);
     expire_sessions(&mut brain);
-    backfill_embeddings(&mut brain);
     bootstrap_associations(&mut brain);
     run_decomposition(&mut brain);
 
-    // Check if enrichments need backfilling (e.g. after embedding model migration
-    // which clears all enrichments). We detect this BEFORE wrapping Brain in Arc.
-    let needs_enrichment_backfill = brain.count_with_embeddings().unwrap_or(0) > 0
-        && brain.count_enrichments().unwrap_or(0) == 0;
+    // Check if embeddings/enrichments need backfilling BEFORE wrapping Brain in Arc.
+    let needs_embedding_backfill = brain.count_without_embeddings().unwrap_or(0) > 0;
+    let needs_enrichment_backfill = needs_embedding_backfill
+        || (brain.count_with_embeddings().unwrap_or(0) > 0
+            && brain.count_enrichments().unwrap_or(0) == 0);
 
     // --- Identity ---
     let identity_storage =
@@ -176,15 +176,21 @@ pub fn run() {
     let identity = Arc::new(Mutex::new(identity));
     let references = Arc::new(Mutex::new(references));
 
-    // --- Background enrichment backfill ---
-    // After an embedding model migration, enrichments are cleared but not
-    // regenerated (requires LLM inference which is too expensive to block startup).
-    // Spawn a background thread that re-enriches all engrams incrementally.
-    if needs_enrichment_backfill && llm.available() {
+    // --- Background embedding + enrichment backfill ---
+    // After an embedding model migration, all embeddings and enrichments are
+    // cleared. Re-generating them is too slow to block the MCP initialize
+    // handshake (Claude Desktop has a 60s timeout), so we do it in the background.
+    // Embeddings run first, then enrichments (which depend on embeddings).
+    if needs_embedding_backfill || needs_enrichment_backfill {
         let brain_clone = Arc::clone(&brain);
         let llm_clone = Arc::clone(&llm);
         std::thread::spawn(move || {
-            backfill_enrichments(brain_clone, llm_clone);
+            if needs_embedding_backfill {
+                backfill_embeddings_bg(Arc::clone(&brain_clone));
+            }
+            if needs_enrichment_backfill && llm_clone.available() {
+                backfill_enrichments(brain_clone, llm_clone);
+            }
         });
     }
 
@@ -271,53 +277,65 @@ fn apply_maintenance(brain: &mut Brain) {
     }
 }
 
-/// Generate embeddings for any memories missing them.
-fn backfill_embeddings(brain: &mut Brain) {
-    match brain.count_without_embeddings() {
-        Ok(0) => {}
-        Ok(count) => {
-            eprintln!("Generating embeddings for {} memories...", count);
-            let generator = EmbeddingGenerator::new();
-            let mut processed = 0;
-            let mut errors = 0;
+/// Generate embeddings for any memories missing them (background-safe).
+///
+/// Acquires write locks briefly to query IDs, then read locks to store results.
+/// Runs on a background thread so it doesn't block the MCP initialize handshake.
+fn backfill_embeddings_bg(brain: Arc<RwLock<Brain>>) {
+    let count = brain.write().ok().and_then(|mut b| b.count_without_embeddings().ok()).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
 
-            loop {
-                match brain.get_ids_without_embeddings(50) {
-                    Ok(ids) if ids.is_empty() => break,
-                    Ok(ids) => {
-                        let items: Vec<_> = ids
-                            .iter()
-                            .filter_map(|id| brain.get(id).map(|e| (*id, e.content.clone())))
-                            .collect();
-                        let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
+    eprintln!("[embedding] Backfilling {} memories in background...", count);
+    let generator = EmbeddingGenerator::new();
+    let mut processed = 0;
+    let mut errors = 0;
 
-                        match generator.generate_batch(&texts) {
-                            Ok(embeddings) => {
-                                for ((id, _), embedding) in items.iter().zip(embeddings.iter()) {
-                                    if brain.set_embedding(id, embedding).is_ok() {
-                                        processed += 1;
-                                    } else {
-                                        errors += 1;
-                                    }
-                                }
-                            }
-                            Err(_) => errors += items.len(),
+    loop {
+        // Brief write lock to get next batch of IDs
+        let ids = match brain.write().ok().and_then(|mut b| b.get_ids_without_embeddings(50).ok()) {
+            Some(ids) if ids.is_empty() => break,
+            Some(ids) => ids,
+            None => break,
+        };
+
+        // Read lock to get content
+        let items: Vec<_> = if let Ok(b) = brain.read() {
+            ids.iter()
+                .filter_map(|id| b.get(id).map(|e| (*id, e.content.clone())))
+                .collect()
+        } else {
+            break;
+        };
+
+        // No lock held during embedding generation
+        let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
+        match generator.generate_batch(&texts) {
+            Ok(embeddings) => {
+                // Read lock to store (set_embedding is &self)
+                if let Ok(b) = brain.read() {
+                    for ((id, _), embedding) in items.iter().zip(embeddings.iter()) {
+                        if b.set_embedding(id, embedding).is_ok() {
+                            processed += 1;
+                        } else {
+                            errors += 1;
                         }
-                        eprint!("\r  Processed {}/{} memories...", processed, count);
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Failed to get memories for embedding: {}", e);
-                        break;
                     }
                 }
             }
-            eprintln!(
-                "\r  Generated {} embeddings ({} errors)        ",
-                processed, errors
-            );
+            Err(_) => errors += items.len(),
         }
-        Err(e) => eprintln!("Warning: Failed to check embedding status: {}", e),
+
+        if processed > 0 && processed % 100 == 0 {
+            eprintln!("[embedding] Progress: {}/{}", processed, count);
+        }
     }
+
+    eprintln!(
+        "[embedding] Backfill complete: {} embeddings ({} errors)",
+        processed, errors
+    );
 }
 
 /// Regenerate enrichment embeddings for all engrams in the background.

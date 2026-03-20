@@ -42,7 +42,7 @@ impl Tool<Context> for ConfigGetTool {
              recall_strength: {:.2} (energy boost when recalling)\n\
              search_follow_associations: {} (follow associations during search)\n\
              search_association_depth: {} (hops to follow)\n\
-             embedding_model: {} (desired embedding model)\n\
+             embedding_model: {} (bundled, read-only)\n\
              embedding_model_active: {} (model used for current embeddings)\n\
              rerank_mode: {} (reranking mode: off, cross-encoder, llm, or hybrid)\n\
              rerank_candidates: {} (candidates for re-ranking pass)\n\

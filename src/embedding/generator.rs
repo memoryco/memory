@@ -96,7 +96,7 @@ impl EmbeddingGenerator {
         let model_path = resolve_model_path().ok_or_else(|| {
             EmbeddingError::Generation(format!(
                 "Embedding model '{}' not found. Searched:\n  \
-                 1. $MEMORY_HOME/cache/models/llm/\n  \
+                 1. $MEMORY_HOME/cache/models/\n  \
                  2. <repo>/gguf_models/llama-nemotron-embed-1b-v2-GGUF/",
                 EMBED_MODEL_FILENAME
             ))
@@ -146,13 +146,13 @@ impl Default for EmbeddingGenerator {
 /// Resolve the embedding model GGUF path.
 ///
 /// Checks in order:
-/// 1. Production: `$MEMORY_HOME/cache/models/llm/<filename>`
+/// 1. Production: `$MEMORY_HOME/cache/models/<filename>`
 /// 2. Dev/repo:   `<crate_root>/../gguf_models/llama-nemotron-embed-1b-v2-GGUF/<filename>`
 ///
 /// Returns None if the model isn't found in any location.
 fn resolve_model_path() -> Option<std::path::PathBuf> {
-    // 1. Production path (MEMORY_HOME/cache/models/llm/)
-    let production = config::get_model_cache_dir().join("llm").join(EMBED_MODEL_FILENAME);
+    // 1. Production path (MEMORY_HOME/cache/models/)
+    let production = config::get_model_cache_dir().join(EMBED_MODEL_FILENAME);
     if production.exists() {
         return Some(production);
     }

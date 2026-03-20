@@ -52,9 +52,6 @@ pub enum Command {
         yes: bool,
     },
 
-    /// Download and cache the embedding model
-    Cache,
-
     /// Auto-detect MCP clients and add MemoryCo to their config
     Install {
         /// Skip confirmation prompts
@@ -90,6 +87,17 @@ pub enum Command {
         #[command(subcommand)]
         command: LlmCommand,
     },
+
+    /// Generate embeddings and enrichments for all engrams
+    Generate {
+        /// Only regenerate embeddings (skip enrichments)
+        #[arg(long)]
+        embeddings: bool,
+
+        /// Only regenerate enrichments (skip embeddings)
+        #[arg(long)]
+        enrichments: bool,
+    },
 }
 
 #[cfg(test)]
@@ -109,6 +117,51 @@ mod tests {
             }) => {
                 assert_eq!(query, "activity with dad");
                 assert_eq!(max_variants, 3);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_generate_no_flags() {
+        let cli = Cli::parse_from(["memoryco", "generate"]);
+        match cli.command {
+            Some(Command::Generate {
+                embeddings,
+                enrichments,
+            }) => {
+                assert!(!embeddings);
+                assert!(!enrichments);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_generate_embeddings_only() {
+        let cli = Cli::parse_from(["memoryco", "generate", "--embeddings"]);
+        match cli.command {
+            Some(Command::Generate {
+                embeddings,
+                enrichments,
+            }) => {
+                assert!(embeddings);
+                assert!(!enrichments);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_generate_enrichments_only() {
+        let cli = Cli::parse_from(["memoryco", "generate", "--enrichments"]);
+        match cli.command {
+            Some(Command::Generate {
+                embeddings,
+                enrichments,
+            }) => {
+                assert!(!embeddings);
+                assert!(enrichments);
             }
             other => panic!("unexpected command: {other:?}"),
         }

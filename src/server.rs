@@ -1,10 +1,12 @@
 //! Server initialization and startup.
 //!
 //! Contains all the heavy lifting: opening databases, applying decay,
-//! backfilling embeddings, registering tools, and running the MCP server.
+//! registering tools, and running the MCP server.
+//!
+//! Embedding and enrichment generation is intentionally NOT done here.
+//! Run `memoryco generate` to rebuild vectors after a model change.
 
 use crate::config;
-use crate::embedding::EmbeddingGenerator;
 use crate::engram::Brain;
 use crate::identity::{DieselIdentityStorage, IdentityStore};
 use crate::plans::{DieselPlanStorage, PlanStore};
@@ -131,12 +133,6 @@ pub fn run() {
     bootstrap_associations(&mut brain);
     run_decomposition(&mut brain);
 
-    // Check if embeddings/enrichments need backfilling BEFORE wrapping Brain in Arc.
-    let needs_embedding_backfill = brain.count_without_embeddings().unwrap_or(0) > 0;
-    let needs_enrichment_backfill = needs_embedding_backfill
-        || (brain.count_with_embeddings().unwrap_or(0) > 0
-            && brain.count_enrichments().unwrap_or(0) == 0);
-
     // --- Identity ---
     let identity_storage =
         DieselIdentityStorage::open(&identity_db_path).expect("Failed to open identity database");
@@ -175,24 +171,6 @@ pub fn run() {
     let brain = Arc::new(RwLock::new(brain));
     let identity = Arc::new(Mutex::new(identity));
     let references = Arc::new(Mutex::new(references));
-
-    // --- Background embedding + enrichment backfill ---
-    // After an embedding model migration, all embeddings and enrichments are
-    // cleared. Re-generating them is too slow to block the MCP initialize
-    // handshake (Claude Desktop has a 60s timeout), so we do it in the background.
-    // Embeddings run first, then enrichments (which depend on embeddings).
-    if needs_embedding_backfill || needs_enrichment_backfill {
-        let brain_clone = Arc::clone(&brain);
-        let llm_clone = Arc::clone(&llm);
-        std::thread::spawn(move || {
-            if needs_embedding_backfill {
-                backfill_embeddings_bg(Arc::clone(&brain_clone));
-            }
-            if needs_enrichment_backfill && llm_clone.available() {
-                backfill_enrichments(brain_clone, llm_clone);
-            }
-        });
-    }
 
     // --- Build context ---
     let context = Context {
@@ -275,129 +253,6 @@ fn apply_maintenance(brain: &mut Brain) {
         ),
         Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
     }
-}
-
-/// Generate embeddings for any memories missing them (background-safe).
-///
-/// Uses only read locks — compatible with concurrent tool use.
-/// Runs on a background thread so it doesn't block the MCP initialize handshake.
-fn backfill_embeddings_bg(brain: Arc<RwLock<Brain>>) {
-    let count = brain.read().ok().and_then(|b| b.count_without_embeddings().ok()).unwrap_or(0);
-    if count == 0 {
-        return;
-    }
-
-    eprintln!("[embedding] Backfilling {} memories in background...", count);
-    let generator = EmbeddingGenerator::new();
-    let mut processed = 0;
-    let mut errors = 0;
-
-    loop {
-        // Brief read lock to get next batch of IDs
-        let ids = match brain.read().ok().and_then(|b| b.get_ids_without_embeddings(50).ok()) {
-            Some(ids) if ids.is_empty() => break,
-            Some(ids) => ids,
-            None => break,
-        };
-
-        // Read lock to get content
-        let items: Vec<_> = if let Ok(b) = brain.read() {
-            ids.iter()
-                .filter_map(|id| b.get(id).map(|e| (*id, e.content.clone())))
-                .collect()
-        } else {
-            break;
-        };
-
-        // No lock held during embedding generation
-        if processed == 0 && errors == 0 {
-            eprintln!("[embedding] First batch: {} items, loading model...", items.len());
-        }
-        let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
-        match generator.generate_batch(&texts) {
-            Ok(embeddings) => {
-                // Read lock to store (set_embedding is &self)
-                if let Ok(b) = brain.read() {
-                    for ((id, _), embedding) in items.iter().zip(embeddings.iter()) {
-                        if b.set_embedding(id, embedding).is_ok() {
-                            processed += 1;
-                        } else {
-                            errors += 1;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[embedding] Batch failed: {}", e);
-                errors += items.len();
-                if errors > 100 {
-                    eprintln!("[embedding] Too many errors, aborting backfill");
-                    break;
-                }
-            }
-        }
-
-        if processed > 0 && processed % 100 == 0 {
-            eprintln!("[embedding] Progress: {}/{}", processed, count);
-        }
-    }
-
-    eprintln!(
-        "[embedding] Backfill complete: {} embeddings ({} errors)",
-        processed, errors
-    );
-}
-
-/// Regenerate enrichment embeddings for all engrams in the background.
-///
-/// Called after an embedding model migration clears all enrichments.
-/// Runs on a background thread so it doesn't block server startup.
-/// Uses read locks only — compatible with concurrent tool use.
-fn backfill_enrichments(
-    brain: Arc<RwLock<Brain>>,
-    llm: crate::llm::SharedLlmService,
-) {
-    let engrams: Vec<(crate::engram::EngramId, String)> = {
-        let brain = brain.read().unwrap();
-        brain.all_engrams().map(|e| (e.id, e.content.clone())).collect()
-    };
-
-    if engrams.is_empty() {
-        return;
-    }
-
-    eprintln!(
-        "[enrichment] Backfilling enrichments for {} engrams in background...",
-        engrams.len()
-    );
-
-    let generator = EmbeddingGenerator::new();
-    let mut enriched = 0;
-    let total = engrams.len();
-
-    for (id, content) in &engrams {
-        if let Ok(queries) = llm.generate_training_queries(content, 5) {
-            let embeddings: Vec<Vec<f32>> = queries
-                .iter()
-                .filter_map(|q| generator.generate(q).ok())
-                .collect();
-            if !embeddings.is_empty() {
-                if let Ok(brain) = brain.read() {
-                    let _ = brain.set_enrichment_embeddings(id, &embeddings, "llm");
-                    enriched += 1;
-                }
-            }
-        }
-
-        if enriched > 0 && enriched % 50 == 0 {
-            eprintln!("[enrichment] Progress: {}/{}", enriched, total);
-        }
-    }
-
-    eprintln!(
-        "[enrichment] Backfill complete: {}/{} engrams enriched",
-        enriched, total
-    );
 }
 
 /// Create semantic associations between similar memories.

@@ -35,6 +35,7 @@ memoryco_design = { git = "ssh://git@github.com/memoryco/design.git" }
 tiny_http = "0.12"
 chrono = "0.4"
 whatlang = "0.16"
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
 
 [patch.crates-io]
 llama-cpp-2 = { path = "/Users/bsneed/work/memoryco/llama-cpp-rs/llama-cpp-2" }

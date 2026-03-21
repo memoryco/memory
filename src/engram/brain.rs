@@ -646,6 +646,10 @@ impl Brain {
                 config.association_cap_max = value.clamp(1.0, 50.0) as usize;
                 true
             }
+            "debug" => {
+                config.debug = value != 0.0;
+                true
+            }
             _ => false,
         };
 

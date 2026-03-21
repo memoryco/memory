@@ -164,6 +164,12 @@ pub struct Config {
     /// Delete sessions not accessed in this many days (0 = never expire).
     #[serde(default = "default_session_expire_days")]
     pub session_expire_days: usize,
+
+    // ── Diagnostics ─────────────────────────────────────────────────────
+
+    /// When true, search responses include a debug section with pipeline diagnostics.
+    #[serde(default)]
+    pub debug: bool,
 }
 
 fn default_max_tag_cardinality() -> usize {
@@ -284,6 +290,7 @@ impl Default for Config {
             session_max_queries: 50,
             session_centroid_smoothing: 0.1,
             session_expire_days: 90,
+            debug: false,
         }
     }
 }

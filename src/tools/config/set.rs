@@ -27,7 +27,8 @@ impl Tool<Context> for ConfigSetTool {
          search_follow_associations, search_association_depth, \
          rerank_mode, rerank_candidates, hybrid_search_enabled, \
          query_expansion_enabled, search_min_score, \
-         composite_limit_min, composite_limit_max, association_cap_min, association_cap_max"
+         composite_limit_min, composite_limit_max, association_cap_min, association_cap_max, \
+         debug"
     }
 
     fn schema(&self) -> JsonValue {
@@ -52,7 +53,8 @@ impl Tool<Context> for ConfigSetTool {
                         "composite_limit_min",
                         "composite_limit_max",
                         "association_cap_min",
-                        "association_cap_max"
+                        "association_cap_max",
+                        "debug"
                     ],
                     "description": "Configuration key to update."
                 },
@@ -109,9 +111,9 @@ impl Tool<Context> for ConfigSetTool {
         // Boolean keys
         let bool_keys = [
             "search_follow_associations",
-
             "hybrid_search_enabled",
             "query_expansion_enabled",
+            "debug",
         ];
 
         // Integer keys

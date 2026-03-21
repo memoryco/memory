@@ -202,12 +202,21 @@ pub struct ChainHint {
     pub ordered_step_count: usize,
 }
 
+/// Debug diagnostics collected during the search pipeline.
+#[derive(Default)]
+pub struct DebugInfo {
+    /// Ordered log of pipeline stages and their outcomes.
+    pub lines: Vec<String>,
+}
+
 /// Result of running the search pipeline.
 pub struct SearchPipelineResult {
     pub results: Vec<ScoredResult>,
     pub association_merged_count: usize,
     pub association_discovery_count: usize,
     pub chain_hints: Vec<ChainHint>,
+    /// Pipeline diagnostics (only populated when config.debug = true).
+    pub debug_info: Option<DebugInfo>,
 }
 
 /// Parameters for the search pipeline, pre-computed by the caller.
@@ -254,6 +263,8 @@ pub struct SearchPipelineParams {
     pub session_centroid: Option<Vec<f32>>,
     /// How much session context biases retrieval (β from config). 0.0 = off.
     pub session_context_weight: f32,
+    /// When true, collect pipeline diagnostics into the result.
+    pub debug: bool,
 }
 
 /// Run vector + BM25 for a single query variant and merge into all_results.
@@ -397,6 +408,16 @@ pub fn run_search_pipeline(
     params: &SearchPipelineParams,
 ) -> Result<SearchPipelineResult, String> {
     let generator = EmbeddingGenerator::new();
+
+    // Debug diagnostics (only collected when config.debug = true)
+    let mut dbg = if params.debug { Some(DebugInfo::default()) } else { None };
+    macro_rules! dbg_push {
+        ($($arg:tt)*) => { if let Some(d) = &mut dbg { d.lines.push(format!($($arg)*)); } };
+    }
+    dbg_push!("query: {:?}", params.query);
+    dbg_push!("variants: {} (expansion={})", params.variants.len(), params.query_expansion_enabled);
+    dbg_push!("rerank_mode: {}", params.rerank_mode);
+    dbg_push!("fetch_count: {}, effective_limit: {}", params.fetch_count, params.effective_limit);
 
     // Find similar memories (fetch extra to allow for filtering)
     // When reranking is enabled, fetch more candidates for the reranker to work with
@@ -559,15 +580,20 @@ pub fn run_search_pipeline(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    dbg_push!("retrieval: {} candidates after cosine scoring + state/date filtering", scored.len());
+
     // Cross-encoder re-ranking (when enabled).
     // Falls back silently to cosine results if reranking fails.
     if params.rerank_mode == "cross-encoder" && !scored.is_empty() {
         let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
         let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
         let candidate_count = contents.len();
+        let pre_order: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
 
+        let rerank_start = std::time::Instant::now();
         match crate::embedding::reranker::rerank(&params.query, &content_refs) {
             Ok(reranked) => {
+                let rerank_ms = rerank_start.elapsed().as_millis();
                 let mut reranked_results = Vec::with_capacity(reranked.len());
                 for rs in &reranked {
                     if rs.index < scored.len() {
@@ -583,16 +609,27 @@ pub fn run_search_pipeline(
                         });
                     }
                 }
+                let post_order: Vec<uuid::Uuid> = reranked_results.iter().map(|r| r.id).collect();
+                let order_changed = pre_order != post_order;
+                let score_min = reranked.last().map(|r| r.score).unwrap_or(0.0);
+                let score_max = reranked.first().map(|r| r.score).unwrap_or(0.0);
                 scored = reranked_results;
                 eprintln!(
                     "[search] re-ranked {} candidates with cross-encoder",
                     candidate_count
                 );
+                dbg_push!(
+                    "cross-encoder: re-ranked {} candidates in {}ms (scores: {:.4}..{:.4}, order_changed: {})",
+                    candidate_count, rerank_ms, score_min, score_max, order_changed
+                );
             }
             Err(e) => {
                 eprintln!("[search] reranking failed, falling back to cosine: {}", e);
+                dbg_push!("cross-encoder: FAILED ({}), fell back to cosine", e);
             }
         }
+    } else {
+        dbg_push!("cross-encoder: skipped (mode={})", params.rerank_mode);
     }
 
     // Session affinity gating: bias scores toward the conversation topic.
@@ -620,6 +657,9 @@ pub fn run_search_pipeline(
                 session_adjusted, params.session_context_weight
             );
         }
+        dbg_push!("session_affinity: adjusted {} results (weight={})", session_adjusted, params.session_context_weight);
+    } else {
+        dbg_push!("session_affinity: skipped (no centroid or weight=0)");
     }
 
     // Association-following: discover related memories via associations
@@ -718,6 +758,10 @@ pub fn run_search_pipeline(
             association_cap,
             params.association_depth
         );
+        dbg_push!("associations: {} discovered, {} merged (cap: {}, depth: {})",
+            association_discovery_count, association_merged_count, association_cap, params.association_depth);
+    } else {
+        dbg_push!("associations: skipped (follow={}, depth={})", params.follow_associations, params.association_depth);
     }
 
     // Diversity shaping: pick a diverse, coverage-rich, source-balanced subset.
@@ -891,6 +935,8 @@ pub fn run_search_pipeline(
                 cue_terms.len(),
                 semantic_dedup_count,
             );
+            dbg_push!("diversity: {} -> {} results (covered cues: {}/{}, semantic dedup: {})",
+                original_count, scored.len(), covered_cues.len(), cue_terms.len(), semantic_dedup_count);
         }
     }
 
@@ -900,11 +946,14 @@ pub fn run_search_pipeline(
     // Limit results
     scored.truncate(params.effective_limit);
 
+    dbg_push!("final: {} results returned", scored.len());
+
     Ok(SearchPipelineResult {
         results: scored,
         association_merged_count,
         association_discovery_count,
         chain_hints,
+        debug_info: dbg,
     })
 }
 

@@ -105,6 +105,7 @@ impl EngramSearchTool {
             composite_limit_max,
             association_cap_min,
             association_cap_max,
+            debug,
         ) = {
             // Phase 0: brief write lock for maintenance + config snapshot.
             // Drop the write lock before expensive embedding generation so enrichment
@@ -128,6 +129,7 @@ impl EngramSearchTool {
                 brain.config().composite_limit_max,
                 brain.config().association_cap_min,
                 brain.config().association_cap_max,
+                brain.config().debug,
             )
         }; // write lock released here
 
@@ -207,6 +209,7 @@ impl EngramSearchTool {
             query_expansion_enabled,
             session_centroid,
             session_context_weight,
+            debug,
         };
 
         let pipeline_result =
@@ -216,6 +219,7 @@ impl EngramSearchTool {
         let scored = pipeline_result.results;
         let chain_hints = pipeline_result.chain_hints;
         let association_merged_count = pipeline_result.association_merged_count;
+        let debug_info = pipeline_result.debug_info;
         let association_discovery_count = pipeline_result.association_discovery_count;
 
         // Save search state for access log (correlated with next recall)
@@ -306,6 +310,15 @@ impl EngramSearchTool {
                  - Search for specific events or actions rather than status or state\n\
                  - Try [person's name] + a related action, event, or feeling\n",
             );
+        }
+
+        // Append debug diagnostics when enabled
+        if let Some(info) = &debug_info {
+            output.push_str("\n--- memoryco debug info ---\n");
+            for line in &info.lines {
+                output.push_str(line);
+                output.push('\n');
+            }
         }
 
         Ok(text_response(output))

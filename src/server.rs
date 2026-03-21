@@ -494,6 +494,9 @@ mod tests {
         fn rerank(&self, _: &str, _: &[&str], _: usize) -> Result<Vec<usize>, LlmError> {
             Ok(vec![])
         }
+        fn infer_answer(&self, _: &str, _: &[&str]) -> Result<Option<String>, LlmError> {
+            Ok(None)
+        }
     }
 
     fn no_llm() -> crate::llm::SharedLlmService {

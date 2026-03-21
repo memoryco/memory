@@ -192,6 +192,11 @@ pub trait Storage: Send {
         Ok(Vec::new())
     }
 
+    /// Get IDs of engrams that have no enrichments (for incremental enrichment backfill)
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+        Ok(Vec::new())
+    }
+
     /// Update embedding for a single engram
     fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let _ = (id, embedding);

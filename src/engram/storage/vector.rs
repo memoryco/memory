@@ -227,6 +227,25 @@ impl<'a> VectorSearch<'a> {
         Ok(ids)
     }
 
+    /// Get IDs of engrams that have NO enrichments (for incremental enrichment backfill).
+    pub fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+        let rows: Vec<IdRow> = sql_query(
+            "SELECT id FROM engrams \
+             WHERE id NOT IN (SELECT DISTINCT engram_id FROM engram_enrichments)",
+        )
+        .load(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        let mut ids = Vec::new();
+        for row in rows {
+            let id = uuid::Uuid::parse_str(&row.id)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+            ids.push(id);
+        }
+
+        Ok(ids)
+    }
+
     /// Update embedding for a single engram
     pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let bytes = embedding_to_bytes(embedding);
@@ -694,5 +713,44 @@ mod tests {
         let mut vs = VectorSearch::new(storage.connection());
         let cleared = vs.clear_all_enrichments().unwrap();
         assert_eq!(cleared, 0);
+    }
+
+    #[test]
+    fn get_ids_without_enrichments() {
+        let mut storage = EngramStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Engram::new("Has enrichment");
+        let e2 = Engram::new("No enrichment");
+        let e3 = Engram::new("Also no enrichment");
+        storage.save_engram(&e1).unwrap();
+        storage.save_engram(&e2).unwrap();
+        storage.save_engram(&e3).unwrap();
+
+        let mut vs = VectorSearch::new(storage.connection());
+
+        // All three start without enrichments
+        let ids = vs.get_ids_without_enrichments().unwrap();
+        assert_eq!(ids.len(), 3);
+
+        // Enrich e1
+        vs.set_enrichment_embeddings(&e1.id, &[vec![1.0, 0.0, 0.0]], "llm")
+            .unwrap();
+
+        // Now only e2 and e3 should be returned
+        let ids = vs.get_ids_without_enrichments().unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(!ids.contains(&e1.id));
+        assert!(ids.contains(&e2.id));
+        assert!(ids.contains(&e3.id));
+
+        // Enrich the rest
+        vs.set_enrichment_embeddings(&e2.id, &[vec![0.0, 1.0, 0.0]], "llm")
+            .unwrap();
+        vs.set_enrichment_embeddings(&e3.id, &[vec![0.0, 0.0, 1.0]], "llm")
+            .unwrap();
+
+        let ids = vs.get_ids_without_enrichments().unwrap();
+        assert_eq!(ids.len(), 0);
     }
 }

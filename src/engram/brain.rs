@@ -841,6 +841,11 @@ impl Brain {
         self.storage.lock().unwrap().get_ids_without_embeddings(limit)
     }
 
+    /// Get IDs of engrams that have no enrichments (for incremental enrichment backfill)
+    pub fn get_ids_without_enrichments(&self) -> StorageResult<Vec<EngramId>> {
+        self.storage.lock().unwrap().get_ids_without_enrichments()
+    }
+
     /// Get embedding for an engram.
     ///
     /// Takes `&self` so callers holding an RwLock read guard can call this

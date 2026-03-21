@@ -739,6 +739,12 @@ impl Storage for EngramStorage {
     }
 
     #[cfg(feature = "sqlite")]
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.get_ids_without_enrichments()
+    }
+
+    #[cfg(feature = "sqlite")]
     fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.set_embedding(id, embedding)
@@ -774,6 +780,11 @@ impl Storage for EngramStorage {
 
     #[cfg(feature = "postgres")]
     fn get_ids_without_embeddings(&mut self, _limit: usize) -> StorageResult<Vec<EngramId>> {
+        Ok(Vec::new()) // TODO
+    }
+
+    #[cfg(feature = "postgres")]
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
         Ok(Vec::new()) // TODO
     }
 

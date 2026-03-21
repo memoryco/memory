@@ -116,11 +116,12 @@ pub fn generate_embeddings(brain: Arc<RwLock<Brain>>, show_progress: bool) -> Em
     }
 }
 
-/// Generate enrichment embeddings for every engram.
+/// Generate enrichment embeddings for engrams that don't have them yet.
 ///
 /// Enrichments are multi-vector representations built from LLM-generated
 /// training queries. They require an available LLM service.
 ///
+/// Skips engrams that already have enrichments — safe to interrupt and re-run.
 /// Uses read locks throughout — safe to call while the server is running.
 /// When `show_progress` is true, prints a `\r`-overwritten progress line to
 /// stderr and a final newline on completion.
@@ -129,8 +130,9 @@ pub fn generate_enrichments(
     llm: crate::llm::SharedLlmService,
     show_progress: bool,
 ) -> EnrichmentStats {
-    let engrams: Vec<(crate::engram::EngramId, String)> = match brain.read() {
-        Ok(b) => b.all_engrams().map(|e| (e.id, e.content.clone())).collect(),
+    // Only fetch IDs that have no enrichments yet — skip already-enriched engrams.
+    let ids: Vec<crate::engram::EngramId> = match brain.read() {
+        Ok(b) => b.get_ids_without_enrichments().unwrap_or_default(),
         Err(_) => {
             return EnrichmentStats {
                 generated: 0,
@@ -140,7 +142,7 @@ pub fn generate_enrichments(
         }
     };
 
-    if engrams.is_empty() {
+    if ids.is_empty() {
         return EnrichmentStats {
             generated: 0,
             total: 0,
@@ -148,12 +150,20 @@ pub fn generate_enrichments(
         };
     }
 
-    let total = engrams.len();
+    let total = ids.len();
     let generator = EmbeddingGenerator::new();
     let mut enriched = 0usize;
 
-    for (i, (id, content)) in engrams.iter().enumerate() {
-        if let Ok(queries) = llm.generate_training_queries(content, 5) {
+    for (i, id) in ids.iter().enumerate() {
+        let content = match brain.read() {
+            Ok(b) => match b.get(id) {
+                Some(e) => e.content.clone(),
+                None => continue,
+            },
+            Err(_) => break,
+        };
+
+        if let Ok(queries) = llm.generate_training_queries(&content, 3) {
             let embeddings: Vec<Vec<f32>> = queries
                 .iter()
                 .filter_map(|q| generator.generate(q).ok())

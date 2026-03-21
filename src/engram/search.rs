@@ -202,11 +202,51 @@ pub struct ChainHint {
     pub ordered_step_count: usize,
 }
 
+/// A single candidate snapshot at a given pipeline stage.
+#[derive(Clone)]
+pub struct TraceEntry {
+    pub id: uuid::Uuid,
+    /// First ~100 chars of memory content.
+    pub content_preview: String,
+    pub similarity: f32,
+    pub energy: f64,
+    pub blended: f32,
+}
+
+impl TraceEntry {
+    fn from_scored(s: &ScoredResult) -> Self {
+        let preview = if s.content.len() > 100 {
+            let mut end = 100;
+            while end > 0 && !s.content.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &s.content[..end])
+        } else {
+            s.content.clone()
+        };
+        Self {
+            id: s.id,
+            content_preview: preview,
+            similarity: s.similarity,
+            energy: s.energy,
+            blended: s.blended,
+        }
+    }
+}
+
+/// A snapshot of all candidates at a given pipeline stage.
+pub struct TraceStage {
+    pub name: String,
+    pub entries: Vec<TraceEntry>,
+}
+
 /// Debug diagnostics collected during the search pipeline.
 #[derive(Default)]
 pub struct DebugInfo {
     /// Ordered log of pipeline stages and their outcomes.
     pub lines: Vec<String>,
+    /// Full candidate snapshots at each pipeline stage (for trace file output).
+    pub stages: Vec<TraceStage>,
 }
 
 /// Result of running the search pipeline.
@@ -414,6 +454,16 @@ pub fn run_search_pipeline(
     macro_rules! dbg_push {
         ($($arg:tt)*) => { if let Some(d) = &mut dbg { d.lines.push(format!($($arg)*)); } };
     }
+    macro_rules! dbg_snapshot {
+        ($name:expr, $scored:expr) => {
+            if let Some(d) = &mut dbg {
+                d.stages.push(TraceStage {
+                    name: $name.to_string(),
+                    entries: $scored.iter().map(TraceEntry::from_scored).collect(),
+                });
+            }
+        };
+    }
     dbg_push!("query: {:?}", params.query);
     dbg_push!("variants: {} (expansion={})", params.variants.len(), params.query_expansion_enabled);
     dbg_push!("rerank_mode: {}", params.rerank_mode);
@@ -581,6 +631,7 @@ pub fn run_search_pipeline(
     });
 
     dbg_push!("retrieval: {} candidates after cosine scoring + state/date filtering", scored.len());
+    dbg_snapshot!("retrieval", scored);
 
     // Cross-encoder re-ranking (when enabled).
     // Falls back silently to cosine results if reranking fails.
@@ -631,6 +682,7 @@ pub fn run_search_pipeline(
     } else {
         dbg_push!("cross-encoder: skipped (mode={})", params.rerank_mode);
     }
+    dbg_snapshot!("cross-encoder", scored);
 
     // Session affinity gating: bias scores toward the conversation topic.
     // Applied after reranking (so we nudge reranked scores, not interfere with reranker)
@@ -661,6 +713,7 @@ pub fn run_search_pipeline(
     } else {
         dbg_push!("session_affinity: skipped (no centroid or weight=0)");
     }
+    dbg_snapshot!("session_affinity", scored);
 
     // Association-following: discover related memories via associations
     let mut association_discovery_count: usize = 0;
@@ -763,6 +816,7 @@ pub fn run_search_pipeline(
     } else {
         dbg_push!("associations: skipped (follow={}, depth={})", params.follow_associations, params.association_depth);
     }
+    dbg_snapshot!("associations", scored);
 
     // Diversity shaping: pick a diverse, coverage-rich, source-balanced subset.
     // Redundancy is a property of results, not the query — always filter near-duplicates.
@@ -939,6 +993,7 @@ pub fn run_search_pipeline(
                 original_count, scored.len(), covered_cues.len(), cue_terms.len(), semantic_dedup_count);
         }
     }
+    dbg_snapshot!("diversity", scored);
 
     // Chain detection: check if any seed results (vector search hits) are procedure anchors
     let chain_hints = detect_procedure_chains(brain, &seed_ids);

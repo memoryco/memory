@@ -103,8 +103,8 @@ pub struct Config {
     #[serde(default)]
     pub embedding_model_active: Option<String>,
 
-    /// Reranking mode: "off", "cross-encoder", or "llm".
-    /// off = cosine order only, cross-encoder = BGE cross-encoder, llm = local LLM reranking.
+    /// Reranking mode: "off" or "cross-encoder".
+    /// off = cosine order only, cross-encoder = nemotron reranker.
     #[serde(default = "default_rerank_mode")]
     pub rerank_mode: String,
 
@@ -125,10 +125,6 @@ pub struct Config {
     #[serde(default = "default_query_expansion_enabled")]
     pub query_expansion_enabled: bool,
 
-    /// Maximum candidates fed to the LLM in "llm" rerank mode.
-    /// Separate from rerank_candidates because LLM is context-length constrained.
-    #[serde(default = "default_llm_rerank_candidates")]
-    pub llm_rerank_candidates: usize,
 
     /// Server-side default minimum similarity score (0.0-1.0).
     /// Used when caller doesn't specify min_score.
@@ -214,10 +210,6 @@ fn default_query_expansion_enabled() -> bool {
     true
 }
 
-fn default_llm_rerank_candidates() -> usize {
-    20
-}
-
 fn default_search_min_score() -> f64 {
     0.3
 }
@@ -283,7 +275,6 @@ impl Default for Config {
             rerank_candidates: 30,
             hybrid_search_enabled: true,
             query_expansion_enabled: true,
-            llm_rerank_candidates: 20,
             search_min_score: 0.3,
             composite_limit_min: 15,
             composite_limit_max: 30,
@@ -312,10 +303,10 @@ mod tests {
     #[test]
     fn rerank_mode_serializes_and_deserializes() {
         let mut config = Config::default();
-        config.rerank_mode = "llm".to_string();
+        config.rerank_mode = "off".to_string();
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.rerank_mode, "llm");
+        assert_eq!(loaded.rerank_mode, "off");
     }
 
     #[test]

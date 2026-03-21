@@ -26,7 +26,7 @@ impl Tool<Context> for ConfigSetTool {
          propagation_damping, hebbian_learning_rate, recall_strength, \
          search_follow_associations, search_association_depth, \
          rerank_mode, rerank_candidates, hybrid_search_enabled, \
-         query_expansion_enabled, llm_rerank_candidates, search_min_score, \
+         query_expansion_enabled, search_min_score, \
          composite_limit_min, composite_limit_max, association_cap_min, association_cap_max"
     }
 
@@ -48,7 +48,6 @@ impl Tool<Context> for ConfigSetTool {
                         "rerank_candidates",
                         "hybrid_search_enabled",
                         "query_expansion_enabled",
-                        "llm_rerank_candidates",
                         "search_min_score",
                         "composite_limit_min",
                         "composite_limit_max",
@@ -80,9 +79,9 @@ impl Tool<Context> for ConfigSetTool {
                 McpError::InvalidParams("rerank_mode value must be a string".to_string())
             })?;
 
-            if !matches!(mode, "off" | "cross-encoder" | "llm" | "hybrid") {
+            if !matches!(mode, "off" | "cross-encoder") {
                 return Ok(text_response(format!(
-                    "Invalid rerank_mode: {}. Must be one of: off, cross-encoder, llm, hybrid",
+                    "Invalid rerank_mode: {}. Must be one of: off, cross-encoder",
                     mode
                 )));
             }
@@ -119,7 +118,6 @@ impl Tool<Context> for ConfigSetTool {
         let int_keys = [
             "search_association_depth",
             "rerank_candidates",
-            "llm_rerank_candidates",
             "composite_limit_min",
             "composite_limit_max",
             "association_cap_min",

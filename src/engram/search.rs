@@ -232,12 +232,10 @@ pub struct SearchPipelineParams {
     pub follow_associations: bool,
     /// Config: how many hops to follow for associations.
     pub association_depth: u8,
-    /// Config: reranking mode ("off", "cross-encoder", "llm", "hybrid").
+    /// Config: reranking mode ("off" or "cross-encoder").
     pub rerank_mode: String,
     /// Config: use hybrid BM25+vector search?
     pub hybrid_search_enabled: bool,
-    /// Config: how many candidates to send to LLM reranker.
-    pub llm_rerank_candidates: usize,
     /// Config: minimum association cap.
     pub association_cap_min: usize,
     /// Config: maximum association cap.
@@ -561,176 +559,39 @@ pub fn run_search_pipeline(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // Re-ranking: either cross-encoder or LLM-based, based on rerank_mode config.
+    // Cross-encoder re-ranking (when enabled).
     // Falls back silently to cosine results if reranking fails.
-    match params.rerank_mode.as_str() {
-        "llm" => {
-            if !scored.is_empty() && llm.available() && llm.tier() >= LlmTier::Minimal {
-                // Cap candidates to fit in context window
-                let cap = params.llm_rerank_candidates.min(scored.len());
-                let contents: Vec<String> = scored[..cap].iter().map(|r| r.content.clone()).collect();
-                let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+    if params.rerank_mode == "cross-encoder" && !scored.is_empty() {
+        let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
+        let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+        let candidate_count = contents.len();
 
-                match llm.rerank(&params.query, &content_refs, params.effective_limit) {
-                    Ok(indices) => {
-                        let mut reranked_results = Vec::with_capacity(indices.len());
-                        for (rank, &idx) in indices.iter().enumerate() {
-                            if idx < cap {
-                                let orig = &scored[idx];
-                                reranked_results.push(ScoredResult {
-                                    id: orig.id,
-                                    content: orig.content.clone(),
-                                    created_at: orig.created_at,
-                                    similarity: orig.similarity,
-                                    energy: orig.energy,
-                                    // Synthetic rank-based score so diversity shaping respects LLM order
-                                    blended: 1.0 - (rank as f32 * 0.05),
-                                    state_emoji: orig.state_emoji,
-                                });
-                            }
-                        }
-                        if !reranked_results.is_empty() {
-                            scored = reranked_results;
-                            eprintln!(
-                                "[search] LLM re-ranked {} candidates, selected {}",
-                                cap, scored.len()
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[search] LLM reranking failed, falling back to cosine: {}", e);
+        match crate::embedding::reranker::rerank(&params.query, &content_refs) {
+            Ok(reranked) => {
+                let mut reranked_results = Vec::with_capacity(reranked.len());
+                for rs in &reranked {
+                    if rs.index < scored.len() {
+                        let orig = &scored[rs.index];
+                        reranked_results.push(ScoredResult {
+                            id: orig.id,
+                            content: orig.content.clone(),
+                            created_at: orig.created_at,
+                            similarity: orig.similarity,
+                            energy: orig.energy,
+                            blended: rs.score,
+                            state_emoji: orig.state_emoji,
+                        });
                     }
                 }
-            } else if !scored.is_empty() {
-                eprintln!("[search] LLM reranking requested but LLM not available, using cosine order");
+                scored = reranked_results;
+                eprintln!(
+                    "[search] re-ranked {} candidates with cross-encoder",
+                    candidate_count
+                );
             }
-        }
-        "cross-encoder" => {
-            if !scored.is_empty() {
-                let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
-                let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-                let candidate_count = contents.len();
-
-                match crate::embedding::reranker::rerank(&params.query, &content_refs) {
-                    Ok(reranked) => {
-                        let mut reranked_results = Vec::with_capacity(reranked.len());
-                        for rs in &reranked {
-                            if rs.index < scored.len() {
-                                let orig = &scored[rs.index];
-                                reranked_results.push(ScoredResult {
-                                    id: orig.id,
-                                    content: orig.content.clone(),
-                                    created_at: orig.created_at,
-                                    similarity: orig.similarity,
-                                    energy: orig.energy,
-                                    blended: rs.score,
-                                    state_emoji: orig.state_emoji,
-                                });
-                            }
-                        }
-                        scored = reranked_results;
-                        eprintln!(
-                            "[search] re-ranked {} candidates with cross-encoder",
-                            candidate_count
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[search] reranking failed, falling back to cosine: {}", e);
-                    }
-                }
+            Err(e) => {
+                eprintln!("[search] reranking failed, falling back to cosine: {}", e);
             }
-        }
-        "hybrid" => {
-            // Two-stage pipeline: cross-encoder narrows the field, LLM refines the top.
-            // Falls back gracefully at each stage.
-            if !scored.is_empty() {
-                // Stage 1: Cross-encoder scores all candidates (fast, no context limit)
-                let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
-                let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-                let candidate_count = contents.len();
-
-                match crate::embedding::reranker::rerank(&params.query, &content_refs) {
-                    Ok(reranked) => {
-                        let mut ce_results = Vec::with_capacity(reranked.len());
-                        for rs in &reranked {
-                            if rs.index < scored.len() {
-                                let orig = &scored[rs.index];
-                                ce_results.push(ScoredResult {
-                                    id: orig.id,
-                                    content: orig.content.clone(),
-                                    created_at: orig.created_at,
-                                    similarity: orig.similarity,
-                                    energy: orig.energy,
-                                    blended: rs.score,
-                                    state_emoji: orig.state_emoji,
-                                });
-                            }
-                        }
-                        scored = ce_results;
-                        eprintln!(
-                            "[search] hybrid stage 1: cross-encoder re-ranked {} candidates",
-                            candidate_count
-                        );
-
-                        // Stage 2: LLM reorders the cross-encoder's top N
-                        if llm.available() && llm.tier() >= LlmTier::Minimal {
-                            let cap = params.llm_rerank_candidates.min(scored.len());
-                            let llm_contents: Vec<String> =
-                                scored[..cap].iter().map(|r| r.content.clone()).collect();
-                            let llm_refs: Vec<&str> =
-                                llm_contents.iter().map(|s| s.as_str()).collect();
-
-                            match llm.rerank(&params.query, &llm_refs, params.effective_limit) {
-                                Ok(indices) => {
-                                    let mut final_results =
-                                        Vec::with_capacity(indices.len());
-                                    for (rank, &idx) in indices.iter().enumerate() {
-                                        if idx < cap {
-                                            let orig = &scored[idx];
-                                            final_results.push(ScoredResult {
-                                                id: orig.id,
-                                                content: orig.content.clone(),
-                                                created_at: orig.created_at,
-                                                similarity: orig.similarity,
-                                                energy: orig.energy,
-                                                blended: 1.0 - (rank as f32 * 0.05),
-                                                state_emoji: orig.state_emoji,
-                                            });
-                                        }
-                                    }
-                                    if !final_results.is_empty() {
-                                        scored = final_results;
-                                        eprintln!(
-                                            "[search] hybrid stage 2: LLM re-ranked top {}, selected {}",
-                                            cap,
-                                            scored.len()
-                                        );
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "[search] hybrid stage 2 (LLM) failed, using cross-encoder results: {}",
-                                        e
-                                    );
-                                }
-                            }
-                        } else {
-                            eprintln!(
-                                "[search] hybrid: LLM not available, using cross-encoder results only"
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "[search] hybrid stage 1 (cross-encoder) failed, falling back to cosine: {}",
-                            e
-                        );
-                    }
-                }
-            }
-        }
-        _ => {
-            // "off" or unknown — keep cosine order, do nothing
         }
     }
 

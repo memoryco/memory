@@ -145,24 +145,6 @@ pub fn is_inferential_query(query: &str) -> bool {
     cues.iter().any(|cue| q.contains(cue))
 }
 
-/// Heuristic: queries that ask for reasoning/synthesis (why, how, what caused)
-/// where the answer might be inferrable from combining multiple memories.
-pub fn is_intent_query(query: &str) -> bool {
-    let q = query.to_lowercase();
-    let cues = [
-        "why ", "why?",
-        "how did", "how does", "how do", "how was", "how is",
-        "what caused", "what led to", "what made",
-        "what was the reason", "what's the reason",
-        "what is the rationale", "what was the rationale",
-    ];
-    cues.iter().any(|cue| q.contains(cue))
-}
-
-/// Similarity threshold below which the inference step fires for intent queries.
-/// If the top result's cosine similarity is below this, the LLM will attempt synthesis.
-const INFERENCE_SIMILARITY_THRESHOLD: f32 = 0.65;
-
 fn normalize_variants(original: &str, generated: Vec<String>) -> Vec<String> {
     let mut variants = Vec::new();
     let mut seen = HashSet::new();
@@ -273,8 +255,6 @@ pub struct SearchPipelineResult {
     pub association_merged_count: usize,
     pub association_discovery_count: usize,
     pub chain_hints: Vec<ChainHint>,
-    /// LLM-synthesized answer when no result directly answers the query.
-    pub inference: Option<String>,
     /// Pipeline diagnostics (only populated when config.debug = true).
     pub debug_info: Option<DebugInfo>,
 }
@@ -1164,56 +1144,6 @@ pub fn run_search_pipeline(
     // Limit results
     scored.truncate(params.effective_limit);
 
-    // Inference step: if query asks "why/how" and top results don't directly answer,
-    // ask the LLM to synthesize an answer from the result set.
-    let inference = if is_intent_query(&params.query)
-        && !scored.is_empty()
-        && scored[0].similarity < INFERENCE_SIMILARITY_THRESHOLD
-        && llm.available()
-        && llm.tier() >= crate::llm::LlmTier::Minimal
-    {
-        let cap = scored.len().min(8);
-        let contents: Vec<String> = scored[..cap].iter().map(|r| r.content.clone()).collect();
-        let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-
-        let infer_start = std::time::Instant::now();
-        match llm.infer_answer(&params.query, &content_refs) {
-            Ok(Some(answer)) => {
-                let infer_ms = infer_start.elapsed().as_millis();
-                eprintln!(
-                    "[search] inference: synthesized answer in {}ms (top_sim={:.4} < {:.2})",
-                    infer_ms, scored[0].similarity, INFERENCE_SIMILARITY_THRESHOLD
-                );
-                dbg_push!(
-                    "inference: synthesized answer in {}ms (top_sim={:.4}, threshold={:.2})",
-                    infer_ms, scored[0].similarity, INFERENCE_SIMILARITY_THRESHOLD
-                );
-                Some(answer)
-            }
-            Ok(None) => {
-                let infer_ms = infer_start.elapsed().as_millis();
-                eprintln!("[search] inference: NO_INFERENCE in {}ms", infer_ms);
-                dbg_push!("inference: NO_INFERENCE in {}ms", infer_ms);
-                None
-            }
-            Err(e) => {
-                eprintln!("[search] inference failed: {}", e);
-                dbg_push!("inference: FAILED ({})", e);
-                None
-            }
-        }
-    } else {
-        if is_intent_query(&params.query) && !scored.is_empty() {
-            dbg_push!(
-                "inference: skipped (top_sim={:.4} >= {:.2}, direct answer likely)",
-                scored[0].similarity, INFERENCE_SIMILARITY_THRESHOLD
-            );
-        } else {
-            dbg_push!("inference: skipped (not an intent query)");
-        }
-        None
-    };
-
     dbg_push!("final: {} results returned", scored.len());
 
     Ok(SearchPipelineResult {
@@ -1221,7 +1151,6 @@ pub fn run_search_pipeline(
         association_merged_count,
         association_discovery_count,
         chain_hints,
-        inference,
         debug_info: dbg,
     })
 }

@@ -294,7 +294,6 @@ impl EngramSearchTool {
 
         let scored = pipeline_result.results;
         let chain_hints = pipeline_result.chain_hints;
-        let inference = pipeline_result.inference;
         let association_merged_count = pipeline_result.association_merged_count;
         let debug_info = pipeline_result.debug_info;
         let association_discovery_count = pipeline_result.association_discovery_count;
@@ -336,15 +335,6 @@ impl EngramSearchTool {
              ---\n\n",
             args.session_id
         );
-
-        // Show LLM inference when no result directly answers the query
-        if let Some(ref answer) = inference {
-            output.push_str(&format!(
-                "💡 **INFERRED:** No direct answer found. Based on retrieved memories: {}\n\
-                 ↳ Consider storing this as a memory if accurate.\n\n",
-                answer
-            ));
-        }
 
         // Show chain hints before memory listings
         for hint in &chain_hints {

@@ -130,7 +130,6 @@ pub fn run() {
 
     apply_maintenance(&mut brain);
     expire_sessions(&mut brain);
-    bootstrap_associations(&mut brain);
     run_decomposition(&mut brain);
 
     // --- Identity ---
@@ -252,15 +251,6 @@ fn apply_maintenance(brain: &mut Brain) {
             brain.config().min_association_weight
         ),
         Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
-    }
-}
-
-/// Create semantic associations between similar memories.
-fn bootstrap_associations(brain: &mut Brain) {
-    match brain.bootstrap_semantic_associations(0.5, 5) {
-        Ok((0, _)) => {}
-        Ok((created, _)) => eprintln!("Created {} semantic associations", created),
-        Err(e) => eprintln!("Warning: Failed to bootstrap semantic associations: {}", e),
     }
 }
 

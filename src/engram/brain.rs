@@ -912,61 +912,6 @@ impl Brain {
         self.storage.lock().unwrap().save_session(session)
     }
 
-    /// Bootstrap associations based on semantic similarity
-    /// Creates associations between memories with similarity above threshold
-    /// Uses similarity score as initial weight
-    /// Returns (associations_created, pairs_checked)
-    pub fn bootstrap_semantic_associations(
-        &mut self,
-        min_similarity: f32,
-        max_associations_per_memory: usize,
-    ) -> StorageResult<(usize, usize)> {
-        let mut created = 0;
-        let mut checked = 0;
-
-        // Get all memory IDs
-        let all_ids: Vec<EngramId> = self.substrate.all_engrams().map(|e| e.id).collect();
-
-        for id in &all_ids {
-            // Get this memory's embedding
-            let embedding = match self.storage.lock().unwrap().get_embedding(id)? {
-                Some(emb) => emb,
-                None => continue, // Skip memories without embeddings
-            };
-
-            // Find similar memories
-            let similar = self.storage.lock().unwrap().find_similar_by_embedding(
-                &embedding,
-                max_associations_per_memory + 1, // +1 because it might include self
-                min_similarity,
-            )?;
-
-            for result in similar {
-                // Skip self-associations
-                if result.id == *id {
-                    continue;
-                }
-
-                checked += 1;
-
-                // Check if association already exists
-                let exists = self
-                    .substrate
-                    .associations_from(id)
-                    .map(|assocs| assocs.iter().any(|a| a.to == result.id))
-                    .unwrap_or(false);
-
-                if !exists {
-                    // Create association with similarity as weight
-                    self.associate(*id, result.id, result.score as f64)?;
-                    created += 1;
-                }
-            }
-        }
-
-        Ok((created, checked))
-    }
-
     /// Find similar memories to a given memory ID
     /// Convenience wrapper around find_similar_by_embedding
     pub fn find_similar_to(

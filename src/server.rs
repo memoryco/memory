@@ -1,10 +1,12 @@
 //! Server initialization and startup.
 //!
 //! Contains all the heavy lifting: opening databases, applying decay,
-//! backfilling embeddings, registering tools, and running the MCP server.
+//! registering tools, and running the MCP server.
+//!
+//! Embedding and enrichment generation is intentionally NOT done here.
+//! Run `memoryco generate` to rebuild vectors after a model change.
 
 use crate::config;
-use crate::embedding::EmbeddingGenerator;
 use crate::engram::Brain;
 use crate::identity::{DieselIdentityStorage, IdentityStore};
 use crate::plans::{DieselPlanStorage, PlanStore};
@@ -128,8 +130,6 @@ pub fn run() {
 
     apply_maintenance(&mut brain);
     expire_sessions(&mut brain);
-    backfill_embeddings(&mut brain);
-    bootstrap_associations(&mut brain);
     run_decomposition(&mut brain);
 
     // --- Identity ---
@@ -251,64 +251,6 @@ fn apply_maintenance(brain: &mut Brain) {
             brain.config().min_association_weight
         ),
         Err(e) => eprintln!("Warning: Failed to prune associations: {}", e),
-    }
-}
-
-/// Generate embeddings for any memories missing them.
-fn backfill_embeddings(brain: &mut Brain) {
-    match brain.count_without_embeddings() {
-        Ok(0) => {}
-        Ok(count) => {
-            eprintln!("Generating embeddings for {} memories...", count);
-            let generator = EmbeddingGenerator::new();
-            let mut processed = 0;
-            let mut errors = 0;
-
-            loop {
-                match brain.get_ids_without_embeddings(50) {
-                    Ok(ids) if ids.is_empty() => break,
-                    Ok(ids) => {
-                        let items: Vec<_> = ids
-                            .iter()
-                            .filter_map(|id| brain.get(id).map(|e| (*id, e.content.clone())))
-                            .collect();
-                        let texts: Vec<&str> = items.iter().map(|(_, c)| c.as_str()).collect();
-
-                        match generator.generate_batch(&texts) {
-                            Ok(embeddings) => {
-                                for ((id, _), embedding) in items.iter().zip(embeddings.iter()) {
-                                    if brain.set_embedding(id, embedding).is_ok() {
-                                        processed += 1;
-                                    } else {
-                                        errors += 1;
-                                    }
-                                }
-                            }
-                            Err(_) => errors += items.len(),
-                        }
-                        eprint!("\r  Processed {}/{} memories...", processed, count);
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Failed to get memories for embedding: {}", e);
-                        break;
-                    }
-                }
-            }
-            eprintln!(
-                "\r  Generated {} embeddings ({} errors)        ",
-                processed, errors
-            );
-        }
-        Err(e) => eprintln!("Warning: Failed to check embedding status: {}", e),
-    }
-}
-
-/// Create semantic associations between similar memories.
-fn bootstrap_associations(brain: &mut Brain) {
-    match brain.bootstrap_semantic_associations(0.5, 5) {
-        Ok((0, _)) => {}
-        Ok((created, _)) => eprintln!("Created {} semantic associations", created),
-        Err(e) => eprintln!("Warning: Failed to bootstrap semantic associations: {}", e),
     }
 }
 

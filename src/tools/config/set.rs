@@ -24,7 +24,7 @@ impl Tool<Context> for ConfigSetTool {
     fn description(&self) -> &str {
         "Update a configuration value. Keys: decay_rate_per_day, decay_interval_hours, \
          propagation_damping, hebbian_learning_rate, recall_strength, \
-         search_follow_associations, search_association_depth, embedding_model, \
+         search_follow_associations, search_association_depth, \
          rerank_mode, rerank_candidates, hybrid_search_enabled, \
          query_expansion_enabled, llm_rerank_candidates, search_min_score, \
          composite_limit_min, composite_limit_max, association_cap_min, association_cap_max"
@@ -44,7 +44,6 @@ impl Tool<Context> for ConfigSetTool {
                         "recall_strength",
                         "search_follow_associations",
                         "search_association_depth",
-                        "embedding_model",
                         "rerank_mode",
                         "rerank_candidates",
                         "hybrid_search_enabled",
@@ -59,7 +58,7 @@ impl Tool<Context> for ConfigSetTool {
                     "description": "Configuration key to update."
                 },
                 "value": {
-                    "description": "New value. Number for most keys, string for embedding_model and rerank_mode."
+                    "description": "New value. Number for most keys, string for rerank_mode."
                 }
             },
             "required": ["key", "value"]
@@ -105,50 +104,6 @@ impl Tool<Context> for ConfigSetTool {
             return Ok(text_response(format!(
                 "Configuration updated: rerank_mode = {}. Change saved to config.toml.",
                 mode
-            )));
-        }
-
-        // Handle embedding_model separately (string value)
-        if args.key == "embedding_model" {
-            let model_name = args.value.as_str().ok_or_else(|| {
-                McpError::InvalidParams("embedding_model value must be a string".to_string())
-            })?;
-
-            if !crate::embedding::is_valid_model(model_name) {
-                return Ok(text_response(format!(
-                    "Unknown embedding model: {}. Use a valid model name like \
-                     SnowflakeArcticEmbedL, AllMiniLML6V2, BGELargeENV15, etc.",
-                    model_name
-                )));
-            }
-
-            // Write to config.toml (durable)
-            write_config_key(
-                &context.memory_home,
-                "embedding_model",
-                &ConfigValue::Str(model_name.to_string()),
-            )
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-            // Also update in-memory config for the current session
-            let mut brain = context.brain.write().unwrap();
-            let mut config = brain.config().clone();
-            config.embedding_model = model_name.to_string();
-            // Don't update embedding_model_active — mismatch triggers migration on next startup
-            brain
-                .set_config(config)
-                .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-            return Ok(text_response(format!(
-                "Configuration updated: embedding_model = {}. \
-                 Migration will occur on next restart (current embeddings: {:?}). \
-                 Change saved to config.toml. Takes full effect on restart.",
-                model_name,
-                brain
-                    .config()
-                    .embedding_model_active
-                    .as_deref()
-                    .unwrap_or("(none)")
             )));
         }
 

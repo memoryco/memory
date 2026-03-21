@@ -13,6 +13,7 @@ pub mod config;
 mod dashboard;
 mod embedding;
 mod engram;
+mod generate;
 mod identity;
 mod install;
 pub mod lang;
@@ -55,7 +56,6 @@ fn main() {
     match cli.command {
         None | Some(cli::Command::Serve) => server::run(),
         Some(cli::Command::Setup { yes }) => commands::setup(yes),
-        Some(cli::Command::Cache) => commands::cache(),
         Some(cli::Command::Install { yes }) => commands::install(yes),
         Some(cli::Command::Uninstall { yes }) => commands::uninstall(yes),
         Some(cli::Command::Doctor) => commands::doctor(),
@@ -63,5 +63,9 @@ fn main() {
         Some(cli::Command::Update { dry_run }) => commands::update(dry_run),
         Some(cli::Command::PruneRegistry) => commands::prune_registry(),
         Some(cli::Command::Llm { command }) => commands::llm(command),
+        Some(cli::Command::Generate {
+            embeddings,
+            enrichments,
+        }) => commands::generate(embeddings, enrichments),
     }
 }

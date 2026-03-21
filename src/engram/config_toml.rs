@@ -108,7 +108,7 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         min_association_weight: get_f64!(min_association_weight),
         search_follow_associations: get_bool!(search_follow_associations),
         search_association_depth: get_u8!(search_association_depth),
-        embedding_model: get_string!(embedding_model),
+        embedding_model: defaults.embedding_model.clone(),
         rerank_mode: get_string!(rerank_mode),
         rerank_candidates: get_usize!(rerank_candidates),
         hybrid_search_enabled: get_bool!(hybrid_search_enabled),
@@ -223,9 +223,6 @@ search_follow_associations = {search_follow_associations}
 # How many hops to follow (1 = direct only, 2 = friends-of-friends).
 search_association_depth = {search_association_depth}
 
-# Embedding model name. Changing triggers re-embedding on restart.
-embedding_model = "{embedding_model}"
-
 # Reranking mode: "off", "cross-encoder", "llm", or "hybrid" (cross-encoder then LLM).
 # "hybrid" requires [llm] enabled = true — auto-degrades to "cross-encoder" if LLM is off.
 # "llm" requires [llm] enabled = true — auto-degrades to "off" if LLM is off.
@@ -284,7 +281,6 @@ session_expire_days = {session_expire_days}
         min_association_weight = d.min_association_weight,
         search_follow_associations = d.search_follow_associations,
         search_association_depth = d.search_association_depth,
-        embedding_model = d.embedding_model,
         rerank_mode = d.rerank_mode,
         rerank_candidates = d.rerank_candidates,
         hybrid_search_enabled = d.hybrid_search_enabled,
@@ -347,7 +343,6 @@ association_decay_rate = 0.8
 min_association_weight = 0.1
 search_follow_associations = false
 search_association_depth = 2
-embedding_model = "BGELargeENV15"
 rerank_mode = "off"
 rerank_candidates = 50
 hybrid_search_enabled = false
@@ -371,7 +366,6 @@ association_cap_max = 16
         assert!((config.min_association_weight - 0.1).abs() < f64::EPSILON);
         assert!(!config.search_follow_associations);
         assert_eq!(config.search_association_depth, 2);
-        assert_eq!(config.embedding_model, "BGELargeENV15");
         assert_eq!(config.rerank_mode, "off");
         assert_eq!(config.rerank_candidates, 50);
         assert!(!config.hybrid_search_enabled);
@@ -465,12 +459,12 @@ rerank_mode = "cross-encoder"
         ensure_default_config_toml(dir.path()).unwrap();
         write_config_key(
             dir.path(),
-            "embedding_model",
-            &ConfigValue::Str("SnowflakeArcticEmbedL".to_string()),
+            "rerank_mode",
+            &ConfigValue::Str("llm".to_string()),
         )
         .unwrap();
         let config = load_config_from_toml(dir.path());
-        assert_eq!(config.embedding_model, "SnowflakeArcticEmbedL");
+        assert_eq!(config.rerank_mode, "llm");
     }
 
     #[test]

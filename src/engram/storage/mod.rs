@@ -192,6 +192,11 @@ pub trait Storage: Send {
         Ok(Vec::new())
     }
 
+    /// Get IDs of engrams that have no enrichments (for incremental enrichment backfill)
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+        Ok(Vec::new())
+    }
+
     /// Update embedding for a single engram
     fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let _ = (id, embedding);
@@ -230,6 +235,12 @@ pub trait Storage: Send {
 
     /// Count total enrichment vectors across all engrams.
     fn count_enrichments(&mut self) -> StorageResult<usize> {
+        Ok(0)
+    }
+
+    /// Clear all enrichment embeddings for migration purposes.
+    /// Returns the number of affected rows.
+    fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
         Ok(0)
     }
 
@@ -290,6 +301,13 @@ pub trait Storage: Send {
     /// Returns the number of sessions deleted.
     fn delete_expired_sessions(&mut self, expire_before: i64) -> StorageResult<usize> {
         let _ = expire_before;
+        Ok(0)
+    }
+
+    /// Delete all sessions. Used during embedding model migration since session
+    /// centroids have wrong dimensions after a model switch.
+    /// Returns the number of sessions deleted.
+    fn clear_all_sessions(&mut self) -> StorageResult<usize> {
         Ok(0)
     }
 }

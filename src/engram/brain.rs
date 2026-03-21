@@ -48,8 +48,6 @@ impl Brain {
             config.embedding_model_active = Some(active);
         }
 
-        Self::apply_embedding_model_config(&config);
-
         let mut brain = Self {
             identity: Identity::new(),
             substrate: Substrate::with_config(config),
@@ -57,7 +55,7 @@ impl Brain {
             persistence_worker: None,
         };
 
-        brain.migrate_embeddings()?;
+        brain.check_model_mismatch()?;
         brain.ensure_fts_index()?;
 
         Ok(brain)
@@ -74,8 +72,6 @@ impl Brain {
         if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
             config.embedding_model_active = Some(active);
         }
-
-        Self::apply_embedding_model_config(&config);
 
         // Load identity
         let identity = storage.load_identity()?.unwrap_or_default();
@@ -112,7 +108,7 @@ impl Brain {
             persistence_worker: None,
         };
 
-        brain.migrate_embeddings()?;
+        brain.check_model_mismatch()?;
         brain.ensure_fts_index()?;
 
         Ok(brain)
@@ -132,8 +128,6 @@ impl Brain {
         if let Ok(Some(active)) = storage.get_metadata("embedding_model_active") {
             config.embedding_model_active = Some(active);
         }
-
-        Self::apply_embedding_model_config(&config);
 
         // Load identity
         let identity = storage.load_identity()?.unwrap_or_default();
@@ -173,7 +167,7 @@ impl Brain {
             persistence_worker: Some(persistence_worker),
         };
 
-        brain.migrate_embeddings()?;
+        brain.check_model_mismatch()?;
         brain.ensure_fts_index()?;
 
         Ok(brain)
@@ -833,18 +827,23 @@ impl Brain {
     }
 
     /// Count engrams that have embeddings
-    pub fn count_with_embeddings(&mut self) -> StorageResult<usize> {
+    pub fn count_with_embeddings(&self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_with_embeddings()
     }
 
     /// Count engrams that need embeddings (for backfill progress)
-    pub fn count_without_embeddings(&mut self) -> StorageResult<usize> {
+    pub fn count_without_embeddings(&self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_without_embeddings()
     }
 
     /// Get IDs of engrams that need embeddings (for backfill)
-    pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
+    pub fn get_ids_without_embeddings(&self, limit: usize) -> StorageResult<Vec<EngramId>> {
         self.storage.lock().unwrap().get_ids_without_embeddings(limit)
+    }
+
+    /// Get IDs of engrams that have no enrichments (for incremental enrichment backfill)
+    pub fn get_ids_without_enrichments(&self) -> StorageResult<Vec<EngramId>> {
+        self.storage.lock().unwrap().get_ids_without_enrichments()
     }
 
     /// Get embedding for an engram.
@@ -885,7 +884,7 @@ impl Brain {
     }
 
     /// Count total enrichment vectors across all engrams.
-    pub fn count_enrichments(&mut self) -> StorageResult<usize> {
+    pub fn count_enrichments(&self) -> StorageResult<usize> {
         self.storage.lock().unwrap().count_enrichments()
     }
 
@@ -911,61 +910,6 @@ impl Brain {
         session: &crate::engram::session::SessionContext,
     ) -> StorageResult<()> {
         self.storage.lock().unwrap().save_session(session)
-    }
-
-    /// Bootstrap associations based on semantic similarity
-    /// Creates associations between memories with similarity above threshold
-    /// Uses similarity score as initial weight
-    /// Returns (associations_created, pairs_checked)
-    pub fn bootstrap_semantic_associations(
-        &mut self,
-        min_similarity: f32,
-        max_associations_per_memory: usize,
-    ) -> StorageResult<(usize, usize)> {
-        let mut created = 0;
-        let mut checked = 0;
-
-        // Get all memory IDs
-        let all_ids: Vec<EngramId> = self.substrate.all_engrams().map(|e| e.id).collect();
-
-        for id in &all_ids {
-            // Get this memory's embedding
-            let embedding = match self.storage.lock().unwrap().get_embedding(id)? {
-                Some(emb) => emb,
-                None => continue, // Skip memories without embeddings
-            };
-
-            // Find similar memories
-            let similar = self.storage.lock().unwrap().find_similar_by_embedding(
-                &embedding,
-                max_associations_per_memory + 1, // +1 because it might include self
-                min_similarity,
-            )?;
-
-            for result in similar {
-                // Skip self-associations
-                if result.id == *id {
-                    continue;
-                }
-
-                checked += 1;
-
-                // Check if association already exists
-                let exists = self
-                    .substrate
-                    .associations_from(id)
-                    .map(|assocs| assocs.iter().any(|a| a.to == result.id))
-                    .unwrap_or(false);
-
-                if !exists {
-                    // Create association with similarity as weight
-                    self.associate(*id, result.id, result.score as f64)?;
-                    created += 1;
-                }
-            }
-        }
-
-        Ok((created, checked))
     }
 
     /// Find similar memories to a given memory ID
@@ -1013,67 +957,41 @@ impl Brain {
         self.substrate.all_engrams()
     }
 
-    /// Check if embeddings need migration and perform it if so.
+    /// Check for embedding model mismatch and clear stale vectors if needed.
     ///
-    /// Migration triggers when `embedding_model` != `embedding_model_active` in config.
-    /// Steps: NULL all embeddings → re-embed in batch → update config.
-    pub fn migrate_embeddings(&mut self) -> StorageResult<()> {
+    /// Triggers when `embedding_model` != `embedding_model_active` in config.
+    /// Steps: clear all embeddings/enrichments/sessions → update `embedding_model_active`.
+    ///
+    /// Re-generation is intentionally NOT done here. Run `memoryco generate` to rebuild.
+    pub fn check_model_mismatch(&mut self) -> StorageResult<()> {
         let config = self.substrate.config();
         let desired = config.embedding_model.clone();
         let active = config.embedding_model_active.clone();
 
-        // If active matches desired, no migration needed
+        // If active matches desired (the common case), nothing to do.
         if active.as_deref() == Some(desired.as_str()) {
             return Ok(());
         }
 
+        let old = active.as_deref().unwrap_or("(none)");
         eprintln!(
-            "[brain] Embedding model migration: {:?} → {}",
-            active.as_deref().unwrap_or("(none)"),
-            desired
+            "[brain] Embedding model changed ({} → {}). Cleared stale vectors. \
+             Run 'memoryco generate' to rebuild.",
+            old, desired
         );
 
-        // Step 1: Clear all existing embeddings
+        // Clear all existing embeddings, enrichments, and sessions.
+        // Session centroids have wrong dimensions after a model switch —
+        // comparing them against new-dimension query embeddings produces garbage.
         let cleared = self.storage.lock().unwrap().clear_all_embeddings()?;
-        eprintln!("[brain] Cleared {} embeddings", cleared);
+        let cleared_enrichments = self.storage.lock().unwrap().clear_all_enrichments()?;
+        let cleared_sessions = self.storage.lock().unwrap().clear_all_sessions()?;
+        eprintln!(
+            "[brain] Cleared {} embeddings, {} enrichments, {} sessions",
+            cleared, cleared_enrichments, cleared_sessions
+        );
 
-        // Step 2: Re-embed all engrams
-        let all_ids: Vec<super::EngramId> = self.substrate.all_engrams().map(|e| e.id).collect();
-
-        if !all_ids.is_empty() {
-            let contents: Vec<String> = all_ids
-                .iter()
-                .filter_map(|id| self.substrate.get(id))
-                .map(|e| e.content.clone())
-                .collect();
-
-            let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-
-            let generator = crate::embedding::EmbeddingGenerator::new();
-            match generator.generate_batch(&content_refs) {
-                Ok(embeddings) => {
-                    for (id, embedding) in all_ids.iter().zip(embeddings.iter()) {
-                        if let Err(e) = self.storage.lock().unwrap().set_embedding(id, embedding) {
-                            eprintln!("[brain] Failed to set embedding for {}: {}", id, e);
-                        }
-                    }
-                    eprintln!(
-                        "[brain] Re-embedded {} engrams with {}",
-                        all_ids.len(),
-                        desired
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[brain] Batch embedding failed: {}. Embeddings cleared but not regenerated.",
-                        e
-                    );
-                    eprintln!("[brain] They will be regenerated on next search/create.");
-                }
-            }
-        }
-
-        // Step 3: Update in-memory config and persist the active model to SQLite metadata.
+        // Update in-memory config and persist the active model to SQLite metadata.
         // embedding_model_active is runtime state, not stored in config.toml.
         let mut new_config = self.substrate.config().clone();
         new_config.embedding_model_active = Some(desired.clone());
@@ -1083,15 +1001,9 @@ impl Brain {
             .unwrap()
             .set_metadata("embedding_model_active", &desired)?;
 
-        eprintln!("[brain] Embedding migration complete");
         Ok(())
     }
 
-    /// Set the active embedding model name in the global state.
-    /// Called during initialization so the EmbeddingGenerator knows which model to load.
-    fn apply_embedding_model_config(config: &Config) {
-        crate::embedding::set_active_model(&config.embedding_model);
-    }
 
     // ==================
     // FTS5 KEYWORD SEARCH
@@ -2015,26 +1927,25 @@ mod tests {
     }
 
     #[test]
-    fn migration_triggers_when_active_is_none() {
-        // Fresh database: embedding_model_active is None, embedding_model is set
-        // This should trigger migration (no-op since there are no engrams to re-embed)
+    fn mismatch_check_triggers_when_active_is_none() {
+        // Fresh database: embedding_model_active is None, embedding_model is set.
+        // Brain::new calls check_model_mismatch(), which sets embedding_model_active.
         let brain = brain_with_sqlite();
 
-        // Config should now have active set after Brain::new migration
         assert!(
             brain.config().embedding_model_active.is_some(),
-            "After Brain init, embedding_model_active should be set"
+            "After Brain::new, embedding_model_active should be set"
         );
         assert_eq!(
             brain.config().embedding_model_active.as_deref(),
             Some(brain.config().embedding_model.as_str()),
-            "Active should match desired after migration"
+            "Active should match desired after mismatch check"
         );
     }
 
     #[test]
-    fn migration_triggers_on_model_change() {
-        // Create brain with one model, then change config and verify migration detects it
+    fn mismatch_check_clears_stale_embeddings_on_model_change() {
+        // Create brain with one model, then change config and verify mismatch is detected.
         let mut brain = brain_with_sqlite();
 
         // Create some engrams with embeddings
@@ -2044,16 +1955,14 @@ mod tests {
         let id_b = brain.create("Python scripting").unwrap();
         brain.set_embedding(&id_b, &[0.0, 1.0, 0.0]).unwrap();
 
-        // Verify embeddings exist
         assert_eq!(brain.count_with_embeddings().unwrap(), 2);
 
-        // Simulate changing the model by directly updating config
+        // Simulate a config change to a new model
         let mut config = brain.config().clone();
         config.embedding_model = "BGESmallENV15".to_string();
-        // Keep active as the old model — this mismatch triggers migration
+        // Keep active as the old model — this mismatch triggers the check
         brain.set_config(config).unwrap();
 
-        // Verify mismatch
         assert_ne!(
             brain.config().embedding_model,
             brain
@@ -2063,22 +1972,26 @@ mod tests {
                 .unwrap_or(""),
         );
 
-        // Run migration manually
-        // Note: this will try to load the actual model which we don't want in tests,
-        // but the clear step should work. The re-embed may fail (model not cached)
-        // which is fine — the cleared state is what we're testing.
-        let _ = brain.migrate_embeddings();
+        // Run the mismatch check directly (as Brain::new/open would).
+        // The check clears stale vectors and updates embedding_model_active.
+        // Re-generation is NOT done here — that's `memoryco generate`.
+        let _ = brain.check_model_mismatch();
 
-        // After migration, active should match desired
+        // After the check, active should match desired and old embeddings are gone
         assert_eq!(
             brain.config().embedding_model_active.as_deref(),
             Some("BGESmallENV15"),
-            "After migration, active model should match desired"
+            "After mismatch check, active model should match desired"
+        );
+        assert_eq!(
+            brain.count_with_embeddings().unwrap(),
+            0,
+            "Stale embeddings should be cleared on model change"
         );
     }
 
     #[test]
-    fn migration_skips_when_models_match() {
+    fn mismatch_check_skips_when_models_match() {
         let mut brain = brain_with_sqlite();
 
         // After init, active should already match desired
@@ -2092,8 +2005,8 @@ mod tests {
         let id = brain.create("Test memory").unwrap();
         brain.set_embedding(&id, &[1.0, 0.0, 0.0]).unwrap();
 
-        // Migration should be a no-op
-        brain.migrate_embeddings().unwrap();
+        // Mismatch check should be a no-op when models match
+        brain.check_model_mismatch().unwrap();
 
         // Embedding should still exist (not cleared)
         assert_eq!(brain.count_with_embeddings().unwrap(), 1);

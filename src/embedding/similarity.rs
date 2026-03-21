@@ -7,8 +7,7 @@
 /// - 0.0 = orthogonal (unrelated)
 /// - -1.0 = opposite direction
 ///
-/// For normalized embeddings (which fastembed produces), this simplifies
-/// to just the dot product.
+/// For normalized embeddings, this simplifies to just the dot product.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len(), "Vector dimensions must match");
 

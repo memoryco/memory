@@ -739,6 +739,12 @@ impl Storage for EngramStorage {
     }
 
     #[cfg(feature = "sqlite")]
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.get_ids_without_enrichments()
+    }
+
+    #[cfg(feature = "sqlite")]
     fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.set_embedding(id, embedding)
@@ -774,6 +780,11 @@ impl Storage for EngramStorage {
 
     #[cfg(feature = "postgres")]
     fn get_ids_without_embeddings(&mut self, _limit: usize) -> StorageResult<Vec<EngramId>> {
+        Ok(Vec::new()) // TODO
+    }
+
+    #[cfg(feature = "postgres")]
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
         Ok(Vec::new()) // TODO
     }
 
@@ -819,6 +830,17 @@ impl Storage for EngramStorage {
     fn count_enrichments(&mut self) -> StorageResult<usize> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.count_enrichments()
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
+        let mut vs = VectorSearch::new(&mut self.conn);
+        vs.clear_all_enrichments()
+    }
+
+    #[cfg(feature = "postgres")]
+    fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
+        Ok(0) // TODO
     }
 
     // ==================
@@ -1043,6 +1065,13 @@ impl Storage for EngramStorage {
     fn delete_expired_sessions(&mut self, expire_before: i64) -> StorageResult<usize> {
         let count = diesel::sql_query("DELETE FROM sessions WHERE last_seen_at < ?1")
             .bind::<diesel::sql_types::BigInt, _>(expire_before)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(count)
+    }
+
+    fn clear_all_sessions(&mut self) -> StorageResult<usize> {
+        let count = diesel::sql_query("DELETE FROM sessions")
             .execute(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(count)

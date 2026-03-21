@@ -33,10 +33,13 @@ memoryco_updater = { path = "../updater" }
 memoryco-llm = { path = "../llm" }
 memoryco_design = { git = "ssh://git@github.com/memoryco/design.git" }
 tiny_http = "0.12"
-fastembed = { version = "5.8", default-features = false, features = ["hf-hub-rustls-tls", "image-models"] }
-ort = { version = "2.0.0-rc", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "tls-rustls"] }
 chrono = "0.4"
 whatlang = "0.16"
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+
+[patch.crates-io]
+llama-cpp-2 = { path = "/Users/bsneed/work/memoryco/llama-cpp-rs/llama-cpp-2" }
+llama-cpp-sys-2 = { path = "/Users/bsneed/work/memoryco/llama-cpp-rs/llama-cpp-sys-2" }
 
 [dev-dependencies]
 tempfile = "3.15"

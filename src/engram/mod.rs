@@ -194,6 +194,10 @@ fn default_embedding_model() -> String {
     crate::embedding::default_embedding_model()
 }
 
+// Note: active_model_name, set_active_model, model_from_name, embedding_dimension,
+// is_valid_model have been removed. The embedding model is now hardcoded in
+// generator.rs (appliance mode — nemotron-embed-1b-v2 via llama.cpp).
+
 fn default_rerank_mode() -> String {
     "cross-encoder".to_string()
 }

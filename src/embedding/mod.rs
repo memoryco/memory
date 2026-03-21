@@ -1,17 +1,13 @@
 //! Embedding generation for semantic search
 //!
 //! Provides vector embeddings for engram content, enabling semantic
-//! similarity search beyond keyword matching. The embedding model and
-//! dimensionality are runtime-configurable via the substrate config.
+//! similarity search beyond keyword matching. Uses the hardcoded
+//! Nemotron embedding model via llama.cpp (GGUF).
 
 mod generator;
 pub mod reranker;
 mod similarity;
 
 pub use generator::EmbeddingGenerator;
-#[allow(unused_imports)]
-pub use generator::{
-    active_model_name, default_embedding_model, embedding_dimension, is_valid_model,
-    model_from_name, set_active_model,
-};
+pub use generator::default_embedding_model;
 pub use similarity::cosine_similarity;

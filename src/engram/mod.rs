@@ -125,6 +125,10 @@ pub struct Config {
     #[serde(default = "default_query_expansion_enabled")]
     pub query_expansion_enabled: bool,
 
+    /// How many candidates to send to the LLM reranker stage.
+    /// Tied to [llm] context_length: at 2048 → ~20, at 4096 → 30-40.
+    #[serde(default = "default_llm_rerank_candidates")]
+    pub llm_rerank_candidates: usize,
 
     /// Server-side default minimum similarity score (0.0-1.0).
     /// Used when caller doesn't specify min_score.
@@ -208,6 +212,10 @@ fn default_rerank_candidates() -> usize {
     30
 }
 
+fn default_llm_rerank_candidates() -> usize {
+    20
+}
+
 fn default_hybrid_search_enabled() -> bool {
     true
 }
@@ -281,6 +289,7 @@ impl Default for Config {
             rerank_candidates: 30,
             hybrid_search_enabled: true,
             query_expansion_enabled: true,
+            llm_rerank_candidates: 20,
             search_min_score: 0.3,
             composite_limit_min: 15,
             composite_limit_max: 30,

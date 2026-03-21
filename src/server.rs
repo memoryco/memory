@@ -310,13 +310,28 @@ fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
     }
 }
 
-/// Validate cross-crate config dependencies.
+/// Validate cross-crate config dependencies and degrade gracefully if needed.
 ///
 /// Called after both the LLM service and brain config are loaded, before Brain::open_path().
-/// Currently a no-op — neither "off" nor "cross-encoder" rerank modes require an LLM.
-/// Retained as a hook for future cross-crate validation.
-fn validate_config(_config: &mut crate::engram::Config, _llm: &crate::llm::SharedLlmService) {
-    // No cross-crate dependencies to validate at this time.
+/// Degrades LLM-dependent rerank modes to safe fallbacks when no LLM is available.
+fn validate_config(config: &mut crate::engram::Config, llm: &crate::llm::SharedLlmService) {
+    if !llm.available() {
+        match config.rerank_mode.as_str() {
+            "hybrid" => {
+                eprintln!(
+                    "⚠ rerank_mode=\"hybrid\" requires [llm] but none is available — degrading to \"cross-encoder\""
+                );
+                config.rerank_mode = "cross-encoder".to_string();
+            }
+            "llm" => {
+                eprintln!(
+                    "⚠ rerank_mode=\"llm\" requires [llm] but none is available — degrading to \"off\""
+                );
+                config.rerank_mode = "off".to_string();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Create the MCP server with all tools registered.
@@ -455,10 +470,38 @@ fn build_server() -> Server<Context> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use memoryco_llm::{LlmError, LlmService, LlmTier};
     use std::sync::Arc;
+
+    struct MockLlmAvailable;
+
+    impl LlmService for MockLlmAvailable {
+        fn available(&self) -> bool {
+            true
+        }
+        fn tier(&self) -> LlmTier {
+            LlmTier::Standard
+        }
+        fn model_name(&self) -> &str {
+            "mock"
+        }
+        fn expand_query(&self, _: &str, _: usize) -> Result<Vec<String>, LlmError> {
+            Ok(vec![])
+        }
+        fn generate_training_queries(&self, _: &str, _: usize) -> Result<Vec<String>, LlmError> {
+            Ok(vec![])
+        }
+        fn rerank(&self, _: &str, _: &[&str], _: usize) -> Result<Vec<usize>, LlmError> {
+            Ok(vec![])
+        }
+    }
 
     fn no_llm() -> crate::llm::SharedLlmService {
         Arc::new(crate::llm::NoLlmService)
+    }
+
+    fn available_llm() -> crate::llm::SharedLlmService {
+        Arc::new(MockLlmAvailable)
     }
 
     fn config_with_rerank(mode: &str) -> crate::engram::Config {
@@ -468,16 +511,44 @@ mod tests {
     }
 
     #[test]
-    fn validate_config_preserves_cross_encoder() {
+    fn hybrid_degrades_to_cross_encoder_when_no_llm() {
+        let mut config = config_with_rerank("hybrid");
+        validate_config(&mut config, &no_llm());
+        assert_eq!(config.rerank_mode, "cross-encoder");
+    }
+
+    #[test]
+    fn llm_mode_degrades_to_off_when_no_llm() {
+        let mut config = config_with_rerank("llm");
+        validate_config(&mut config, &no_llm());
+        assert_eq!(config.rerank_mode, "off");
+    }
+
+    #[test]
+    fn cross_encoder_unchanged_when_no_llm() {
         let mut config = config_with_rerank("cross-encoder");
         validate_config(&mut config, &no_llm());
         assert_eq!(config.rerank_mode, "cross-encoder");
     }
 
     #[test]
-    fn validate_config_preserves_off() {
+    fn off_unchanged_when_no_llm() {
         let mut config = config_with_rerank("off");
         validate_config(&mut config, &no_llm());
         assert_eq!(config.rerank_mode, "off");
+    }
+
+    #[test]
+    fn hybrid_unchanged_when_llm_available() {
+        let mut config = config_with_rerank("hybrid");
+        validate_config(&mut config, &available_llm());
+        assert_eq!(config.rerank_mode, "hybrid");
+    }
+
+    #[test]
+    fn llm_mode_unchanged_when_llm_available() {
+        let mut config = config_with_rerank("llm");
+        validate_config(&mut config, &available_llm());
+        assert_eq!(config.rerank_mode, "llm");
     }
 }

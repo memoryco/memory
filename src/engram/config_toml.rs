@@ -113,6 +113,7 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         rerank_candidates: get_usize!(rerank_candidates),
         hybrid_search_enabled: get_bool!(hybrid_search_enabled),
         query_expansion_enabled: get_bool!(query_expansion_enabled),
+        llm_rerank_candidates: get_usize!(llm_rerank_candidates),
         search_min_score: get_f64!(search_min_score),
         composite_limit_min: get_usize!(composite_limit_min),
         composite_limit_max: get_usize!(composite_limit_max),
@@ -223,8 +224,10 @@ search_follow_associations = {search_follow_associations}
 # How many hops to follow (1 = direct only, 2 = friends-of-friends).
 search_association_depth = {search_association_depth}
 
-# Reranking mode: "off" or "cross-encoder".
-# cross-encoder uses nemotron-rerank-1b-v2 to re-score candidates by relevance.
+# Reranking mode: "off", "cross-encoder", "llm", or "hybrid" (cross-encoder then LLM).
+# "hybrid" requires [llm] enabled = true — auto-degrades to "cross-encoder" if LLM is off.
+# "llm" requires [llm] enabled = true — auto-degrades to "off" if LLM is off.
+# Tip: switch to "hybrid" when enabling [llm] for best retrieval quality.
 rerank_mode = "{rerank_mode}"
 
 # Candidates to feed to re-ranker (higher = better recall, slower).
@@ -236,6 +239,8 @@ hybrid_search_enabled = {hybrid_search_enabled}
 # Expand queries with variant phrasings before retrieval.
 query_expansion_enabled = {query_expansion_enabled}
 
+# Candidates for LLM rerank stage. Tied to [llm] context_length: at 2048 → ~20, at 4096 → 30-40.
+llm_rerank_candidates = {llm_rerank_candidates}
 
 # Default minimum similarity score (0.0-1.0). Used when caller doesn't specify.
 search_min_score = {search_min_score}
@@ -285,6 +290,7 @@ debug = {debug}
         rerank_candidates = d.rerank_candidates,
         hybrid_search_enabled = d.hybrid_search_enabled,
         query_expansion_enabled = d.query_expansion_enabled,
+        llm_rerank_candidates = d.llm_rerank_candidates,
         search_min_score = d.search_min_score,
         composite_limit_min = d.composite_limit_min,
         composite_limit_max = d.composite_limit_max,
@@ -347,6 +353,7 @@ rerank_mode = "off"
 rerank_candidates = 50
 hybrid_search_enabled = false
 query_expansion_enabled = false
+llm_rerank_candidates = 35
 search_min_score = 0.25
 composite_limit_min = 20
 composite_limit_max = 40
@@ -369,6 +376,7 @@ association_cap_max = 16
         assert_eq!(config.rerank_candidates, 50);
         assert!(!config.hybrid_search_enabled);
         assert!(!config.query_expansion_enabled);
+        assert_eq!(config.llm_rerank_candidates, 35);
         assert!((config.search_min_score - 0.25).abs() < f64::EPSILON);
         assert_eq!(config.composite_limit_min, 20);
         assert_eq!(config.composite_limit_max, 40);
@@ -458,11 +466,11 @@ rerank_mode = "cross-encoder"
         write_config_key(
             dir.path(),
             "rerank_mode",
-            &ConfigValue::Str("off".to_string()),
+            &ConfigValue::Str("llm".to_string()),
         )
         .unwrap();
         let config = load_config_from_toml(dir.path());
-        assert_eq!(config.rerank_mode, "off");
+        assert_eq!(config.rerank_mode, "llm");
     }
 
     #[test]

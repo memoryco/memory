@@ -626,6 +626,10 @@ impl Brain {
                 config.query_expansion_enabled = value != 0.0;
                 true
             }
+            "llm_rerank_candidates" => {
+                config.llm_rerank_candidates = value.clamp(1.0, 100.0) as usize;
+                true
+            }
             "search_min_score" => {
                 config.search_min_score = value.clamp(0.0, 1.0);
                 true

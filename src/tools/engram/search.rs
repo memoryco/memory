@@ -7,6 +7,79 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
+use std::path::{Path, PathBuf};
+
+/// Write a verbose pipeline trace to MEMORY_HOME/logs/<session_id>.log.
+///
+/// Each search query appends to the same session log file, separated by
+/// a timestamp header. Returns the file path on success, None on failure.
+fn write_trace_file(
+    memory_home: &Path,
+    session_id: &str,
+    query: &str,
+    info: &crate::engram::search::DebugInfo,
+) -> Option<PathBuf> {
+    use std::fmt::Write as FmtWrite;
+    use std::io::Write;
+
+    let logs_dir = memory_home.join("logs");
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        eprintln!("[search] failed to create logs dir: {}", e);
+        return None;
+    }
+
+    let log_path = logs_dir.join(format!("{}.log", session_id));
+
+    let mut buf = String::new();
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let _ = writeln!(buf, "\n{}", "=".repeat(80));
+    let _ = writeln!(buf, "SEARCH TRACE  |  {}  |  query: {:?}", timestamp, query);
+    let _ = writeln!(buf, "{}", "=".repeat(80));
+
+    // Summary lines
+    for line in &info.lines {
+        let _ = writeln!(buf, "  {}", line);
+    }
+
+    // Stage snapshots
+    for stage in &info.stages {
+        let _ = writeln!(buf, "\n--- stage: {} ({} candidates) ---", stage.name, stage.entries.len());
+        let _ = writeln!(buf, "{:<4} {:<38} {:>8} {:>8} {:>8}  {}",
+            "#", "ID", "sim", "energy", "blended", "content");
+        let _ = writeln!(buf, "{}", "-".repeat(120));
+        for (i, entry) in stage.entries.iter().enumerate() {
+            let _ = writeln!(buf, "{:<4} {:<38} {:>8.4} {:>8.4} {:>8.4}  {}",
+                i + 1,
+                entry.id,
+                entry.similarity,
+                entry.energy,
+                entry.blended,
+                entry.content_preview,
+            );
+        }
+    }
+
+    let _ = writeln!(buf);
+
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = file.write_all(buf.as_bytes()) {
+                eprintln!("[search] failed to write trace: {}", e);
+                return None;
+            }
+            Some(log_path)
+        }
+        Err(e) => {
+            eprintln!("[search] failed to open trace file: {}", e);
+            None
+        }
+    }
+}
+
 pub struct EngramSearchTool;
 
 #[derive(Deserialize)]
@@ -106,6 +179,7 @@ impl EngramSearchTool {
             composite_limit_max,
             association_cap_min,
             association_cap_max,
+            debug,
         ) = {
             // Phase 0: brief write lock for maintenance + config snapshot.
             // Drop the write lock before expensive embedding generation so enrichment
@@ -130,6 +204,7 @@ impl EngramSearchTool {
                 brain.config().composite_limit_max,
                 brain.config().association_cap_min,
                 brain.config().association_cap_max,
+                brain.config().debug,
             )
         }; // write lock released here
 
@@ -210,6 +285,7 @@ impl EngramSearchTool {
             query_expansion_enabled,
             session_centroid,
             session_context_weight,
+            debug,
         };
 
         let pipeline_result =
@@ -219,6 +295,7 @@ impl EngramSearchTool {
         let scored = pipeline_result.results;
         let chain_hints = pipeline_result.chain_hints;
         let association_merged_count = pipeline_result.association_merged_count;
+        let debug_info = pipeline_result.debug_info;
         let association_discovery_count = pipeline_result.association_discovery_count;
 
         // Save search state for access log (correlated with next recall)
@@ -309,6 +386,28 @@ impl EngramSearchTool {
                  - Search for specific events or actions rather than status or state\n\
                  - Try [person's name] + a related action, event, or feeling\n",
             );
+        }
+
+        // Append debug diagnostics when enabled
+        if let Some(info) = &debug_info {
+            output.push_str("\n--- memoryco debug info ---\n");
+            for line in &info.lines {
+                output.push_str(line);
+                output.push('\n');
+            }
+
+            // Write verbose trace file when stages were collected
+            if !info.stages.is_empty() {
+                let trace_path = write_trace_file(
+                    &context.memory_home,
+                    &args.session_id,
+                    &args.query,
+                    info,
+                );
+                if let Some(path) = trace_path {
+                    output.push_str(&format!("trace: {}\n", path.display()));
+                }
+            }
         }
 
         Ok(text_response(output))

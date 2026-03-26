@@ -123,6 +123,7 @@ pub fn load_config_from_toml(memory_home: &Path) -> Config {
         session_max_queries: get_usize!(session_max_queries),
         session_centroid_smoothing: get_f32!(session_centroid_smoothing),
         session_expire_days: get_usize!(session_expire_days),
+        debug: get_bool!(debug),
         // Runtime state — not stored in TOML
         embedding_model_active: defaults.embedding_model_active,
         // Rarely-changed fields — keep defaults (can be set manually in TOML if needed)
@@ -271,6 +272,10 @@ session_centroid_smoothing = {session_centroid_smoothing}
 
 # Delete sessions not accessed in this many days (0 = never expire).
 session_expire_days = {session_expire_days}
+
+# ── Diagnostics ───────────────────────────────────────────────────────────
+# Include pipeline debug info in search responses.
+debug = {debug}
 "#,
         decay_rate_per_day = d.decay_rate_per_day,
         decay_interval_hours = d.decay_interval_hours,
@@ -295,6 +300,7 @@ session_expire_days = {session_expire_days}
         session_max_queries = d.session_max_queries,
         session_centroid_smoothing = d.session_centroid_smoothing,
         session_expire_days = d.session_expire_days,
+        debug = d.debug,
     )
 }
 
@@ -512,15 +518,15 @@ decay_rate_per_day = 0.15
     }
 
     #[test]
-    fn test_load_rerank_mode_llm() {
+    fn test_load_rerank_mode_off() {
         let dir = temp_home();
         let toml = r#"
 [brain]
-rerank_mode = "llm"
+rerank_mode = "off"
 "#;
         std::fs::write(dir.path().join("config.toml"), toml).unwrap();
         let config = load_config_from_toml(dir.path());
-        assert_eq!(config.rerank_mode, "llm");
+        assert_eq!(config.rerank_mode, "off");
     }
 
     #[test]

@@ -551,11 +551,4 @@ mod tests {
         validate_config(&mut config, &available_llm());
         assert_eq!(config.rerank_mode, "llm");
     }
-
-    #[test]
-    fn cross_encoder_unchanged_when_llm_available() {
-        let mut config = config_with_rerank("cross-encoder");
-        validate_config(&mut config, &available_llm());
-        assert_eq!(config.rerank_mode, "cross-encoder");
-    }
 }

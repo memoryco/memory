@@ -53,7 +53,8 @@ impl Tool<Context> for ConfigGetTool {
              composite_limit_min: {} (minimum result limit for list-style queries)\n\
              composite_limit_max: {} (maximum result limit for list-style queries)\n\
              association_cap_min: {} (minimum association discoveries to merge)\n\
-             association_cap_max: {} (maximum association discoveries to merge)",
+             association_cap_max: {} (maximum association discoveries to merge)\n\
+             debug: {} (include pipeline diagnostics in search responses)",
             config.decay_rate_per_day,
             config.decay_rate_per_day * 100.0,
             config.decay_interval_hours,
@@ -73,7 +74,8 @@ impl Tool<Context> for ConfigGetTool {
             config.composite_limit_min,
             config.composite_limit_max,
             config.association_cap_min,
-            config.association_cap_max
+            config.association_cap_max,
+            config.debug
         );
 
         Ok(text_response(output))

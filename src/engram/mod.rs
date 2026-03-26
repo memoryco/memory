@@ -103,8 +103,8 @@ pub struct Config {
     #[serde(default)]
     pub embedding_model_active: Option<String>,
 
-    /// Reranking mode: "off", "cross-encoder", or "llm".
-    /// off = cosine order only, cross-encoder = BGE cross-encoder, llm = local LLM reranking.
+    /// Reranking mode: "off" or "cross-encoder".
+    /// off = cosine order only, cross-encoder = nemotron reranker.
     #[serde(default = "default_rerank_mode")]
     pub rerank_mode: String,
 
@@ -125,8 +125,8 @@ pub struct Config {
     #[serde(default = "default_query_expansion_enabled")]
     pub query_expansion_enabled: bool,
 
-    /// Maximum candidates fed to the LLM in "llm" rerank mode.
-    /// Separate from rerank_candidates because LLM is context-length constrained.
+    /// How many candidates to send to the LLM reranker stage.
+    /// Tied to [llm] context_length: at 2048 → ~20, at 4096 → 30-40.
     #[serde(default = "default_llm_rerank_candidates")]
     pub llm_rerank_candidates: usize,
 
@@ -168,6 +168,12 @@ pub struct Config {
     /// Delete sessions not accessed in this many days (0 = never expire).
     #[serde(default = "default_session_expire_days")]
     pub session_expire_days: usize,
+
+    // ── Diagnostics ─────────────────────────────────────────────────────
+
+    /// When true, search responses include a debug section with pipeline diagnostics.
+    #[serde(default)]
+    pub debug: bool,
 }
 
 fn default_max_tag_cardinality() -> usize {
@@ -206,16 +212,16 @@ fn default_rerank_candidates() -> usize {
     30
 }
 
+fn default_llm_rerank_candidates() -> usize {
+    20
+}
+
 fn default_hybrid_search_enabled() -> bool {
     true
 }
 
 fn default_query_expansion_enabled() -> bool {
     true
-}
-
-fn default_llm_rerank_candidates() -> usize {
-    20
 }
 
 fn default_search_min_score() -> f64 {
@@ -293,6 +299,7 @@ impl Default for Config {
             session_max_queries: 50,
             session_centroid_smoothing: 0.1,
             session_expire_days: 90,
+            debug: false,
         }
     }
 }
@@ -312,10 +319,10 @@ mod tests {
     #[test]
     fn rerank_mode_serializes_and_deserializes() {
         let mut config = Config::default();
-        config.rerank_mode = "llm".to_string();
+        config.rerank_mode = "off".to_string();
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.rerank_mode, "llm");
+        assert_eq!(loaded.rerank_mode, "off");
     }
 
     #[test]

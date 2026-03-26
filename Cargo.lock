@@ -1108,6 +1108,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "llama-cpp-2"
 version = "0.1.139"
+source = "git+ssh://git@github.com/memoryco/llama-cpp-rs.git?branch=memoryco%2Frerank-support#511414059e65d9f5ce7b045b060048e1684b4184"
 dependencies = [
  "encoding_rs",
  "enumflags2",
@@ -1120,6 +1121,7 @@ dependencies = [
 [[package]]
 name = "llama-cpp-sys-2"
 version = "0.1.139"
+source = "git+ssh://git@github.com/memoryco/llama-cpp-rs.git?branch=memoryco%2Frerank-support#511414059e65d9f5ce7b045b060048e1684b4184"
 dependencies = [
  "bindgen",
  "cc",

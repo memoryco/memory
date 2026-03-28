@@ -347,21 +347,16 @@
 
 .search-bar input::placeholder { color: var(--text-dim); }
 
-.search-clear {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 0.2rem;
-  line-height: 1;
-  display: none;
-  transition: color 0.15s;
-  flex-shrink: 0;
+.search-bar .search-icon {
+  font-size: 1.4rem;
 }
-
-.search-clear:hover { color: var(--text-muted); }
-.search-clear.visible { display: block; }
+.search-icon.clearable {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.search-icon.clearable:hover {
+  color: var(--accent-rose);
+}
 
 .memory-grid {
   display: grid;
@@ -816,9 +811,8 @@
       <div id="memory-tab" class="tab-content">
         <div class="search-bar">
           <div class="search-wrap">
-            <div class="search-icon">⌕</div>
+            <div class="search-icon" id="search-icon" onclick="handleSearchIconClick()">⌕</div>
             <input class="search-input" type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="toggleSearchClear()">
-            <button class="search-clear" id="search-clear" onclick="clearSearch()">&times;</button>
             <button class="btn btn-primary" onclick="searchMemories()">Search</button>
           </div>
         </div>
@@ -850,12 +844,30 @@
   var lastMemoryStats = null; // cache stats so pills render even on search responses
   var memoryOffset = 0;
   var expandedMemoryId = null; // ID of the currently expanded memory card
+  var lastVisualFingerprint = null; // skip re-renders when display hasn't changed
   var lensesData = [];
   var editingLens = null; // name of lens being edited, or '__new__' for new
   var graphLoaded = false;
 
   // ── Helpers ──
   // escapeHtml is provided globally by BASE_JS
+
+  // Build a fingerprint of what the user can actually see.
+  // Ignores sub-percent energy drift that doesn't change the displayed value.
+  function visualFingerprint(data) {
+    var engrams = data.engrams || [];
+    var stats = data.stats;
+    var parts = [];
+    for (var i = 0; i < engrams.length; i++) {
+      var e = engrams[i];
+      parts.push(e.id + ':' + Math.round((e.energy || 0) * 100) + ':' + (e.access_count || 0) + ':' + (e.state || ''));
+    }
+    if (stats) {
+      parts.push('s:' + (stats.total || 0) + ':' + (stats.active || 0) + ':' + (stats.dormant || 0) + ':' + (stats.deep || 0) + ':' + (stats.archived || 0));
+    }
+    parts.push('t:' + (data.total_filtered || 0));
+    return parts.join('|');
+  }
 
   function truncate(str, len) {
     if (!str) return '';
@@ -1177,7 +1189,7 @@
           html += '<div class="ref-title">' + escapeHtml(truncate(ref.title, 80)) + '</div>';
         }
         html += '</div>';
-        html += '<button class="btn btn-danger" onclick="deleteReference(\'' + escapeHtml(ref.name) + '\')">&times;</button>';
+        html += '<button class="btn btn-danger" onclick="deleteReference(\'' + escapeHtml(ref.name) + '\')">DELETE</button>';
         html += '</div>';
       });
       html += '</div>';
@@ -1438,7 +1450,7 @@
         html += '<div class="lens-card' + (isEditing ? ' expanded' : '') + '"' + (!isEditing ? ' onclick="expandLens(\'' + escapeHtml(lens.name) + '\')"' : '') + '>';
         html += '<div class="lens-card-header">';
         html += '<h3>' + escapeHtml(lens.name) + '</h3>';
-        html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteLens(\'' + escapeHtml(lens.name) + '\')">&times;</button>';
+        html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteLens(\'' + escapeHtml(lens.name) + '\')">DELETE</button>';
         html += '</div>';
         if (lens.description) {
           html += '<div class="lens-description">' + escapeHtml(lens.description) + '</div>';
@@ -1703,7 +1715,7 @@
     html += '<span class="energy-dot ' + sc + '"></span>';
     html += (engram.state_emoji || '') + ' ' + stateName(engram.state);
     html += '</div>';
-    html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteEngram(\'' + engram.id + '\')">&times;</button>';
+    html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteEngram(\'' + engram.id + '\')">DELETE</button>';
     html += '</div>';
 
     if (isExpanded) {
@@ -1849,29 +1861,36 @@
   window.filterMemory = function(state) {
     memoryFilter = (memoryFilter === state) ? null : state;
     memoryOffset = 0;
-    memoryData = null; // force re-render (bypass stringify guard)
+    memoryData = null;
+    lastVisualFingerprint = null;
     fetchMemories();
   };
 
   window.searchMemories = function() {
     memoryFilter = null;
     memoryOffset = 0;
-    memoryData = null; // force re-render (bypass stringify guard)
+    memoryData = null;
+    lastVisualFingerprint = null;
     toggleSearchClear();
     fetchMemories();
   };
 
   window.toggleSearchClear = function() {
     var input = document.getElementById('memory-search');
-    var btn = document.getElementById('search-clear');
-    if (btn) btn.classList.toggle('visible', input && input.value.length > 0);
+    var icon = document.getElementById('search-icon');
+    if (!icon) return;
+    var hasText = input && input.value.length > 0;
+    icon.innerHTML = hasText ? '&times;' : '\u2315';
+    icon.classList.toggle('clearable', hasText);
   };
 
-  window.clearSearch = function() {
+  window.handleSearchIconClick = function() {
     var input = document.getElementById('memory-search');
-    if (input) input.value = '';
-    toggleSearchClear();
-    searchMemories();
+    if (input && input.value.length > 0) {
+      input.value = '';
+      toggleSearchClear();
+      searchMemories();
+    }
   };
 
   window.viewInMemory = function(id) {
@@ -1891,6 +1910,7 @@
   window.deleteEngram = function(id) {
     apiFetch('/api/engrams/' + id, { method: 'DELETE' }).then(function() {
       showToast('Memory deleted');
+      lastVisualFingerprint = null;
       fetchMemories();
     }).catch(function(e) {
       showToast(e.message, 'error');
@@ -1911,7 +1931,13 @@
         var newEngrams = data.engrams || [];
         data.engrams = existing.concat(newEngrams);
       }
-      if (!append && JSON.stringify(data) === JSON.stringify(memoryData)) return;
+      // Visual fingerprint: only re-render if what the user sees actually changed.
+      // Raw energy floats drift with decay but often round to the same display value.
+      if (!append) {
+        var fp = visualFingerprint(data);
+        if (fp === lastVisualFingerprint) return;
+        lastVisualFingerprint = fp;
+      }
       memoryData = data;
       renderMemories();
     }).catch(function() {});

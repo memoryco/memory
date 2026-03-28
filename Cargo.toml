@@ -37,9 +37,10 @@ chrono = "0.4"
 whatlang = "0.16"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
 
+
 [patch.crates-io]
-llama-cpp-2 = { git = "ssh://git@github.com/memoryco/llama-cpp-rs.git", branch = "memoryco/rerank-support" }
-llama-cpp-sys-2 = { git = "ssh://git@github.com/memoryco/llama-cpp-rs.git", branch = "memoryco/rerank-support" }
+llama-cpp-2 = { git = "ssh://git@github.com/memoryco/llama-cpp-rs.git", branch = "memoryco/main" }
+llama-cpp-sys-2 = { git = "ssh://git@github.com/memoryco/llama-cpp-rs.git", branch = "memoryco/main" }
 
 [dev-dependencies]
 tempfile = "3.15"

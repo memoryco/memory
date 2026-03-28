@@ -133,6 +133,23 @@ impl EmbeddingGenerator {
         );
 
         *guard = Some(service);
+
+        // Register atexit handler to free Metal/CUDA resources before C++
+        // static destructors fire. Rust never drops statics, so without this
+        // the Metal device finalizer asserts on leaked resource sets.
+        //
+        // atexit handlers and C++ destructors share a LIFO queue. Since we
+        // register AFTER the Metal device is constructed (during model load),
+        // our handler fires BEFORE the Metal device destructor on exit.
+        static ATEXIT_REGISTERED: std::sync::Once = std::sync::Once::new();
+        ATEXIT_REGISTERED.call_once(|| {
+            extern "C" fn cleanup() {
+                EmbeddingGenerator::shutdown();
+            }
+            unsafe extern "C" { fn atexit(f: extern "C" fn()) -> std::ffi::c_int; }
+            unsafe { atexit(cleanup) };
+        });
+
         Ok(())
     }
 }
@@ -140,9 +157,8 @@ impl EmbeddingGenerator {
 impl EmbeddingGenerator {
     /// Explicitly release the global embedding model.
     ///
-    /// Must be called before process exit to free Metal/CUDA GPU resources
-    /// before C++ static destructors fire. Rust does not drop statics, so
-    /// without this the Metal device finalizer asserts on leaked resource sets.
+    /// Frees Metal/CUDA GPU resources. Called automatically via atexit,
+    /// but can also be called manually before process::exit().
     pub fn shutdown() {
         if let Ok(mut guard) = EMBED_SERVICE.lock() {
             *guard = None;

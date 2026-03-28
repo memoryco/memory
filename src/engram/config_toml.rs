@@ -224,10 +224,8 @@ search_follow_associations = {search_follow_associations}
 # How many hops to follow (1 = direct only, 2 = friends-of-friends).
 search_association_depth = {search_association_depth}
 
-# Reranking mode: "off", "cross-encoder", "llm", or "hybrid" (cross-encoder then LLM).
-# "hybrid" requires [llm] enabled = true — auto-degrades to "cross-encoder" if LLM is off.
+# Reranking mode: "off" or "llm".
 # "llm" requires [llm] enabled = true — auto-degrades to "off" if LLM is off.
-# Tip: switch to "hybrid" when enabling [llm] for best retrieval quality.
 rerank_mode = "{rerank_mode}"
 
 # Candidates to feed to re-ranker (higher = better recall, slower).
@@ -530,7 +528,7 @@ rerank_mode = "off"
     }
 
     #[test]
-    fn test_missing_rerank_mode_defaults_to_cross_encoder() {
+    fn test_missing_rerank_mode_defaults_to_llm() {
         let dir = temp_home();
         // No rerank_mode in TOML
         let toml = r#"
@@ -539,6 +537,6 @@ decay_rate_per_day = 0.05
 "#;
         std::fs::write(dir.path().join("config.toml"), toml).unwrap();
         let config = load_config_from_toml(dir.path());
-        assert_eq!(config.rerank_mode, "cross-encoder");
+        assert_eq!(config.rerank_mode, "llm");
     }
 }

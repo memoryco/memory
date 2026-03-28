@@ -2062,7 +2062,7 @@ mod tests {
     #[test]
     fn config_defaults_rerank_mode() {
         let config = Config::default();
-        assert_eq!(config.rerank_mode, "cross-encoder");
+        assert_eq!(config.rerank_mode, "llm");
         assert_eq!(config.rerank_candidates, 30);
     }
 
@@ -2071,8 +2071,8 @@ mod tests {
         let storage = MemoryStorage::new();
         let mut brain = Brain::new(storage, Config::default()).unwrap();
 
-        // Default: cross-encoder mode with 30 candidates
-        assert_eq!(brain.config().rerank_mode, "cross-encoder");
+        // Default: llm mode with 30 candidates
+        assert_eq!(brain.config().rerank_mode, "llm");
         assert_eq!(brain.config().rerank_candidates, 30);
 
         // rerank_mode is a string — configure() returns false for it (handled via set_config)
@@ -2108,7 +2108,7 @@ mod tests {
         }"#;
 
         let config: Config = serde_json::from_str(old_json).unwrap();
-        assert_eq!(config.rerank_mode, "cross-encoder", "rerank should default to cross-encoder");
+        assert_eq!(config.rerank_mode, "llm", "rerank should default to llm");
         assert_eq!(
             config.rerank_candidates, 30,
             "rerank_candidates should default to 30"

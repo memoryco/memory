@@ -82,9 +82,9 @@ impl Tool<Context> for ConfigSetTool {
                 McpError::InvalidParams("rerank_mode value must be a string".to_string())
             })?;
 
-            if !matches!(mode, "off" | "cross-encoder" | "llm" | "hybrid") {
+            if !matches!(mode, "off" | "llm") {
                 return Ok(text_response(format!(
-                    "Invalid rerank_mode: {}. Must be one of: off, cross-encoder, llm, hybrid",
+                    "Invalid rerank_mode: {}. Must be one of: off, llm",
                     mode
                 )));
             }

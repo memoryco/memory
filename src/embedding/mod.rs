@@ -5,7 +5,6 @@
 //! Nemotron embedding model via llama.cpp (GGUF).
 
 mod generator;
-pub mod reranker;
 mod similarity;
 
 pub use generator::EmbeddingGenerator;

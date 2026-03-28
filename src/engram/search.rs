@@ -281,7 +281,7 @@ pub struct SearchPipelineParams {
     pub follow_associations: bool,
     /// Config: how many hops to follow for associations.
     pub association_depth: u8,
-    /// Config: reranking mode ("off", "cross-encoder", "llm", "hybrid").
+    /// Config: reranking mode ("off" or "llm").
     pub rerank_mode: String,
     /// Config: use hybrid BM25+vector search?
     pub hybrid_search_enabled: bool,
@@ -635,7 +635,7 @@ pub fn run_search_pipeline(
     dbg_push!("retrieval: {} candidates after cosine scoring + state/date filtering", scored.len());
     dbg_snapshot!("retrieval", scored);
 
-    // Re-ranking: cross-encoder, LLM, hybrid, or off.
+    // Re-ranking: LLM or off.
     // Falls back silently to cosine results if reranking fails.
     match params.rerank_mode.as_str() {
         "llm" => {
@@ -683,142 +683,6 @@ pub fn run_search_pipeline(
             } else if !scored.is_empty() {
                 eprintln!("[search] LLM reranking requested but LLM not available, using cosine order");
                 dbg_push!("llm-rerank: skipped (LLM not available)");
-            }
-        }
-        "hybrid" => {
-            // Stage 1: cross-encoder narrows candidates
-            if !scored.is_empty() {
-                let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
-                let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-                let candidate_count = contents.len();
-
-                let rerank_start = std::time::Instant::now();
-                match crate::embedding::reranker::rerank(&params.query, &content_refs) {
-                    Ok(reranked) => {
-                        let rerank_ms = rerank_start.elapsed().as_millis();
-                        let mut reranked_results = Vec::with_capacity(reranked.len());
-                        for rs in &reranked {
-                            if rs.index < scored.len() {
-                                let orig = &scored[rs.index];
-                                reranked_results.push(ScoredResult {
-                                    id: orig.id,
-                                    content: orig.content.clone(),
-                                    created_at: orig.created_at,
-                                    similarity: orig.similarity,
-                                    energy: orig.energy,
-                                    blended: rs.score,
-                                    state_emoji: orig.state_emoji,
-                                });
-                            }
-                        }
-                        scored = reranked_results;
-                        eprintln!(
-                            "[search] hybrid stage 1: cross-encoder re-ranked {} candidates in {}ms",
-                            candidate_count, rerank_ms
-                        );
-                        dbg_push!(
-                            "hybrid/cross-encoder: re-ranked {} candidates in {}ms",
-                            candidate_count, rerank_ms
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[search] hybrid stage 1 failed, skipping to LLM: {}", e);
-                        dbg_push!("hybrid/cross-encoder: FAILED ({})", e);
-                    }
-                }
-            }
-            // Stage 2: LLM reorders the top N
-            if !scored.is_empty() && llm.available() && llm.tier() >= LlmTier::Minimal {
-                let cap = params.llm_rerank_candidates.min(scored.len());
-                let contents: Vec<String> = scored[..cap].iter().map(|r| r.content.clone()).collect();
-                let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-
-                let rerank_start = std::time::Instant::now();
-                match llm.rerank(&params.query, &content_refs, params.effective_limit) {
-                    Ok(indices) => {
-                        let rerank_ms = rerank_start.elapsed().as_millis();
-                        let mut reranked_results = Vec::with_capacity(indices.len());
-                        for (rank, &idx) in indices.iter().enumerate() {
-                            if idx < cap {
-                                let orig = &scored[idx];
-                                reranked_results.push(ScoredResult {
-                                    id: orig.id,
-                                    content: orig.content.clone(),
-                                    created_at: orig.created_at,
-                                    similarity: orig.similarity,
-                                    energy: orig.energy,
-                                    blended: 1.0 - (rank as f32 * 0.05),
-                                    state_emoji: orig.state_emoji,
-                                });
-                            }
-                        }
-                        if !reranked_results.is_empty() {
-                            scored = reranked_results;
-                            eprintln!(
-                                "[search] hybrid stage 2: LLM re-ranked {} candidates, selected {} in {}ms",
-                                cap, scored.len(), rerank_ms
-                            );
-                            dbg_push!(
-                                "hybrid/llm: re-ranked {} candidates, selected {} in {}ms",
-                                cap, scored.len(), rerank_ms
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[search] hybrid stage 2 LLM reranking failed: {}", e);
-                        dbg_push!("hybrid/llm: FAILED ({}), kept cross-encoder order", e);
-                    }
-                }
-            } else if !scored.is_empty() && !(llm.available() && llm.tier() >= LlmTier::Minimal) {
-                eprintln!("[search] hybrid stage 2: LLM not available, keeping cross-encoder order");
-                dbg_push!("hybrid/llm: skipped (LLM not available)");
-            }
-        }
-        "cross-encoder" => {
-            if !scored.is_empty() {
-                let contents: Vec<String> = scored.iter().map(|r| r.content.clone()).collect();
-                let content_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-                let candidate_count = contents.len();
-                let pre_order: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
-
-                let rerank_start = std::time::Instant::now();
-                match crate::embedding::reranker::rerank(&params.query, &content_refs) {
-                    Ok(reranked) => {
-                        let rerank_ms = rerank_start.elapsed().as_millis();
-                        let mut reranked_results = Vec::with_capacity(reranked.len());
-                        for rs in &reranked {
-                            if rs.index < scored.len() {
-                                let orig = &scored[rs.index];
-                                reranked_results.push(ScoredResult {
-                                    id: orig.id,
-                                    content: orig.content.clone(),
-                                    created_at: orig.created_at,
-                                    similarity: orig.similarity,
-                                    energy: orig.energy,
-                                    blended: rs.score,
-                                    state_emoji: orig.state_emoji,
-                                });
-                            }
-                        }
-                        let post_order: Vec<uuid::Uuid> = reranked_results.iter().map(|r| r.id).collect();
-                        let order_changed = pre_order != post_order;
-                        let score_min = reranked.last().map(|r| r.score).unwrap_or(0.0);
-                        let score_max = reranked.first().map(|r| r.score).unwrap_or(0.0);
-                        scored = reranked_results;
-                        eprintln!(
-                            "[search] re-ranked {} candidates with cross-encoder",
-                            candidate_count
-                        );
-                        dbg_push!(
-                            "cross-encoder: re-ranked {} candidates in {}ms (scores: {:.4}..{:.4}, order_changed: {})",
-                            candidate_count, rerank_ms, score_min, score_max, order_changed
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[search] reranking failed, falling back to cosine: {}", e);
-                        dbg_push!("cross-encoder: FAILED ({}), fell back to cosine", e);
-                    }
-                }
             }
         }
         _ => {

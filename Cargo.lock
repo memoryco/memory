@@ -2755,3 +2755,13 @@ name = "zmij"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
+
+[[patch.unused]]
+name = "llama-cpp-2"
+version = "0.1.141"
+source = "git+ssh://git@github.com/memoryco/llama-cpp-rs.git?branch=memoryco%2Fmain#bcd93724e0838b3067ac2941d16faca53fd9c6d5"
+
+[[patch.unused]]
+name = "llama-cpp-sys-2"
+version = "0.1.141"
+source = "git+ssh://git@github.com/memoryco/llama-cpp-rs.git?branch=memoryco%2Fmain#bcd93724e0838b3067ac2941d16faca53fd9c6d5"

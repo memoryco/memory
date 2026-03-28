@@ -275,24 +275,13 @@ fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
 /// Validate cross-crate config dependencies and degrade gracefully if needed.
 ///
 /// Called after both the LLM service and brain config are loaded, before Brain::open_path().
-/// Degrades LLM-dependent rerank modes to safe fallbacks when no LLM is available.
+/// Degrades LLM-dependent rerank mode to safe fallback when no LLM is available.
 fn validate_config(config: &mut crate::engram::Config, llm: &crate::llm::SharedLlmService) {
-    if !llm.available() {
-        match config.rerank_mode.as_str() {
-            "hybrid" => {
-                eprintln!(
-                    "⚠ rerank_mode=\"hybrid\" requires [llm] but none is available — degrading to \"cross-encoder\""
-                );
-                config.rerank_mode = "cross-encoder".to_string();
-            }
-            "llm" => {
-                eprintln!(
-                    "⚠ rerank_mode=\"llm\" requires [llm] but none is available — degrading to \"off\""
-                );
-                config.rerank_mode = "off".to_string();
-            }
-            _ => {}
-        }
+    if !llm.available() && config.rerank_mode == "llm" {
+        eprintln!(
+            "⚠ rerank_mode=\"llm\" requires [llm] but none is available — degrading to \"off\""
+        );
+        config.rerank_mode = "off".to_string();
     }
 }
 
@@ -473,13 +462,6 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_degrades_to_cross_encoder_when_no_llm() {
-        let mut config = config_with_rerank("hybrid");
-        validate_config(&mut config, &no_llm());
-        assert_eq!(config.rerank_mode, "cross-encoder");
-    }
-
-    #[test]
     fn llm_mode_degrades_to_off_when_no_llm() {
         let mut config = config_with_rerank("llm");
         validate_config(&mut config, &no_llm());
@@ -487,24 +469,10 @@ mod tests {
     }
 
     #[test]
-    fn cross_encoder_unchanged_when_no_llm() {
-        let mut config = config_with_rerank("cross-encoder");
-        validate_config(&mut config, &no_llm());
-        assert_eq!(config.rerank_mode, "cross-encoder");
-    }
-
-    #[test]
     fn off_unchanged_when_no_llm() {
         let mut config = config_with_rerank("off");
         validate_config(&mut config, &no_llm());
         assert_eq!(config.rerank_mode, "off");
-    }
-
-    #[test]
-    fn hybrid_unchanged_when_llm_available() {
-        let mut config = config_with_rerank("hybrid");
-        validate_config(&mut config, &available_llm());
-        assert_eq!(config.rerank_mode, "hybrid");
     }
 
     #[test]

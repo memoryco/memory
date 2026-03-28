@@ -102,8 +102,8 @@ pub struct Config {
     #[serde(default)]
     pub embedding_model_active: Option<String>,
 
-    /// Reranking mode: "off" or "cross-encoder".
-    /// off = cosine order only, cross-encoder = nemotron reranker.
+    /// Reranking mode: "off" or "llm".
+    /// off = cosine order only, llm = generative model reranks top candidates.
     #[serde(default = "default_rerank_mode")]
     pub rerank_mode: String,
 
@@ -204,7 +204,7 @@ fn default_embedding_model() -> String {
 // generator.rs (appliance mode — nemotron-embed-1b-v2 via llama.cpp).
 
 fn default_rerank_mode() -> String {
-    "cross-encoder".to_string()
+    "llm".to_string()
 }
 
 fn default_rerank_candidates() -> usize {
@@ -325,8 +325,8 @@ mod tests {
     }
 
     #[test]
-    fn rerank_mode_defaults_to_cross_encoder_when_missing() {
-        // Old configs missing rerank_mode should default to "cross-encoder"
+    fn rerank_mode_defaults_to_llm_when_missing() {
+        // Old configs missing rerank_mode should default to "llm"
         let json = r#"{
             "decay_rate_per_day": 0.05,
             "decay_interval_hours": 1.0,
@@ -341,6 +341,6 @@ mod tests {
             "search_association_depth": 1
         }"#;
         let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.rerank_mode, "cross-encoder");
+        assert_eq!(config.rerank_mode, "llm");
     }
 }

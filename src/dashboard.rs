@@ -141,6 +141,9 @@ fn route(method: &str, url: &str, mut request: tiny_http::Request, state: &Arc<D
         // Graph
         ("GET", "/api/graph") => handle_graph(query, state),
 
+        // Dynamic GET routes
+        _ if method == "GET" => route_get(path, state),
+
         // Dynamic POST routes
         _ if method == "POST" => route_post(path, state),
 
@@ -183,6 +186,19 @@ fn route_delete(
         ["api", "references", name] => handle_delete_reference(name, state),
         // DELETE /api/lenses/:name
         ["api", "lenses", name] => handle_delete_lens(name, state),
+        _ => json_response(404, r#"{"error":"Not found"}"#),
+    }
+}
+
+fn route_get(
+    path: &str,
+    state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+    match segments.as_slice() {
+        // GET /api/engrams/:id/associations
+        ["api", "engrams", id, "associations"] => handle_engram_associations(id, state),
         _ => json_response(404, r#"{"error":"Not found"}"#),
     }
 }
@@ -237,8 +253,8 @@ fn cors_headers_header() -> tiny_http::Header {
         .unwrap()
 }
 
-/// Parse query string parameters into key=value pairs.
-fn parse_query(query: &str) -> Vec<(&str, &str)> {
+/// Parse query string parameters into key=value pairs, URL-decoding values.
+fn parse_query(query: &str) -> Vec<(String, String)> {
     query
         .split('&')
         .filter(|s| !s.is_empty())
@@ -246,13 +262,13 @@ fn parse_query(query: &str) -> Vec<(&str, &str)> {
             let mut parts = pair.splitn(2, '=');
             let key = parts.next()?;
             let value = parts.next().unwrap_or("");
-            Some((key, value))
+            Some((key.to_string(), url_decode(value)))
         })
         .collect()
 }
 
-fn query_param<'a>(params: &[(&'a str, &'a str)], key: &str) -> Option<&'a str> {
-    params.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+fn query_param<'a>(params: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    params.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
 }
 
 /// Read the full request body as a string.
@@ -833,11 +849,33 @@ fn handle_list_engrams(
         }
 
         // Try semantic search first
+        let (min_score_config, hybrid_enabled) = {
+            let config = brain.config();
+            (config.search_min_score, config.hybrid_search_enabled)
+        };
+        // Dashboard floor: higher than MCP pipeline since we lack LLM reranking to filter noise
+        let min_score = (min_score_config as f32).max(0.5);
+
         let embedding_gen = crate::embedding::EmbeddingGenerator::new();
         match embedding_gen.generate(q) {
             Ok(query_embedding) => {
-                match brain.find_similar_by_embedding(&query_embedding, limit, 0.3) {
-                    Ok(results) => {
+                match brain.find_similar_by_embedding(&query_embedding, limit, min_score) {
+                    Ok(vector_results) => {
+                        // If hybrid search is enabled, merge with BM25
+                        let results = if hybrid_enabled {
+                            let bm25_results = brain.keyword_search(q, limit).unwrap_or_default();
+                            if bm25_results.is_empty() {
+                                vector_results
+                            } else {
+                                use crate::engram::storage::rrf;
+                                rrf::reciprocal_rank_fusion(
+                                    &[&vector_results, &bm25_results],
+                                    rrf::DEFAULT_K,
+                                )
+                            }
+                        } else {
+                            vector_results
+                        };
                         let engrams: Vec<JsonValue> = results
                             .iter()
                             .filter_map(|r| {
@@ -1007,6 +1045,42 @@ fn handle_delete_engram(
         Ok(false) => json_response(404, &format!(r#"{{"error":"Engram '{}' not found"}}"#, id)),
         Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
     }
+}
+
+fn handle_engram_associations(
+    id: &str,
+    state: &Arc<DashboardState>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let engram_id = match uuid::Uuid::parse_str(id) {
+        Ok(id) => id,
+        Err(e) => return json_response(400, &format!(r#"{{"error":"Invalid UUID: {}"}}"#, e)),
+    };
+
+    let mut brain = state.brain.write().unwrap();
+    let _ = brain.sync_from_storage();
+
+    let all_assocs = brain.all_associations();
+    let related: Vec<JsonValue> = all_assocs
+        .iter()
+        .filter(|a| a.from == engram_id || a.to == engram_id)
+        .filter_map(|a| {
+            let other_id = if a.from == engram_id { a.to } else { a.from };
+            let direction = if a.from == engram_id { "outbound" } else { "inbound" };
+            brain.get(&other_id).map(|e| {
+                json!({
+                    "id": other_id.to_string(),
+                    "content": e.content.clone(),
+                    "direction": direction,
+                    "weight": a.weight,
+                    "energy": e.energy,
+                    "state": format!("{:?}", e.state),
+                    "state_emoji": e.state.emoji(),
+                })
+            })
+        })
+        .collect();
+
+    json_ok(&json!({ "associations": related }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1637,6 +1711,13 @@ mod tests {
     fn parse_query_no_value() {
         let params = parse_query("key=");
         assert_eq!(query_param(&params, "key"), Some(""));
+    }
+
+    #[test]
+    fn parse_query_url_encoded() {
+        let params = parse_query("q=hello%20world&limit=10");
+        assert_eq!(query_param(&params, "q"), Some("hello world"));
+        assert_eq!(query_param(&params, "limit"), Some("10"));
     }
 
     // ── URL decoding ───────────────────────────────────────────────────────

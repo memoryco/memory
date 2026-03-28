@@ -332,30 +332,22 @@
 
 .search-bar .search-wrap {
   flex: 1;
-  position: relative;
 }
 
 .search-bar input {
   width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.6rem 2rem 0.6rem 1rem;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.85rem;
-  color: var(--text);
+  background: none;
+  border: none;
   outline: none;
-  transition: border-color 0.15s;
+  padding: 0;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  color: var(--text);
 }
 
-.search-bar input:focus { border-color: var(--accent-blue); }
 .search-bar input::placeholder { color: var(--text-dim); }
 
 .search-clear {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
   background: none;
   border: none;
   color: var(--text-dim);
@@ -365,6 +357,7 @@
   line-height: 1;
   display: none;
   transition: color 0.15s;
+  flex-shrink: 0;
 }
 
 .search-clear:hover { color: var(--text-muted); }
@@ -438,6 +431,141 @@
   padding-top: 0.6rem;
 }
 
+.memory-card {
+  cursor: pointer;
+}
+
+.memory-card.expanded {
+  grid-column: 1 / -1;
+  cursor: default;
+  border-color: var(--accent-blue);
+  background: var(--surface-raised);
+}
+
+.memory-card.expanded:hover {
+  border-color: var(--accent-blue);
+}
+
+.memory-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.memory-detail-full-content {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+
+.memory-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.4rem 1rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-bottom: 1rem;
+}
+
+.memory-detail-meta-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.memory-detail-meta-label {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.memory-detail-meta-value {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-detail-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--accent-blue);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.memory-detail-id:hover {
+  color: var(--text);
+}
+
+.memory-detail-section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.5rem;
+}
+
+.memory-associations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.assoc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 0.75rem;
+}
+
+.assoc-item:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.assoc-arrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--accent-blue);
+  flex-shrink: 0;
+}
+
+.assoc-content {
+  flex: 1;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assoc-weight {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    GRAPH TAB
@@ -688,10 +816,11 @@
       <div id="memory-tab" class="tab-content">
         <div class="search-bar">
           <div class="search-wrap">
-            <input type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="toggleSearchClear()">
+            <div class="search-icon">⌕</div>
+            <input class="search-input" type="text" id="memory-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')searchMemories()" oninput="toggleSearchClear()">
             <button class="search-clear" id="search-clear" onclick="clearSearch()">&times;</button>
+            <button class="btn btn-primary" onclick="searchMemories()">Search</button>
           </div>
-          <button class="btn btn-primary" onclick="searchMemories()">Search</button>
         </div>
         <div class="toolbar" id="memory-toolbar"></div>
         <div id="memory-content"></div>
@@ -720,6 +849,7 @@
   var memoryFilter = null; // null = show all, or 'Active', 'Dormant', 'Deep', 'Archived'
   var lastMemoryStats = null; // cache stats so pills render even on search responses
   var memoryOffset = 0;
+  var expandedMemoryId = null; // ID of the currently expanded memory card
   var lensesData = [];
   var editingLens = null; // name of lens being edited, or '__new__' for new
   var graphLoaded = false;
@@ -1531,26 +1661,95 @@
     return Math.round((energy || 0) * 100);
   }
 
+  function formatDate(iso) {
+    if (!iso) return '—';
+    try {
+      var d = new Date(iso);
+      var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+      return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) +
+             ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ' UTC';
+    } catch(e) { return iso; }
+  }
+
+  function loadAssociations(engramId, container) {
+    container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">Loading...</div>';
+    apiFetch('/api/engrams/' + engramId + '/associations').then(function(data) {
+      var assocs = data.associations || [];
+      if (assocs.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">No associations</div>';
+        return;
+      }
+      var html = '';
+      assocs.forEach(function(a) {
+        var arrow = a.direction === 'outbound' ? '→' : '←';
+        html += '<div class="assoc-item" onclick="event.stopPropagation(); viewInMemory(\'' + escapeHtml(a.id) + '\')">';
+        html += '<span class="assoc-arrow">' + arrow + '</span>';
+        html += '<span class="assoc-content">' + escapeHtml(truncate(a.content, 80)) + '</span>';
+        html += '<span class="assoc-weight">w:' + a.weight.toFixed(2) + '</span>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }).catch(function() {
+      container.innerHTML = '<div style="color:var(--accent-rose);font-size:0.75rem;">Failed to load associations</div>';
+    });
+  }
+
   function renderMemory(engram) {
     var sc = stateClass(engram.state);
-    var html = '<div class="memory-card fade-in">';
+    var isExpanded = expandedMemoryId === engram.id;
+    var html = '<div class="memory-card fade-in' + (isExpanded ? ' expanded' : '') + '" onclick="toggleMemoryDetail(\'' + engram.id + '\')">';
     html += '<div class="memory-card-header">';
     html += '<div class="memory-state">';
     html += '<span class="energy-dot ' + sc + '"></span>';
     html += (engram.state_emoji || '') + ' ' + stateName(engram.state);
     html += '</div>';
-    html += '<button class="btn btn-danger" onclick="deleteEngram(\'' + engram.id + '\')">&times;</button>';
+    html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteEngram(\'' + engram.id + '\')">&times;</button>';
     html += '</div>';
 
-    html += '<div class="memory-content">' + escapeHtml(truncate(engram.content, 200)) + '</div>';
-    html += '<div class="memory-meta">';
-    html += '<span>energy: ' + energyPercent(engram.energy) + '%</span>';
-    html += '<span>accessed: ' + (engram.access_count || 0) + 'x</span>';
-    if (engram.score != null) html += '<span>score: ' + engram.score.toFixed(2) + '</span>';
-    html += '</div>';
+    if (isExpanded) {
+      html += '<div class="memory-detail">';
+      html += '<div class="memory-detail-full-content">' + escapeHtml(engram.content) + '</div>';
+
+      html += '<div class="memory-detail-meta">';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">id:</span><span class="memory-detail-id" onclick="event.stopPropagation(); navigator.clipboard.writeText(\'' + escapeHtml(engram.id) + '\').then(function(){showToast(\'ID copied\')})" title="Click to copy">' + escapeHtml(engram.id) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">state:</span><span class="memory-detail-meta-value">' + escapeHtml((engram.state_emoji || '') + ' ' + stateName(engram.state)) + ' — ' + energyPercent(engram.energy) + '%</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">created:</span><span class="memory-detail-meta-value">' + escapeHtml(formatDate(engram.created_at)) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">accessed:</span><span class="memory-detail-meta-value">' + escapeHtml(formatDate(engram.last_accessed)) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">access count:</span><span class="memory-detail-meta-value">' + (engram.access_count || 0) + 'x</span></div>';
+      if (engram.confidence != null) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">confidence:</span><span class="memory-detail-meta-value">' + engram.confidence.toFixed(2) + '</span></div>';
+      if (engram.score != null) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">score:</span><span class="memory-detail-meta-value">' + engram.score.toFixed(2) + '</span></div>';
+      if (engram.tags && engram.tags.length > 0) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">tags:</span><span class="memory-detail-meta-value">' + escapeHtml(engram.tags.join(', ')) + '</span></div>';
+      html += '</div>';
+
+      html += '<div class="memory-detail-section-label">Associations</div>';
+      html += '<div class="memory-associations" id="assoc-' + engram.id + '"><div style="color:var(--text-dim);font-size:0.75rem;">Loading...</div></div>';
+      html += '</div>'; // memory-detail
+    } else {
+      html += '<div class="memory-content">' + escapeHtml(truncate(engram.content, 200)) + '</div>';
+      html += '<div class="memory-meta">';
+      html += '<span>energy: ' + energyPercent(engram.energy) + '%</span>';
+      html += '<span>accessed: ' + (engram.access_count || 0) + 'x</span>';
+      if (engram.score != null) html += '<span>score: ' + engram.score.toFixed(2) + '</span>';
+      html += '</div>';
+    }
+
     html += '</div>';
     return html;
   }
+
+  window.toggleMemoryDetail = function(id) {
+    if (expandedMemoryId === id) {
+      expandedMemoryId = null;
+    } else {
+      expandedMemoryId = id;
+    }
+    renderMemories();
+    // After render, load associations for expanded card
+    if (expandedMemoryId) {
+      var container = document.getElementById('assoc-' + expandedMemoryId);
+      if (container) loadAssociations(expandedMemoryId, container);
+    }
+  };
 
   function renderMemories() {
     var el = document.getElementById('memory-content');
@@ -1597,18 +1796,22 @@
       });
     }
 
-    // Contextual sorting
-    engrams.sort(function(a, b) {
-      if (memoryFilter === 'Dormant' || memoryFilter === 'Deep') {
-        // Sort by energy descending first, then access_count descending
-        if (b.energy !== a.energy) return b.energy - a.energy;
-        return (b.access_count || 0) - (a.access_count || 0);
-      } else {
-        // Active, Archived, or All: sort by access_count descending first, then energy descending
-        if ((b.access_count || 0) !== (a.access_count || 0)) return (b.access_count || 0) - (a.access_count || 0);
-        return b.energy - a.energy;
-      }
-    });
+    // Contextual sorting — skip when a search is active (server already ranked by relevance)
+    var searchInput = document.getElementById('memory-search');
+    var isSearchActive = searchInput && searchInput.value.trim().length > 0;
+    if (!isSearchActive) {
+      engrams.sort(function(a, b) {
+        if (memoryFilter === 'Dormant' || memoryFilter === 'Deep') {
+          // Sort by energy descending first, then access_count descending
+          if (b.energy !== a.energy) return b.energy - a.energy;
+          return (b.access_count || 0) - (a.access_count || 0);
+        } else {
+          // Active, Archived, or All: sort by access_count descending first, then energy descending
+          if ((b.access_count || 0) !== (a.access_count || 0)) return (b.access_count || 0) - (a.access_count || 0);
+          return b.energy - a.energy;
+        }
+      });
+    }
 
     if (engrams.length === 0) {
       var emptyHtml = '<div class="empty-state" style="min-height:30vh"><div class="icon">\u{1F9E0}</div><div class="message">No memories found</div><div class="hint">memories are created through AI conversations</div></div>';
@@ -2055,8 +2258,12 @@
   // Periodic refresh
   setInterval(function() {
     if (activeTab === 'memory') {
-      memoryOffset = 0;
-      fetchMemories();
+      var searchInput = document.getElementById('memory-search');
+      var isSearchActive = searchInput && searchInput.value.trim().length > 0;
+      if (!isSearchActive) {
+        memoryOffset = 0;
+        fetchMemories();
+      }
     }
   }, 30000);
 

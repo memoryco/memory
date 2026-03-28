@@ -22,8 +22,10 @@ Complete these steps for every user message, in order:
 
 5. Respond → Incorporate the context you found
 
-6. Store what you learned → Create new memories incrementally as you discover them
-   Creation is incremental, not end-of-turn. When you accumulate ~3–5 new facts — from reading files, hearing from the user, or reaching conclusions — batch them into an `engram_create` call immediately. This matters for two reasons: if the conversation ends abruptly, unwritten facts are permanently lost; and memories created earlier in the session get wired to memories recalled or created later via session-based association tracking. Late creation misses those connections.
+6. Store what you learned → Call `engram_create` with every new fact from this turn
+   This step is MANDATORY, not optional. If you learned anything new — from the user's message, from reading files, from reaching conclusions — call `engram_create` before finishing your response. Facts you don't store are permanently lost; there is no second chance. Batch multiple atomic memories into a single call using the memories array parameter.
+
+   For long turns with many tool calls, create incrementally: batch ~3–5 facts into an `engram_create` call as you discover them, then continue working. This guards against conversation interruption and ensures earlier memories get wired to later ones via session tracking. But even on short turns, always do a final check: did I learn anything new? If yes, store it.
 </workflow>
 
 <searching_memories>
@@ -113,11 +115,15 @@ Before creating a memory, check:
    - "Project X: API endpoints updated to v2"
    - "Project X: Tests passing at 98% coverage"
 
-## Incremental Creation
+## When to Create
 
-Create memories as you discover them, in batches of ~3–5 facts. This applies especially when reading code, exploring filesystems, or processing multi-step user input where each step reveals new information. The goal is that if the conversation ends at any point, all facts discovered up to that moment are already persisted.
+Call `engram_create` at least once per turn if you learned anything new. This is not optional — skipping creation means permanent information loss.
 
-Use the memories array parameter to batch multiple atomic memories in a single `engram_create` call. Each memory should be independently searchable and understandable.
+On long turns with many tool calls, create incrementally in batches of ~3–5 facts as you discover them. This applies especially when reading code, exploring filesystems, or processing multi-step user input. On short turns, a single `engram_create` call before finishing your response is sufficient.
+
+Self-check before responding: "Did I learn any new facts this turn that aren't already in memory?" If the answer is yes and you haven't called `engram_create`, stop and do it now.
+
+Use the memories array parameter to batch multiple atomic memories in a single call. Each memory should be independently searchable and understandable.
 </creating_memories>
 
 <associations_and_procedures>

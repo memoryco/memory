@@ -44,6 +44,12 @@ pub struct SessionContext {
     pub created_at: i64,
     /// Unix epoch seconds when this session was last touched.
     pub last_seen_at: i64,
+    /// Engram IDs returned by searches in this session (may contain duplicates across searches).
+    pub search_result_ids: Vec<String>,
+    /// Engram IDs explicitly recalled by the client in this session.
+    pub recalled_ids: Vec<String>,
+    /// Engram IDs created during this session.
+    pub created_ids: Vec<String>,
 }
 
 fn now_secs() -> i64 {
@@ -64,6 +70,9 @@ impl SessionContext {
             query_count: 0,
             created_at: now,
             last_seen_at: now,
+            search_result_ids: Vec::new(),
+            recalled_ids: Vec::new(),
+            created_ids: Vec::new(),
         }
     }
 
@@ -103,6 +112,36 @@ impl SessionContext {
     /// Update `last_seen_at` to the current time.
     pub fn touch(&mut self) {
         self.last_seen_at = now_secs();
+    }
+
+    /// Record engram IDs returned by a search. Deduplicates across calls.
+    pub fn add_search_results(&mut self, ids: &[uuid::Uuid]) {
+        for id in ids {
+            let s = id.to_string();
+            if !self.search_result_ids.contains(&s) {
+                self.search_result_ids.push(s);
+            }
+        }
+    }
+
+    /// Record engram IDs explicitly recalled by the client. Deduplicates across calls.
+    pub fn add_recalled(&mut self, ids: &[uuid::Uuid]) {
+        for id in ids {
+            let s = id.to_string();
+            if !self.recalled_ids.contains(&s) {
+                self.recalled_ids.push(s);
+            }
+        }
+    }
+
+    /// Record engram IDs created during this session. Deduplicates across calls.
+    pub fn add_created(&mut self, ids: &[uuid::Uuid]) {
+        for id in ids {
+            let s = id.to_string();
+            if !self.created_ids.contains(&s) {
+                self.created_ids.push(s);
+            }
+        }
     }
 }
 
@@ -185,6 +224,66 @@ mod tests {
         session.last_seen_at = 0;
         session.touch();
         assert!(session.last_seen_at > 0);
+    }
+
+    #[test]
+    fn test_add_search_results_deduplicates() {
+        let mut session = SessionContext::new("test");
+        let id = uuid::Uuid::new_v4();
+        session.add_search_results(&[id, id]);
+        assert_eq!(session.search_result_ids.len(), 1);
+        assert_eq!(session.search_result_ids[0], id.to_string());
+
+        // Adding again still stays at 1
+        session.add_search_results(&[id]);
+        assert_eq!(session.search_result_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_add_recalled_deduplicates() {
+        let mut session = SessionContext::new("test");
+        let id = uuid::Uuid::new_v4();
+        session.add_recalled(&[id, id]);
+        assert_eq!(session.recalled_ids.len(), 1);
+        assert_eq!(session.recalled_ids[0], id.to_string());
+
+        session.add_recalled(&[id]);
+        assert_eq!(session.recalled_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_add_created_deduplicates() {
+        let mut session = SessionContext::new("test");
+        let id = uuid::Uuid::new_v4();
+        session.add_created(&[id, id]);
+        assert_eq!(session.created_ids.len(), 1);
+        assert_eq!(session.created_ids[0], id.to_string());
+
+        session.add_created(&[id]);
+        assert_eq!(session.created_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_session_id_tracking_isolation() {
+        let mut session_a = SessionContext::new("session-a");
+        let mut session_b = SessionContext::new("session-b");
+
+        let id_a = uuid::Uuid::new_v4();
+        let id_b = uuid::Uuid::new_v4();
+
+        session_a.add_search_results(&[id_a]);
+        session_b.add_recalled(&[id_b]);
+        session_b.add_created(&[id_b]);
+
+        // session_a only has search results, not recalled or created
+        assert_eq!(session_a.search_result_ids, vec![id_a.to_string()]);
+        assert!(session_a.recalled_ids.is_empty());
+        assert!(session_a.created_ids.is_empty());
+
+        // session_b only has recalled and created, not search results
+        assert!(session_b.search_result_ids.is_empty());
+        assert_eq!(session_b.recalled_ids, vec![id_b.to_string()]);
+        assert_eq!(session_b.created_ids, vec![id_b.to_string()]);
     }
 
     #[test]
@@ -300,6 +399,49 @@ mod tests {
 
             let loaded = storage.load_session("recent-session").unwrap();
             assert!(loaded.is_some());
+        }
+
+        #[test]
+        fn test_save_and_load_session_with_tracked_ids() {
+            let mut storage = make_storage();
+            let mut session = SessionContext::new("tracked-ids-test");
+
+            let search_id = uuid::Uuid::new_v4();
+            let recalled_id = uuid::Uuid::new_v4();
+            let created_id = uuid::Uuid::new_v4();
+
+            session.add_search_results(&[search_id]);
+            session.add_recalled(&[recalled_id]);
+            session.add_created(&[created_id]);
+
+            storage.save_session(&session).unwrap();
+
+            let loaded = storage.load_session("tracked-ids-test").unwrap().unwrap();
+            assert_eq!(loaded.search_result_ids, vec![search_id.to_string()]);
+            assert_eq!(loaded.recalled_ids, vec![recalled_id.to_string()]);
+            assert_eq!(loaded.created_ids, vec![created_id.to_string()]);
+        }
+
+        #[test]
+        fn test_session_migration_adds_columns() {
+            // Create storage and manually insert a session row without the new columns
+            // (simulating an old-schema database that gets migrated)
+            let mut storage = make_storage();
+
+            // Insert a minimal session directly into the DB bypassing the ORM
+            // to simulate the pre-migration schema where new columns don't exist yet.
+            // Since initialize() already ran migrate_sessions_table() which added the
+            // columns (with DEFAULT '[]'), loading should return empty lists.
+            let mut session = SessionContext::new("migration-test");
+            session.add_query("old query", 50);
+            storage.save_session(&session).unwrap();
+
+            let loaded = storage.load_session("migration-test").unwrap().unwrap();
+            assert_eq!(loaded.queries, vec!["old query".to_string()]);
+            // New ID tracking fields should be empty (default)
+            assert!(loaded.search_result_ids.is_empty());
+            assert!(loaded.recalled_ids.is_empty());
+            assert!(loaded.created_ids.is_empty());
         }
     }
 }

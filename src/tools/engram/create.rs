@@ -98,17 +98,39 @@ impl Tool<Context> for EngramCreateTool {
             }
         } // Lock released here
 
-        // Session accumulation: feed each memory's content into the session context.
-        // Collect any embeddings generated here so we can reuse them for storage
-        // instead of regenerating them in the background thread.
+        // Session accumulation: feed each memory's content into the session context,
+        // track created IDs, and collect precomputed embeddings — all in one load/save.
         let mut precomputed_embeddings: std::collections::HashMap<EngramId, Vec<f32>> =
             std::collections::HashMap::new();
+        {
+            let brain = context.brain.read().unwrap();
+            let config = brain.config();
+            let max_queries = config.session_max_queries;
+            let smoothing = config.session_centroid_smoothing;
 
-        for (id, memory) in created.iter().zip(args.memories.iter()) {
-            if let Some(embedding) =
-                super::accumulate_session_signal(context, &args.session_id, &memory.content)
-            {
-                precomputed_embeddings.insert(id.0, embedding);
+            let mut session = brain
+                .load_session(&args.session_id)
+                .unwrap_or(None)
+                .unwrap_or_else(|| crate::engram::SessionContext::new(&args.session_id));
+
+            session.touch();
+
+            let generator = crate::embedding::EmbeddingGenerator::new();
+
+            for (id, memory) in created.iter().zip(args.memories.iter()) {
+                session.add_query(&memory.content, max_queries);
+                if let Ok(embedding) = generator.generate(&memory.content) {
+                    session.update_centroid(&embedding, smoothing);
+                    precomputed_embeddings.insert(id.0, embedding);
+                }
+            }
+
+            // Track created IDs in the same session save
+            let created_uuids: Vec<uuid::Uuid> = created.iter().map(|(id, _)| *id).collect();
+            session.add_created(&created_uuids);
+
+            if let Err(e) = brain.save_session(&session) {
+                eprintln!("[session] Failed to save session {}: {}", &args.session_id, e);
             }
         }
 

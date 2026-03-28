@@ -27,12 +27,17 @@ pub use stats::EngramStatsTool;
 /// updates the centroid via EMA, and saves. Failures are logged but never
 /// propagated — session context is best-effort.
 ///
+/// Optional ID tracking: pass `search_result_ids` or `created_ids` to record
+/// which engrams were touched in this session, avoiding a separate load/save cycle.
+///
 /// Returns the embedding generated for the text, if successful. Callers can
 /// reuse this embedding (e.g. to store on the engram) to avoid regenerating it.
 pub(crate) fn accumulate_session_signal(
     context: &crate::Context,
     session_id: &str,
     text: &str,
+    search_result_ids: Option<&[uuid::Uuid]>,
+    created_ids: Option<&[uuid::Uuid]>,
 ) -> Option<Vec<f32>> {
     let brain = context.brain.read().unwrap();
     let config = brain.config();
@@ -52,6 +57,13 @@ pub(crate) fn accumulate_session_signal(
 
     if let Some(ref embedding) = generated {
         session.update_centroid(embedding, smoothing);
+    }
+
+    if let Some(ids) = search_result_ids {
+        session.add_search_results(ids);
+    }
+    if let Some(ids) = created_ids {
+        session.add_created(ids);
     }
 
     if let Err(e) = brain.save_session(&session) {

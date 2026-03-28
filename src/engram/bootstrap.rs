@@ -9,12 +9,12 @@ Complete these steps for every user message, in order:
 
 1. Load identity (first message only) → Call `identity_get`
 2. Search for context → Call `engram_search` with keywords from the user's message before responding
-3. Resolve dates if needed → If the question involves when something happened, or any time/duration/sequence reasoning, scan retrieved memories for relative time expressions ("last Saturday", "two weeks ago", etc.) and call `date_resolve` for each one
-4. Respond → Incorporate the context you found
-5. Recall what you used → Call `engram_recall` with IDs of all memories you referenced
-6. Store what you learned → Call `engram_create` for new facts worth preserving
+3. Recall what you'll use → Call `engram_recall` with IDs of memories you will reference. Do this NOW while tool budget is available.
+4. Resolve dates if needed → If the question involves when something happened, or any time/duration/sequence reasoning, scan retrieved memories for relative time expressions ("last Saturday", "two weeks ago", etc.) and call `date_resolve` for each one
+5. Respond → Incorporate the context you found
+6. Store what you learned → Create new memories as you learn new facts
 
-Steps 5 and 6 complete every response. Your response is not finished until recall and storage are done.
+Recall (step 3) happens BEFORE your response, not after. This ensures memory stimulation and Hebbian wiring happen reliably even when tool limits are tight. Creation (step 6) can happen at any point during your turn — as soon as you learn a fact worth preserving, store it. Don't wait until the end if tool budget might run out.
 </workflow>
 
 <creating_memories>
@@ -70,9 +70,11 @@ If results include a 🔗 procedure chain hint, call `engram_associations` on th
 </searching_memories>
 
 <recalling_memories>
-Call `engram_recall` for every memory you used or referenced in your response. This serves two purposes: it strengthens the memory (preventing decay) and builds your associative network through Hebbian learning — memories recalled together form associations automatically.
+Call `engram_recall` IMMEDIATELY after search, BEFORE writing your response. Review the search results, identify which memories you will reference, and recall them right away while tool budget is available.
 
-Pass all relevant IDs in a single call using the ids array parameter.
+This serves two purposes: it strengthens the memory (preventing decay) and builds your associative network through Hebbian learning — memories recalled together form associations automatically.
+
+Pass all relevant IDs in a single call using the ids array parameter. Do NOT defer recall to end of turn — tool limits may prevent it from happening.
 </recalling_memories>
 
 <resolving_dates>

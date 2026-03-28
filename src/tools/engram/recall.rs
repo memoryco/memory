@@ -1,4 +1,4 @@
-//! engram_recall - Actively recall memories and optionally create new ones
+//! engram_recall - Actively recall memories to stimulate energy and Hebbian learning
 
 use crate::engram::EngramId;
 use serde::Deserialize;
@@ -6,25 +6,15 @@ use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::tools::engram::EngramCreateTool;
-use crate::tools::{extract_text, format_engram, text_response};
+use crate::tools::{format_engram, text_response};
 
 pub struct EngramRecallTool;
-
-#[derive(Deserialize)]
-struct MemoryInput {
-    content: String,
-    #[serde(default)]
-    created_at: Option<String>,
-}
 
 #[derive(Deserialize)]
 struct Args {
     ids: Vec<String>,
     #[serde(default)]
     strength: Option<f64>,
-    #[serde(default)]
-    create_memories: Option<Vec<MemoryInput>>,
     /// Session ID for context-aware retrieval
     session_id: String,
 }
@@ -35,11 +25,11 @@ impl Tool<Context> for EngramRecallTool {
     }
 
     fn description(&self) -> &str {
-        "Actively recall memories and optionally create new ones in a single call. \
+        "Recall memories you are referencing in your response. Call this right after \
+         searching, before writing your response \u{2014} while tool budget is available. \
          Stimulates recalled memories (increases energy), triggers Hebbian learning \
-         between them, and can resurrect archived memories. Pass create_memories to also \
-         store new facts in the same call \u{2014} use this at end of turn to handle \
-         both recall and creation in one round trip."
+         between them, and can resurrect archived memories. Use engram_create separately \
+         to store new facts as you learn them."
     }
 
     fn schema(&self) -> JsonValue {
@@ -55,23 +45,6 @@ impl Tool<Context> for EngramRecallTool {
                     "type": "number",
                     "description": "Stimulation strength (0.0-1.0). Default uses config value."
                 },
-                "create_memories": {
-                    "type": "array",
-                    "description": "Optional array of memories to create alongside recall. \
-                        Same format as engram_create. Use this to combine end-of-turn recall \
-                        and storage into a single call.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "content": { "type": "string" },
-                            "created_at": {
-                                "type": "string",
-                                "description": "Optional creation timestamp (ISO 8601 or unix epoch seconds). Defaults to now."
-                            }
-                        },
-                        "required": ["content"]
-                    }
-                },
                 "session_id": {
                     "type": "string",
                     "description": "Session ID for context-aware retrieval."
@@ -85,7 +58,7 @@ impl Tool<Context> for EngramRecallTool {
         &self,
         args: JsonValue,
         context: &mut Context,
-        env: &ToolEnv,
+        _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
@@ -192,41 +165,20 @@ impl Tool<Context> for EngramRecallTool {
                 }
             }
 
+            // Track recalled IDs for server-side Hebbian learning
+            let recalled_uuids: Vec<uuid::Uuid> = args
+                .ids
+                .iter()
+                .filter_map(|id_str| id_str.parse::<crate::engram::EngramId>().ok())
+                .collect();
+            session.add_recalled(&recalled_uuids);
+
             if let Err(e) = brain.save_session(&session) {
                 eprintln!("[session] Failed to save session {}: {}", &args.session_id, e);
             }
         }
 
-        let mut final_output = format!("session_id: {}\n\n{}\n{}", args.session_id, header, output.trim());
-
-        // Phase 2: Create new memories if provided (bounce to EngramCreateTool)
-        if let Some(create_memories) = &args.create_memories {
-            if !create_memories.is_empty() {
-                let create_tool = EngramCreateTool;
-                let memories_json: Vec<JsonValue> = create_memories
-                    .iter()
-                    .map(|m| {
-                        let mut obj = json!({ "content": m.content });
-                        if let Some(ref ts) = m.created_at {
-                            obj["created_at"] = json!(ts);
-                        }
-                        obj
-                    })
-                    .collect();
-
-                let create_args = json!({ "memories": memories_json, "session_id": args.session_id });
-
-                final_output.push_str("\n\n---\n\n");
-                match create_tool.execute(create_args, context, env) {
-                    Ok(result) => {
-                        final_output.push_str(&extract_text(&result));
-                    }
-                    Err(e) => {
-                        final_output.push_str(&format!("Memory creation failed: {}\n", e));
-                    }
-                }
-            }
-        }
+        let final_output = format!("session_id: {}\n\n{}\n{}", args.session_id, header, output.trim());
 
         Ok(text_response(final_output))
     }

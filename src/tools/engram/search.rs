@@ -299,21 +299,22 @@ impl EngramSearchTool {
         let association_discovery_count = pipeline_result.association_discovery_count;
 
         // Save search state for access log (correlated with next recall)
+        let result_ids: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
         {
-            let result_ids: Vec<uuid::Uuid> = scored.iter().map(|r| r.id).collect();
             if let Ok(mut q) = context.last_search_query.lock() {
                 *q = Some(args.query.clone());
             }
             if let Ok(mut r) = context.last_search_result_ids.lock() {
-                *r = result_ids;
+                *r = result_ids.clone();
             }
         }
 
         // Drop read lock before session accumulation (accumulate_session_signal acquires its own read lock)
         drop(brain);
 
-        // Session accumulation: feed the query into the session context
-        super::accumulate_session_signal(context, &args.session_id, &args.query);
+        // Session accumulation: feed the query + search result IDs into the session context
+        let search_ids = if result_ids.is_empty() { None } else { Some(result_ids.as_slice()) };
+        super::accumulate_session_signal(context, &args.session_id, &args.query, search_ids, None);
 
         if scored.is_empty() {
             let mut output = format!(

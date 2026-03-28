@@ -305,17 +305,43 @@ impl EngramStorage {
                 .batch_execute(
                     r#"
                 CREATE TABLE IF NOT EXISTS sessions (
-                    session_id    TEXT PRIMARY KEY,
-                    queries       TEXT NOT NULL DEFAULT '[]',
-                    centroid      BLOB,
-                    query_count   INTEGER NOT NULL DEFAULT 0,
-                    created_at    INTEGER NOT NULL,
-                    last_seen_at  INTEGER NOT NULL
+                    session_id         TEXT PRIMARY KEY,
+                    queries            TEXT NOT NULL DEFAULT '[]',
+                    centroid           BLOB,
+                    query_count        INTEGER NOT NULL DEFAULT 0,
+                    created_at         INTEGER NOT NULL,
+                    last_seen_at       INTEGER NOT NULL,
+                    search_result_ids  TEXT NOT NULL DEFAULT '[]',
+                    recalled_ids       TEXT NOT NULL DEFAULT '[]',
+                    created_ids        TEXT NOT NULL DEFAULT '[]'
                 );
                 CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen_at);
             "#,
                 )
                 .map_err(|e| StorageError::Database(e.to_string()))?;
+        } else {
+            // Table exists — add new columns if missing (upgrade from old schema)
+            let col_check: Result<CountResult, _> = diesel::sql_query(
+                "SELECT COUNT(*) as cnt FROM pragma_table_info('sessions') WHERE name = 'search_result_ids'",
+            )
+            .get_result(&mut self.conn);
+
+            let has_new_columns = match col_check {
+                Ok(r) => r.cnt > 0,
+                Err(_) => false,
+            };
+
+            if !has_new_columns {
+                self.conn
+                    .batch_execute(
+                        r#"
+                    ALTER TABLE sessions ADD COLUMN search_result_ids TEXT NOT NULL DEFAULT '[]';
+                    ALTER TABLE sessions ADD COLUMN recalled_ids TEXT NOT NULL DEFAULT '[]';
+                    ALTER TABLE sessions ADD COLUMN created_ids TEXT NOT NULL DEFAULT '[]';
+                "#,
+                    )
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+            }
         }
 
         Ok(())
@@ -1019,10 +1045,17 @@ impl Storage for EngramStorage {
             created_at: i64,
             #[diesel(sql_type = diesel::sql_types::BigInt)]
             last_seen_at: i64,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            search_result_ids: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            recalled_ids: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            created_ids: String,
         }
 
         let result: Option<SessionRow> = diesel::sql_query(
-            "SELECT session_id, queries, centroid, query_count, created_at, last_seen_at \
+            "SELECT session_id, queries, centroid, query_count, created_at, last_seen_at, \
+             search_result_ids, recalled_ids, created_ids \
              FROM sessions WHERE session_id = ?1",
         )
         .bind::<diesel::sql_types::Text, _>(session_id)
@@ -1036,6 +1069,12 @@ impl Storage for EngramStorage {
                 let queries: Vec<String> =
                     serde_json::from_str(&row.queries).unwrap_or_default();
                 let centroid = row.centroid.as_deref().and_then(bytes_to_embedding);
+                let search_result_ids: Vec<String> =
+                    serde_json::from_str(&row.search_result_ids).unwrap_or_default();
+                let recalled_ids: Vec<String> =
+                    serde_json::from_str(&row.recalled_ids).unwrap_or_default();
+                let created_ids: Vec<String> =
+                    serde_json::from_str(&row.created_ids).unwrap_or_default();
                 Ok(Some(SessionContext {
                     session_id: row.session_id,
                     queries,
@@ -1043,6 +1082,9 @@ impl Storage for EngramStorage {
                     query_count: row.query_count as usize,
                     created_at: row.created_at,
                     last_seen_at: row.last_seen_at,
+                    search_result_ids,
+                    recalled_ids,
+                    created_ids,
                 }))
             }
         }
@@ -1054,11 +1096,18 @@ impl Storage for EngramStorage {
             .unwrap_or_else(|_| "[]".to_string());
         let centroid_bytes: Option<Vec<u8>> =
             session.centroid.as_deref().map(embedding_to_bytes);
+        let search_result_ids_json = serde_json::to_string(&session.search_result_ids)
+            .unwrap_or_else(|_| "[]".to_string());
+        let recalled_ids_json = serde_json::to_string(&session.recalled_ids)
+            .unwrap_or_else(|_| "[]".to_string());
+        let created_ids_json = serde_json::to_string(&session.created_ids)
+            .unwrap_or_else(|_| "[]".to_string());
 
         diesel::sql_query(
             "INSERT OR REPLACE INTO sessions \
-             (session_id, queries, centroid, query_count, created_at, last_seen_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             (session_id, queries, centroid, query_count, created_at, last_seen_at, \
+              search_result_ids, recalled_ids, created_ids) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .bind::<diesel::sql_types::Text, _>(&session.session_id)
         .bind::<diesel::sql_types::Text, _>(&queries_json)
@@ -1066,6 +1115,9 @@ impl Storage for EngramStorage {
         .bind::<diesel::sql_types::BigInt, _>(session.query_count as i64)
         .bind::<diesel::sql_types::BigInt, _>(session.created_at)
         .bind::<diesel::sql_types::BigInt, _>(session.last_seen_at)
+        .bind::<diesel::sql_types::Text, _>(&search_result_ids_json)
+        .bind::<diesel::sql_types::Text, _>(&recalled_ids_json)
+        .bind::<diesel::sql_types::Text, _>(&created_ids_json)
         .execute(&mut self.conn)
         .map_err(|e| StorageError::Database(e.to_string()))?;
 

@@ -252,6 +252,23 @@ impl Brain {
         self.associate_with_ordinal(from, to, weight, None)
     }
 
+    /// Create an association only if one does not already exist between from→to.
+    /// Returns true if a new association was created, false if skipped.
+    pub fn associate_if_absent(&mut self, from: EngramId, to: EngramId, weight: f64) -> StorageResult<bool> {
+        if !self.substrate.associate_if_absent(from, to, weight) {
+            return Ok(false);
+        }
+
+        // Persist the new association
+        if let Some(assocs) = self.substrate.associations_from(&from)
+            && let Some(assoc) = assocs.iter().find(|a| a.to == to)
+        {
+            self.storage.lock().unwrap().save_association(assoc)?;
+        }
+
+        Ok(true)
+    }
+
     /// Create an explicit association with optional ordinal (for ordered chains)
     pub fn associate_with_ordinal(
         &mut self,
@@ -2324,5 +2341,60 @@ mod tests {
             !discoveries.iter().any(|d| d.id == b),
             "Deleted engram B should not appear in discoveries"
         );
+    }
+
+    #[test]
+    fn associate_if_absent_creates_and_persists() {
+        let mut brain = brain_with_sqlite();
+        let a = brain.create("Memory A").unwrap();
+        let b = brain.create("Memory B").unwrap();
+
+        let created = brain.associate_if_absent(a, b, 0.5).unwrap();
+        assert!(created);
+
+        // Verify in-memory
+        let assocs = brain.substrate.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].to, b);
+
+        // Verify persisted to storage
+        let stored = brain.storage.lock().unwrap().load_associations_from(&a).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].to, b);
+        assert!((stored[0].weight - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn associate_if_absent_skips_existing() {
+        let mut brain = brain_with_sqlite();
+        let a = brain.create("Memory A").unwrap();
+        let b = brain.create("Memory B").unwrap();
+
+        // First call creates
+        assert!(brain.associate_if_absent(a, b, 0.5).unwrap());
+        // Second call skips
+        assert!(!brain.associate_if_absent(a, b, 0.5).unwrap());
+
+        // Still only one association in substrate and storage
+        let assocs = brain.substrate.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        let stored = brain.storage.lock().unwrap().load_associations_from(&a).unwrap();
+        assert_eq!(stored.len(), 1);
+    }
+
+    #[test]
+    fn associate_if_absent_preserves_existing_weight() {
+        let mut brain = brain_with_sqlite();
+        let a = brain.create("Memory A").unwrap();
+        let b = brain.create("Memory B").unwrap();
+
+        // Create explicit association at weight 0.8
+        brain.associate(a, b, 0.8).unwrap();
+
+        // associate_if_absent should NOT overwrite with 0.5
+        assert!(!brain.associate_if_absent(a, b, 0.5).unwrap());
+
+        let assocs = brain.substrate.associations_from(&a).unwrap();
+        assert!((assocs[0].weight - 0.8).abs() < 0.001);
     }
 }

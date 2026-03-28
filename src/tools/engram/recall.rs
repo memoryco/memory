@@ -178,6 +178,10 @@ impl Tool<Context> for EngramRecallTool {
             }
         }
 
+        // Wire associations between all created/recalled IDs in this session.
+        // Requires write lock (separate phase from read-lock session accumulation above).
+        super::wire_session_associations(context, &args.session_id);
+
         let final_output = format!("session_id: {}\n\n{}\n{}", args.session_id, header, output.trim());
 
         Ok(text_response(final_output))

@@ -134,6 +134,10 @@ impl Tool<Context> for EngramCreateTool {
             }
         }
 
+        // Phase 1b: Wire associations between all created/recalled IDs in this session.
+        // Requires write lock (separate phase from read-lock session accumulation above).
+        super::wire_session_associations(context, &args.session_id);
+
         // Phase 2a: Spawn per-memory threads for primary embeddings (fast, parallel).
         // If session accumulation already generated the embedding, store it directly
         // instead of regenerating — same model, same text, deterministic output.

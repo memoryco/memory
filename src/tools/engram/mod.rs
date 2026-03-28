@@ -72,3 +72,58 @@ pub(crate) fn accumulate_session_signal(
 
     generated
 }
+
+/// Wire bidirectional associations between all created and recalled memories
+/// in a session. Uses create-if-absent semantics at weight 0.5 — existing
+/// associations are left untouched (no within-session strengthening).
+///
+/// Requires a write lock on brain. Callers should invoke this as a separate
+/// lock phase after session accumulation is complete.
+pub(crate) fn wire_session_associations(context: &crate::Context, session_id: &str) {
+    let mut brain = context.brain.write().unwrap();
+
+    // Load session to get the current ID sets
+    let session = match brain.load_session(session_id) {
+        Ok(Some(s)) => s,
+        _ => return,
+    };
+
+    // Combine created + recalled IDs — these are the high-confidence tiers.
+    // Dedup since a memory could appear in both created_ids and recalled_ids.
+    let mut seen = std::collections::HashSet::new();
+    let all_ids: Vec<uuid::Uuid> = session
+        .created_ids
+        .iter()
+        .chain(session.recalled_ids.iter())
+        .filter_map(|s| s.parse::<uuid::Uuid>().ok())
+        .filter(|id| seen.insert(*id))
+        .collect();
+
+    if all_ids.len() < 2 {
+        return;
+    }
+
+    let mut wired = 0usize;
+    for i in 0..all_ids.len() {
+        for j in (i + 1)..all_ids.len() {
+            let a = all_ids[i];
+            let b = all_ids[j];
+            // Bidirectional: A→B and B→A
+            if let Ok(true) = brain.associate_if_absent(a, b, 0.5) {
+                wired += 1;
+            }
+            if let Ok(true) = brain.associate_if_absent(b, a, 0.5) {
+                wired += 1;
+            }
+        }
+    }
+
+    if wired > 0 {
+        eprintln!(
+            "[session] Wired {} new associations from {} session IDs (session {})",
+            wired,
+            all_ids.len(),
+            session_id
+        );
+    }
+}

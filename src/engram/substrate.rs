@@ -329,6 +329,19 @@ impl Substrate {
         self.reverse_associations.entry(to).or_default().push(from);
     }
 
+    /// Create an association only if one does not already exist between from→to.
+    /// Returns true if a new association was created, false if one already existed.
+    pub fn associate_if_absent(&mut self, from: EngramId, to: EngramId, weight: f64) -> bool {
+        let assocs = self.associations.entry(from).or_default();
+        if assocs.iter().any(|a| a.to == to) {
+            return false;
+        }
+        let assoc = Association::with_weight(from, to, weight);
+        assocs.push(assoc);
+        self.reverse_associations.entry(to).or_default().push(from);
+        true
+    }
+
     /// Get the last decay timestamp (for persistence)
     pub fn last_decay_at(&self) -> i64 {
         self.last_decay_at
@@ -1281,5 +1294,70 @@ mod tests {
 
         assert!(!result.found());
         assert!(result.content().is_none());
+    }
+
+    #[test]
+    fn associate_if_absent_creates_when_new() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        let created = substrate.associate_if_absent(a, b, 0.5);
+        assert!(created);
+
+        let assocs = substrate.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].to, b);
+        assert!((assocs[0].weight - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn associate_if_absent_skips_when_exists() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        // First call creates
+        assert!(substrate.associate_if_absent(a, b, 0.5));
+        // Second call skips
+        assert!(!substrate.associate_if_absent(a, b, 0.5));
+
+        // Should still only have one association
+        let assocs = substrate.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+    }
+
+    #[test]
+    fn associate_if_absent_does_not_strengthen_existing() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        // Create with weight 0.3
+        substrate.associate(a, b, 0.3, None);
+        // Try to create again with weight 0.5 — should skip
+        assert!(!substrate.associate_if_absent(a, b, 0.5));
+
+        // Weight should remain 0.3
+        let assocs = substrate.associations_from(&a).unwrap();
+        assert!((assocs[0].weight - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn associate_if_absent_is_directional() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        // A→B exists, but B→A does not
+        assert!(substrate.associate_if_absent(a, b, 0.5));
+        assert!(substrate.associate_if_absent(b, a, 0.5));
+
+        let ab = substrate.associations_from(&a).unwrap();
+        let ba = substrate.associations_from(&b).unwrap();
+        assert_eq!(ab.len(), 1);
+        assert_eq!(ba.len(), 1);
+        assert_eq!(ab[0].to, b);
+        assert_eq!(ba[0].to, a);
     }
 }

@@ -13,7 +13,6 @@ pub mod association;
 pub mod bootstrap;
 pub mod brain;
 pub mod config_toml;
-pub mod decompose;
 #[allow(clippy::module_inception)]
 pub mod engram;
 pub mod persistence;

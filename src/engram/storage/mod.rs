@@ -117,6 +117,10 @@ pub trait Storage: Send {
     /// Delete all associations (for bulk operations like pruning)
     fn delete_all_associations(&mut self) -> StorageResult<()>;
 
+    /// Delete associations that reference non-existent engrams.
+    /// Returns the number of orphaned associations removed.
+    fn prune_orphan_associations(&mut self) -> StorageResult<usize>;
+
     // ==================
     // CONFIG
     // ==================

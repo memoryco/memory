@@ -626,6 +626,17 @@ impl Storage for EngramStorage {
         Ok(())
     }
 
+    fn prune_orphan_associations(&mut self) -> StorageResult<usize> {
+        let deleted = diesel::sql_query(
+            "DELETE FROM associations \
+             WHERE from_id NOT IN (SELECT id FROM engrams) \
+             OR to_id NOT IN (SELECT id FROM engrams)",
+        )
+        .execute(&mut self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(deleted)
+    }
+
     // ==================
     // CONFIG
     // ==================

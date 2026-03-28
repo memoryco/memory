@@ -193,13 +193,24 @@ pub fn uninstall(yes: bool) {
 
 /// `memoryco generate` — generate embeddings and/or enrichments.
 pub fn generate(embeddings_only: bool, enrichments_only: bool) {
+    let exit_code = generate_inner(embeddings_only, enrichments_only);
+    // Explicitly release GPU models before process exit. Rust does not drop
+    // statics, so without this the Metal/CUDA device finalizer asserts on
+    // leaked resource sets during C++ __cxa_finalize.
+    crate::embedding::EmbeddingGenerator::shutdown();
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+}
+
+fn generate_inner(embeddings_only: bool, enrichments_only: bool) -> i32 {
     let memory_home = config::get_memory_home();
     let db_path = memory_home.join("brain.db");
 
     if !db_path.exists() {
         eprintln!("✗ Brain database not found: {}", db_path.display());
         eprintln!("  Run `memoryco setup` to get started.");
-        std::process::exit(1);
+        return 1;
     }
 
     let brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
@@ -207,7 +218,7 @@ pub fn generate(embeddings_only: bool, enrichments_only: bool) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("✗ Failed to open brain: {}", e);
-            std::process::exit(1);
+            return 1;
         }
     };
 
@@ -246,7 +257,7 @@ pub fn generate(embeddings_only: bool, enrichments_only: bool) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("✗ Failed to initialize LLM: {}", e);
-                std::process::exit(1);
+                return 1;
             }
         };
         if !llm.available() {
@@ -258,7 +269,7 @@ pub fn generate(embeddings_only: bool, enrichments_only: bool) {
             if do_embeddings && total_embeddings > 0 {
                 eprintln!("  {} embedding(s) were generated successfully.", total_embeddings);
             }
-            std::process::exit(1);
+            return 1;
         }
         let stats = crate::generate::generate_enrichments(Arc::clone(&brain), llm, true);
         total_enrichments = stats.generated;
@@ -278,6 +289,8 @@ pub fn generate(embeddings_only: bool, enrichments_only: bool) {
         ),
         (false, false) => unreachable!(),
     }
+
+    0
 }
 
 /// `memoryco doctor` — health check.

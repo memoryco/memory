@@ -105,6 +105,15 @@ impl Storage for MemoryStorage {
         Ok(())
     }
 
+    fn prune_orphan_associations(&mut self) -> StorageResult<usize> {
+        let before = self.associations.len();
+        self.associations.retain(|a| {
+            self.engrams.contains_key(&a.from)
+                && self.engrams.contains_key(&a.to)
+        });
+        Ok(before - self.associations.len())
+    }
+
     fn save_config(&mut self, config: &Config) -> StorageResult<()> {
         self.config = Some(config.clone());
         Ok(())

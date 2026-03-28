@@ -527,6 +527,15 @@ impl Brain {
         Ok(applied)
     }
 
+    /// Remove associations that reference non-existent engrams.
+    ///
+    /// Orphan associations can accumulate when the async persistence worker
+    /// re-writes associations after `delete_engram` has already cleaned them up.
+    /// This is called during server startup maintenance.
+    pub fn prune_orphan_associations(&mut self) -> StorageResult<usize> {
+        self.storage.lock().unwrap().prune_orphan_associations()
+    }
+
     /// Prune weak associations below the minimum weight threshold
     /// Returns the number of associations pruned
     /// Note: Pruned associations are removed from storage as well
@@ -670,15 +679,6 @@ impl Brain {
         Ok(())
     }
 
-    /// Save an engram directly to storage (for bulk operations like decompose)
-    pub(crate) fn storage_save_engram(&mut self, engram: &Engram) -> StorageResult<()> {
-        self.storage.lock().unwrap().save_engram(engram)
-    }
-
-    /// Save an association directly to storage (for bulk operations like decompose)
-    pub(crate) fn storage_save_association(&mut self, assoc: &Association) -> StorageResult<()> {
-        self.storage.lock().unwrap().save_association(assoc)
-    }
 
     /// Get a metadata value by key
     pub fn get_metadata(&mut self, key: &str) -> StorageResult<Option<String>> {
@@ -2194,5 +2194,135 @@ mod tests {
 
         let results = brain.keyword_search("language", 10).unwrap();
         assert_eq!(results.len(), 2, "Both language memories should match");
+    }
+
+    #[test]
+    fn get_embedding_returns_none_for_missing_engram() {
+        let mut brain = brain_with_sqlite();
+
+        // Create a valid engram so the DB is initialized
+        brain.create("Test memory").unwrap();
+
+        // Query embedding for a non-existent engram ID
+        let missing_id = uuid::Uuid::new_v4();
+        let result = brain.get_embedding(&missing_id);
+        assert!(
+            result.is_ok(),
+            "get_embedding should return Ok for missing engram, got: {:?}",
+            result
+        );
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "get_embedding should return None for missing engram"
+        );
+    }
+
+    #[test]
+    fn prune_orphan_associations_removes_dangling() {
+        let mut brain = brain_with_sqlite();
+
+        let a = brain.create("Memory A").unwrap();
+        let b = brain.create("Memory B").unwrap();
+        let c = brain.create("Memory C").unwrap();
+
+        // Create valid associations
+        brain.associate(a, b, 0.8).unwrap();
+        brain.associate(b, c, 0.6).unwrap();
+
+        // Delete memory B — this cleans up associations in storage
+        brain.delete(b).unwrap();
+
+        // Simulate the persistence worker race: re-insert orphan associations
+        // directly into storage after the delete has cleaned them up.
+        let orphan_assoc = Association::with_weight(a, b, 0.8);
+        brain
+            .storage
+            .lock()
+            .unwrap()
+            .save_associations(&[&orphan_assoc])
+            .unwrap();
+
+        // Verify the orphan exists in storage
+        let all_assocs = brain.storage.lock().unwrap().load_all_associations().unwrap();
+        assert!(
+            all_assocs.iter().any(|assoc| assoc.to == b),
+            "Orphan association should exist before pruning"
+        );
+
+        // Prune orphans
+        let pruned = brain.prune_orphan_associations().unwrap();
+        assert!(
+            pruned >= 1,
+            "Should have pruned at least 1 orphan, pruned: {}",
+            pruned
+        );
+
+        // Verify no orphans remain
+        let remaining = brain.storage.lock().unwrap().load_all_associations().unwrap();
+        for assoc in &remaining {
+            assert!(
+                brain.get(&assoc.from).is_some() || assoc.from == a || assoc.from == c,
+                "Association from {} should reference an existing engram",
+                assoc.from
+            );
+            assert!(
+                assoc.to != b,
+                "No associations should point to deleted engram B"
+            );
+        }
+    }
+
+    #[test]
+    fn discover_associations_skips_dangling_references() {
+        let mut brain = brain_with_sqlite();
+
+        let a = brain.create("Memory about Rust").unwrap();
+        let b = brain.create("Memory about safety").unwrap();
+        let c = brain.create("Memory about types").unwrap();
+
+        // Set embeddings so discover_associated_memories can compute similarity
+        let emb_a: Vec<f32> = vec![0.9, 0.1, 0.0, 0.0];
+        let emb_b: Vec<f32> = vec![0.8, 0.2, 0.0, 0.0];
+        let emb_c: Vec<f32> = vec![0.7, 0.3, 0.0, 0.0];
+        brain.set_embedding(&a, &emb_a).unwrap();
+        brain.set_embedding(&b, &emb_b).unwrap();
+        brain.set_embedding(&c, &emb_c).unwrap();
+
+        brain.associate(a, b, 0.8).unwrap();
+        brain.associate(a, c, 0.6).unwrap();
+
+        // Delete B, then re-insert orphan association (simulating persistence race)
+        brain.delete(b).unwrap();
+        let orphan_assoc = Association::with_weight(a, b, 0.8);
+        brain
+            .storage
+            .lock()
+            .unwrap()
+            .save_associations(&[&orphan_assoc])
+            .unwrap();
+
+        // Reload associations into substrate so it sees the orphan
+        let _ = brain.sync_from_storage();
+
+        // discover_associated_memories should NOT error when encountering
+        // the dangling association to B (whose embedding row is gone)
+        let query_emb: Vec<f32> = vec![0.85, 0.15, 0.0, 0.0];
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(a);
+
+        let result = brain.discover_associated_memories(&query_emb, &[a], &mut seen, 1);
+        assert!(
+            result.is_ok(),
+            "discover_associated_memories should not error on dangling associations: {:?}",
+            result
+        );
+
+        // Only C should be discovered (B is deleted)
+        let discoveries = result.unwrap();
+        assert!(
+            !discoveries.iter().any(|d| d.id == b),
+            "Deleted engram B should not appear in discoveries"
+        );
     }
 }

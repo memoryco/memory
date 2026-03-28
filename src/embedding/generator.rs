@@ -137,6 +137,19 @@ impl EmbeddingGenerator {
     }
 }
 
+impl EmbeddingGenerator {
+    /// Explicitly release the global embedding model.
+    ///
+    /// Must be called before process exit to free Metal/CUDA GPU resources
+    /// before C++ static destructors fire. Rust does not drop statics, so
+    /// without this the Metal device finalizer asserts on leaked resource sets.
+    pub fn shutdown() {
+        if let Ok(mut guard) = EMBED_SERVICE.lock() {
+            *guard = None;
+        }
+    }
+}
+
 impl Default for EmbeddingGenerator {
     fn default() -> Self {
         Self::new()

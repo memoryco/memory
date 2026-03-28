@@ -273,12 +273,14 @@ impl<'a> VectorSearch<'a> {
     pub fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
         let id_str = id.to_string();
 
-        let row: OptionalEmbeddingRow = sql_query("SELECT embedding FROM engrams WHERE id = ?")
-            .bind::<Text, _>(&id_str)
-            .get_result(self.conn)
-            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let row: Option<OptionalEmbeddingRow> =
+            sql_query("SELECT embedding FROM engrams WHERE id = ?")
+                .bind::<Text, _>(&id_str)
+                .get_result(self.conn)
+                .optional()
+                .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        match row.embedding {
+        match row.and_then(|r| r.embedding) {
             Some(bytes) => Ok(bytes_to_embedding(&bytes)),
             None => Ok(None),
         }

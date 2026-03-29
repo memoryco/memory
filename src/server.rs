@@ -9,7 +9,7 @@
 use crate::config;
 use crate::engram::Brain;
 use crate::identity::{DieselIdentityStorage, IdentityStore};
-use crate::plans::{DieselPlanStorage, PlanStore};
+
 use crate::reference::ReferenceManager;
 use crate::{Context, bootstrap, lenses, tools};
 use sml_mcps::{Server, ServerConfig, StdioTransport};
@@ -63,7 +63,7 @@ pub fn run() {
     let memory_home = config::get_memory_home();
     let db_path = memory_home.join("brain.db");
     let identity_db_path = memory_home.join("identity.db");
-    let plans_db_path = memory_home.join("plans.db");
+
     let lenses_dir = memory_home.join("lenses");
     let references_dir = memory_home.join("references");
 
@@ -80,7 +80,7 @@ pub fn run() {
     eprintln!("Memory home: {}", memory_home.display());
     eprintln!("  Database: {}", db_path.display());
     eprintln!("  Identity DB: {}", identity_db_path.display());
-    eprintln!("  Plans DB: {}", plans_db_path.display());
+
     eprintln!("  Lenses: {}", lenses_dir.display());
     eprintln!("  References: {}", references_dir.display());
 
@@ -138,11 +138,6 @@ pub fn run() {
 
     migrate_identity(&brain, &mut identity);
 
-    // --- Plans ---
-    let plans_storage =
-        DieselPlanStorage::open(&plans_db_path).expect("Failed to open plans database");
-    let plans = PlanStore::new(plans_storage).expect("Failed to open plans store");
-
     // --- References ---
     let mut references = ReferenceManager::new();
     match references.load_directory(&references_dir) {
@@ -175,7 +170,7 @@ pub fn run() {
         brain: Arc::clone(&brain),
         llm,
         identity: Arc::clone(&identity),
-        plans: Arc::new(Mutex::new(plans)),
+
         references: Arc::clone(&references),
         lenses_dir: lenses_dir.clone(),
         memory_home: memory_home.clone(),
@@ -394,16 +389,6 @@ fn build_server() -> Server<Context> {
     server
         .add_tool(tools::ReferenceCitationTool)
         .expect("reference_citation");
-
-    // Plan tools
-    server.add_tool(tools::PlansListTool).expect("plans");
-    server.add_tool(tools::PlanGetTool).expect("plan_get");
-    server.add_tool(tools::PlanStartTool).expect("plan_start");
-    server.add_tool(tools::PlanStopTool).expect("plan_stop");
-    server.add_tool(tools::StepAddTool).expect("step_add");
-    server
-        .add_tool(tools::StepCompleteTool)
-        .expect("step_complete");
 
     // Date tools
     server

@@ -13,7 +13,7 @@ pub mod engram;
 pub mod identity;
 pub mod lenses;
 pub mod open_dashboard;
-pub mod plans;
+
 pub mod reference;
 
 use crate::engram::Engram;
@@ -61,10 +61,6 @@ pub use lenses::{LensesGetTool, LensesListTool};
 pub use reference::{
     ReferenceCitationTool, ReferenceGetTool, ReferenceListTool, ReferenceSearchTool,
     ReferenceSectionsTool,
-};
-
-pub use plans::{
-    PlanGetTool, PlanStartTool, PlanStopTool, PlansListTool, StepAddTool, StepCompleteTool,
 };
 
 pub use date_resolve::DateResolveTool;

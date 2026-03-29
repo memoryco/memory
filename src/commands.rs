@@ -318,11 +318,7 @@ pub fn doctor() {
         "identity.db",
         memory_home.join("identity.db").exists(),
     );
-    check(
-        "Plans database",
-        "plans.db",
-        memory_home.join("plans.db").exists(),
-    );
+
 
     // Embedding model
     let model_dir = config::get_model_cache_dir();
@@ -499,12 +495,9 @@ pub fn reset() {
         "identity.db",
         "identity.db-wal",
         "identity.db-shm",
-        "plans.db",
-        "plans.db-wal",
-        "plans.db-shm",
     ];
 
-    eprintln!("⚠️  This will permanently delete all memories, identity, and plans.");
+    eprintln!("⚠️  This will permanently delete all memories and identity.");
     eprintln!("   Cache, lenses, and references will be preserved.");
     eprintln!();
     eprintln!("   Files to delete:");

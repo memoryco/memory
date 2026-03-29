@@ -29,9 +29,6 @@ pub fn bootstrap_all(
     // Reference (adds per-source citation instructions)
     crate::reference::bootstrap::bootstrap(identity, references)?;
 
-    // Plans (task tracking instructions)
-    crate::plans::bootstrap::bootstrap(identity)?;
-
     // External plugins (TOML manifests in bootstrap.d/)
     crate::plugins::bootstrap::bootstrap(identity, memory_home)?;
 
@@ -89,7 +86,7 @@ mod tests {
             all_text.contains("## References"),
             "Missing reference instructions"
         );
-        assert!(all_text.contains("## Plans"), "Missing plans instructions");
+
     }
 
     #[test]

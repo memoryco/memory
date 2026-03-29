@@ -19,7 +19,7 @@ mod install;
 pub mod lang;
 mod lenses;
 mod llm;
-mod plans;
+
 mod plugins;
 mod reference;
 mod registry;
@@ -29,7 +29,7 @@ mod tools;
 
 use crate::engram::{Brain, EngramId};
 use crate::identity::IdentityStore;
-use crate::plans::PlanStore;
+
 use crate::reference::ReferenceManager;
 use clap::Parser;
 use std::path::PathBuf;
@@ -40,7 +40,7 @@ pub struct Context {
     pub brain: Arc<RwLock<Brain>>,
     pub llm: crate::llm::SharedLlmService,
     pub identity: Arc<Mutex<IdentityStore>>,
-    pub plans: Arc<Mutex<PlanStore>>,
+
     pub references: Arc<Mutex<ReferenceManager>>,
     pub lenses_dir: PathBuf,
     pub memory_home: PathBuf,

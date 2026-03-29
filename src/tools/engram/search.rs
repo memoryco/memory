@@ -421,15 +421,22 @@ impl Tool<Context> for EngramSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search memories by semantic similarity using vector embeddings. \
-         Accepts an array of queries to batch multiple searches in a single call. \
-         Finds memories with similar meaning even if they don't share exact keywords. \
-         Supports date-range filtering via created_after/created_before to narrow \
-         results by when memories were stored. \
-         If results seem weak or irrelevant, try decomposing abstract queries into \
-         concrete related terms. For example, instead of 'relationship status', \
-         try 'breakup', 'dating', 'partner', or 'married'. Search for actions \
-         and events rather than abstract states."
+        "Search memories by semantic similarity. Call BEFORE responding to every user \
+         message \u{2014} this is what makes you a persistent collaborator instead of a \
+         stateless chatbot.\n\
+         \n\
+         Accepts an array of queries to batch multiple searches in one call. Finds \
+         memories with similar meaning even without exact keyword matches.\n\
+         \n\
+         Query tips:\n\
+         - Decompose abstract queries into concrete terms: instead of 'relationship \
+         status', try 'breakup', 'dating', 'partner'\n\
+         - Search for actions and events rather than abstract states\n\
+         - Use created_after/created_before (ISO 8601 or unix epoch) for time-based \
+         queries like 'what did I work on last week?'\n\
+         \n\
+         If results include a \u{1f517} procedure chain hint, call engram_associations \
+         on the anchor with direction: outbound to get the full ordered steps."
     }
 
     fn schema(&self) -> JsonValue {

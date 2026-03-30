@@ -1,6 +1,6 @@
 //! Embedding generator using llama.cpp (GGUF model via memoryco-llm)
 //!
-//! Provides vector embeddings for engram content, enabling semantic
+//! Provides vector embeddings for memory content, enabling semantic
 //! similarity search beyond keyword matching.
 //!
 //! Uses a hardcoded NVIDIA Nemotron embedding model in appliance mode —
@@ -112,7 +112,7 @@ impl EmbeddingGenerator {
             model_path,
             n_gpu_layers: -1, // Use all available GPU layers
             threads: 4,
-            context_length: 512, // Engram text is short
+            context_length: 512, // Memory text is short
             pooling: PoolingType::Mean,
         };
 

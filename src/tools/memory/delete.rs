@@ -1,6 +1,6 @@
-//! engram_delete - Delete memories permanently
+//! memory_delete - Delete memories permanently
 
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
@@ -8,16 +8,16 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
-pub struct EngramDeleteTool;
+pub struct MemoryDeleteTool;
 
 #[derive(Deserialize)]
 struct Args {
     ids: Vec<String>,
 }
 
-impl Tool<Context> for EngramDeleteTool {
+impl Tool<Context> for MemoryDeleteTool {
     fn name(&self) -> &str {
-        "engram_delete"
+        "memory_delete"
     }
 
     fn description(&self) -> &str {
@@ -56,7 +56,7 @@ impl Tool<Context> for EngramDeleteTool {
         let mut not_found_count = 0;
 
         for id_str in &args.ids {
-            let id: EngramId = id_str.parse().map_err(|e| {
+            let id: MemoryId = id_str.parse().map_err(|e| {
                 McpError::InvalidParams(format!("Invalid UUID '{}': {}", id_str, e))
             })?;
 

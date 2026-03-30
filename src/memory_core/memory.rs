@@ -1,6 +1,6 @@
-//! Engram - a single memory trace
+//! Memory - a single memory trace
 
-use super::EngramId;
+use super::MemoryId;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -70,9 +70,9 @@ impl MemoryState {
 
 /// A single memory unit in the substrate
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Engram {
+pub struct Memory {
     /// Unique identifier
-    pub id: EngramId,
+    pub id: MemoryId,
 
     /// The actual content of the memory
     pub content: String,
@@ -88,13 +88,13 @@ pub struct Engram {
     /// Can drift over time if not reinforced
     pub confidence: f64,
 
-    /// When this engram was created (unix timestamp)
+    /// When this memory was created (unix timestamp)
     pub created_at: i64,
 
-    /// When this engram was last accessed/stimulated (unix timestamp)
+    /// When this memory was last accessed/stimulated (unix timestamp)
     pub last_accessed: i64,
 
-    /// Total number of times this engram has been accessed
+    /// Total number of times this memory has been accessed
     pub access_count: u64,
 
     /// Optional tags/entities for categorization
@@ -106,8 +106,8 @@ pub struct Engram {
     pub embedding: Option<Vec<f32>>,
 }
 
-impl Engram {
-    /// Create a new engram with full energy
+impl Memory {
+    /// Create a new memory with full energy
     pub fn new(content: impl Into<String>) -> Self {
         let now = now_unix();
         Self {
@@ -124,7 +124,7 @@ impl Engram {
         }
     }
 
-    /// Create a new engram with an explicit creation timestamp
+    /// Create a new memory with an explicit creation timestamp
     pub fn new_with_timestamp(content: impl Into<String>, created_at: i64) -> Self {
         Self {
             id: uuid::Uuid::new_v4(),
@@ -140,11 +140,11 @@ impl Engram {
         }
     }
 
-    /// Create an engram with specific tags
+    /// Create a memory with specific tags
     pub fn with_tags(content: impl Into<String>, tags: Vec<String>) -> Self {
-        let mut engram = Self::new(content);
-        engram.tags = tags;
-        engram
+        let mut mem = Self::new(content);
+        mem.tags = tags;
+        mem
     }
 
     /// Update state based on current energy level
@@ -152,7 +152,7 @@ impl Engram {
         self.state = MemoryState::from_energy(self.energy);
     }
 
-    /// Stimulate this engram - increases energy and updates access time
+    /// Stimulate this memory - increases energy and updates access time
     /// Returns the previous state if resurrection occurred
     pub fn stimulate(&mut self, amount: f64) -> Option<MemoryState> {
         let old_state = self.state;
@@ -172,7 +172,7 @@ impl Engram {
         }
     }
 
-    /// Apply decay to this engram
+    /// Apply decay to this memory
     pub fn decay(&mut self, rate: f64) {
         // Archived memories don't decay further - they're frozen
         if self.state == MemoryState::Archived {
@@ -190,22 +190,22 @@ impl Engram {
         self.update_state();
     }
 
-    /// Check if this engram is dormant (low energy but still searchable)
+    /// Check if this memory is dormant (low energy but still searchable)
     pub fn is_dormant(&self) -> bool {
         self.state == MemoryState::Dormant
     }
 
-    /// Check if this engram is in deep storage
+    /// Check if this memory is in deep storage
     pub fn is_deep(&self) -> bool {
         self.state == MemoryState::Deep
     }
 
-    /// Check if this engram is archived
+    /// Check if this memory is archived
     pub fn is_archived(&self) -> bool {
         self.state == MemoryState::Archived
     }
 
-    /// Check if this engram is searchable (Active or Dormant)
+    /// Check if this memory is searchable (Active or Dormant)
     pub fn is_searchable(&self) -> bool {
         self.state.is_searchable()
     }
@@ -215,7 +215,7 @@ impl Engram {
         now_unix() - self.last_accessed
     }
 
-    /// Age of this engram in seconds
+    /// Age of this memory in seconds
     pub fn age_seconds(&self) -> i64 {
         now_unix() - self.created_at
     }
@@ -226,8 +226,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_engram_has_full_energy() {
-        let e = Engram::new("test memory");
+    fn new_memory_has_full_energy() {
+        let e = Memory::new("test memory");
         assert_eq!(e.energy, 1.0);
         assert_eq!(e.confidence, 1.0);
         assert_eq!(e.state, MemoryState::Active);
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn stimulate_increases_energy() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         e.energy = 0.5;
         e.update_state();
         e.stimulate(0.3);
@@ -246,21 +246,21 @@ mod tests {
 
     #[test]
     fn stimulate_caps_at_one() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         e.stimulate(0.5);
         assert_eq!(e.energy, 1.0);
     }
 
     #[test]
     fn decay_reduces_energy() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         e.decay(0.3);
         assert!((e.energy - 0.7).abs() < 0.001);
     }
 
     #[test]
     fn decay_never_hits_zero() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         e.decay(1.5);
         assert!(e.energy > 0.0);
         assert_eq!(e.energy, 0.001);
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn state_transitions_on_decay() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         assert_eq!(e.state, MemoryState::Active);
 
         e.energy = 0.25;
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn archived_doesnt_decay() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         e.energy = 0.01;
         e.update_state();
         assert_eq!(e.state, MemoryState::Archived);
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn resurrection_from_archived() {
-        let mut e = Engram::new("test");
+        let mut e = Memory::new("test");
         e.energy = 0.01;
         e.update_state();
         assert_eq!(e.state, MemoryState::Archived);
@@ -310,11 +310,11 @@ mod tests {
 
     #[test]
     fn deep_decays_slower() {
-        let mut active = Engram::new("active");
+        let mut active = Memory::new("active");
         active.energy = 0.5;
         active.update_state();
 
-        let mut deep = Engram::new("deep");
+        let mut deep = Memory::new("deep");
         deep.energy = 0.05;
         deep.update_state();
         assert_eq!(deep.state, MemoryState::Deep);

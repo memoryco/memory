@@ -1,6 +1,6 @@
-//! engram_associate - Create an explicit association between memories
+//! memory_associate - Create an explicit association between memories
 
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
@@ -8,7 +8,7 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
-pub struct EngramAssociateTool;
+pub struct MemoryAssociateTool;
 
 #[derive(Deserialize)]
 struct Args {
@@ -20,9 +20,9 @@ struct Args {
     ordinal: Option<u32>,
 }
 
-impl Tool<Context> for EngramAssociateTool {
+impl Tool<Context> for MemoryAssociateTool {
     fn name(&self) -> &str {
-        "engram_associate"
+        "memory_associate"
     }
 
     fn description(&self) -> &str {
@@ -66,11 +66,11 @@ impl Tool<Context> for EngramAssociateTool {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let from: EngramId = args
+        let from: MemoryId = args
             .from
             .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid 'from' UUID: {}", e)))?;
-        let to: EngramId = args
+        let to: MemoryId = args
             .to
             .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid 'to' UUID: {}", e)))?;

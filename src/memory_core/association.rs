@@ -1,6 +1,6 @@
-//! Association - weighted connections between engrams
+//! Association - weighted connections between memories
 
-use super::EngramId;
+use super::MemoryId;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,14 +12,14 @@ fn now_unix() -> i64 {
         .as_secs() as i64
 }
 
-/// A weighted connection between two engrams
+/// A weighted connection between two memories
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Association {
-    /// Source engram
-    pub from: EngramId,
+    /// Source memory
+    pub from: MemoryId,
 
-    /// Target engram
-    pub to: EngramId,
+    /// Target memory
+    pub to: MemoryId,
 
     /// Strength of the association (0.0 - 1.0)
     /// Strengthens with co-activation (Hebbian learning)
@@ -31,7 +31,7 @@ pub struct Association {
     /// When this association was last activated (unix timestamp)
     pub last_activated: i64,
 
-    /// Number of times both engrams were co-accessed
+    /// Number of times both memories were co-accessed
     pub co_activation_count: u64,
 
     /// Position in an ordered chain (e.g., procedure steps).
@@ -42,7 +42,7 @@ pub struct Association {
 
 impl Association {
     /// Create a new association with default weight
-    pub fn new(from: EngramId, to: EngramId) -> Self {
+    pub fn new(from: MemoryId, to: MemoryId) -> Self {
         let now = now_unix();
         Self {
             from,
@@ -56,14 +56,14 @@ impl Association {
     }
 
     /// Create an association with a specific initial weight
-    pub fn with_weight(from: EngramId, to: EngramId, weight: f64) -> Self {
+    pub fn with_weight(from: MemoryId, to: MemoryId, weight: f64) -> Self {
         let mut assoc = Self::new(from, to);
         assoc.weight = weight.clamp(0.0, 1.0);
         assoc
     }
 
     /// Create an association with weight and ordinal (for ordered chains)
-    pub fn with_ordinal(from: EngramId, to: EngramId, weight: f64, ordinal: Option<u32>) -> Self {
+    pub fn with_ordinal(from: MemoryId, to: MemoryId, weight: f64, ordinal: Option<u32>) -> Self {
         let mut assoc = Self::with_weight(from, to, weight);
         assoc.ordinal = ordinal;
         assoc

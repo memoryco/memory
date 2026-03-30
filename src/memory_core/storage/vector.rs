@@ -1,12 +1,12 @@
 //! Vector similarity search operations
 //!
-//! Provides cosine similarity search over engram embeddings stored in SQLite.
+//! Provides cosine similarity search over memory embeddings stored in SQLite.
 //! Uses Diesel's sql_query for raw SQL operations.
 
 use super::models::{bytes_to_embedding, embedding_to_bytes};
 use crate::embedding::cosine_similarity;
-use crate::engram::EngramId;
-use crate::engram::storage::{StorageError, StorageResult};
+use crate::memory_core::MemoryId;
+use crate::memory_core::storage::{StorageError, StorageResult};
 
 use diesel::prelude::*;
 use diesel::sql_query;
@@ -16,7 +16,7 @@ use diesel::sqlite::SqliteConnection;
 /// Result of a vector similarity search
 #[derive(Debug, Clone)]
 pub struct SimilarityResult {
-    pub id: EngramId,
+    pub id: MemoryId,
     pub score: f32,
     pub content: String,
 }
@@ -57,7 +57,7 @@ struct CountRow {
 #[derive(QueryableByName, Debug)]
 struct EnrichmentRow {
     #[diesel(sql_type = Text)]
-    engram_id: String,
+    memory_id: String,
     #[diesel(sql_type = Text)]
     content: String,
     #[diesel(sql_type = Binary)]
@@ -75,25 +75,25 @@ impl<'a> VectorSearch<'a> {
         Self { conn }
     }
 
-    /// Find engrams most similar to the given embedding
+    /// Find memories most similar to the given embedding
     ///
     /// Returns up to `limit` results sorted by descending similarity score.
     /// Only returns results with similarity >= min_score.
-    /// Searches BOTH the primary engram embeddings AND enrichment vectors,
-    /// deduplicating by engram_id (keeping highest score per engram).
+    /// Searches BOTH the primary memory embeddings AND enrichment vectors,
+    /// deduplicating by memory_id (keeping highest score per memory).
     pub fn find_similar(
         &mut self,
         query_embedding: &[f32],
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        // best_scores: engram_id -> (score, content)
+        // best_scores: memory_id -> (score, content)
         let mut best_scores: std::collections::HashMap<uuid::Uuid, (f32, String)> =
             std::collections::HashMap::new();
 
-        // Search primary engram embeddings
+        // Search primary memory embeddings
         let rows: Vec<EmbeddingRow> =
-            sql_query("SELECT id, content, embedding FROM engrams WHERE embedding IS NOT NULL")
+            sql_query("SELECT id, content, embedding FROM memories WHERE embedding IS NOT NULL")
                 .load(self.conn)
                 .map_err(|e| StorageError::Database(e.to_string()))?;
 
@@ -116,9 +116,9 @@ impl<'a> VectorSearch<'a> {
 
         // Search enrichment embeddings (JOIN to get parent content)
         let enrichment_rows: Vec<EnrichmentRow> = sql_query(
-            "SELECT e.engram_id, eng.content, e.embedding \
-             FROM engram_enrichments e \
-             JOIN engrams eng ON eng.id = e.engram_id",
+            "SELECT e.memory_id, eng.content, e.embedding \
+             FROM memory_enrichments e \
+             JOIN memories eng ON eng.id = e.memory_id",
         )
         .load(self.conn)
         .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -130,7 +130,7 @@ impl<'a> VectorSearch<'a> {
                 }
                 let score = cosine_similarity(query_embedding, &embedding);
                 if score >= min_score {
-                    let id = uuid::Uuid::parse_str(&row.engram_id)
+                    let id = uuid::Uuid::parse_str(&row.memory_id)
                         .map_err(|e| StorageError::Serialization(e.to_string()))?;
                     let entry = best_scores
                         .entry(id)
@@ -160,59 +160,59 @@ impl<'a> VectorSearch<'a> {
         Ok(results)
     }
 
-    /// Find engrams similar to a given engram by ID
+    /// Find memories similar to a given memory by ID
     #[allow(dead_code)]
     pub fn find_similar_to(
         &mut self,
-        engram_id: &EngramId,
+        memory_id: &MemoryId,
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        // First, get the embedding for the source engram
-        let id_str = engram_id.to_string();
-        let row: OptionalEmbeddingRow = sql_query("SELECT embedding FROM engrams WHERE id = ?")
+        // First, get the embedding for the source memory
+        let id_str = memory_id.to_string();
+        let row: OptionalEmbeddingRow = sql_query("SELECT embedding FROM memories WHERE id = ?")
             .bind::<Text, _>(&id_str)
             .get_result(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
         let embedding_bytes = row.embedding.ok_or_else(|| {
-            StorageError::NotFound(format!("No embedding for engram {}", engram_id))
+            StorageError::NotFound(format!("No embedding for memory {}", memory_id))
         })?;
 
         let query_embedding = bytes_to_embedding(&embedding_bytes)
             .ok_or_else(|| StorageError::Serialization("Invalid embedding format".into()))?;
 
-        // Find similar, excluding the source engram
+        // Find similar, excluding the source memory
         let mut results = self.find_similar(&query_embedding, limit + 1, min_score)?;
-        results.retain(|r| r.id != *engram_id);
+        results.retain(|r| r.id != *memory_id);
         results.truncate(limit);
 
         Ok(results)
     }
 
-    /// Count engrams that have embeddings
+    /// Count memories that have embeddings
     pub fn count_with_embeddings(&mut self) -> StorageResult<usize> {
         let row: CountRow =
-            sql_query("SELECT COUNT(*) as cnt FROM engrams WHERE embedding IS NOT NULL")
+            sql_query("SELECT COUNT(*) as cnt FROM memories WHERE embedding IS NOT NULL")
                 .get_result(self.conn)
                 .map_err(|e| StorageError::Database(e.to_string()))?;
 
         Ok(row.cnt as usize)
     }
 
-    /// Count engrams that need embeddings
+    /// Count memories that need embeddings
     pub fn count_without_embeddings(&mut self) -> StorageResult<usize> {
         let row: CountRow =
-            sql_query("SELECT COUNT(*) as cnt FROM engrams WHERE embedding IS NULL")
+            sql_query("SELECT COUNT(*) as cnt FROM memories WHERE embedding IS NULL")
                 .get_result(self.conn)
                 .map_err(|e| StorageError::Database(e.to_string()))?;
 
         Ok(row.cnt as usize)
     }
 
-    /// Get IDs of engrams that need embeddings (for backfill)
-    pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
-        let rows: Vec<IdRow> = sql_query("SELECT id FROM engrams WHERE embedding IS NULL LIMIT ?")
+    /// Get IDs of memories that need embeddings (for backfill)
+    pub fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<MemoryId>> {
+        let rows: Vec<IdRow> = sql_query("SELECT id FROM memories WHERE embedding IS NULL LIMIT ?")
             .bind::<diesel::sql_types::BigInt, _>(limit as i64)
             .load(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -227,11 +227,11 @@ impl<'a> VectorSearch<'a> {
         Ok(ids)
     }
 
-    /// Get IDs of engrams that have NO enrichments (for incremental enrichment backfill).
-    pub fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+    /// Get IDs of memories that have NO enrichments (for incremental enrichment backfill).
+    pub fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<MemoryId>> {
         let rows: Vec<IdRow> = sql_query(
-            "SELECT id FROM engrams \
-             WHERE id NOT IN (SELECT DISTINCT engram_id FROM engram_enrichments)",
+            "SELECT id FROM memories \
+             WHERE id NOT IN (SELECT DISTINCT memory_id FROM memory_enrichments)",
         )
         .load(self.conn)
         .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -246,12 +246,12 @@ impl<'a> VectorSearch<'a> {
         Ok(ids)
     }
 
-    /// Update embedding for a single engram
-    pub fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+    /// Update embedding for a single memory
+    pub fn set_embedding(&mut self, id: &MemoryId, embedding: &[f32]) -> StorageResult<()> {
         let bytes = embedding_to_bytes(embedding);
         let id_str = id.to_string();
 
-        sql_query("UPDATE engrams SET embedding = ? WHERE id = ?")
+        sql_query("UPDATE memories SET embedding = ? WHERE id = ?")
             .bind::<Nullable<Binary>, _>(Some(&bytes[..]))
             .bind::<Text, _>(&id_str)
             .execute(self.conn)
@@ -263,18 +263,18 @@ impl<'a> VectorSearch<'a> {
     /// Clear all embeddings (set to NULL) for model migration.
     /// Returns the number of affected rows.
     pub fn clear_all_embeddings(&mut self) -> StorageResult<usize> {
-        let result = sql_query("UPDATE engrams SET embedding = NULL WHERE embedding IS NOT NULL")
+        let result = sql_query("UPDATE memories SET embedding = NULL WHERE embedding IS NOT NULL")
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(result)
     }
 
-    /// Get embedding for a single engram
-    pub fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+    /// Get embedding for a single memory
+    pub fn get_embedding(&mut self, id: &MemoryId) -> StorageResult<Option<Vec<f32>>> {
         let id_str = id.to_string();
 
         let row: Option<OptionalEmbeddingRow> =
-            sql_query("SELECT embedding FROM engrams WHERE id = ?")
+            sql_query("SELECT embedding FROM memories WHERE id = ?")
                 .bind::<Text, _>(&id_str)
                 .get_result(self.conn)
                 .optional()
@@ -286,11 +286,11 @@ impl<'a> VectorSearch<'a> {
         }
     }
 
-    /// Store enrichment embeddings for an engram.
-    /// Replaces any existing enrichments for this engram.
+    /// Store enrichment embeddings for a memory.
+    /// Replaces any existing enrichments for this memory.
     pub fn set_enrichment_embeddings(
         &mut self,
-        id: &EngramId,
+        id: &MemoryId,
         embeddings: &[Vec<f32>],
         source: &str,
     ) -> StorageResult<()> {
@@ -300,8 +300,8 @@ impl<'a> VectorSearch<'a> {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // Delete existing enrichments for this engram
-        sql_query("DELETE FROM engram_enrichments WHERE engram_id = ?")
+        // Delete existing enrichments for this memory
+        sql_query("DELETE FROM memory_enrichments WHERE memory_id = ?")
             .bind::<Text, _>(&id_str)
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -310,7 +310,7 @@ impl<'a> VectorSearch<'a> {
         for (seq, embedding) in embeddings.iter().enumerate() {
             let bytes = embedding_to_bytes(embedding);
             sql_query(
-                "INSERT INTO engram_enrichments (engram_id, seq, embedding, source, created_at) \
+                "INSERT INTO memory_enrichments (memory_id, seq, embedding, source, created_at) \
                  VALUES (?, ?, ?, ?, ?)",
             )
             .bind::<Text, _>(&id_str)
@@ -325,19 +325,19 @@ impl<'a> VectorSearch<'a> {
         Ok(())
     }
 
-    /// Delete all enrichment embeddings for an engram.
-    pub fn delete_enrichments(&mut self, id: &EngramId) -> StorageResult<()> {
+    /// Delete all enrichment embeddings for a memory.
+    pub fn delete_enrichments(&mut self, id: &MemoryId) -> StorageResult<()> {
         let id_str = id.to_string();
-        sql_query("DELETE FROM engram_enrichments WHERE engram_id = ?")
+        sql_query("DELETE FROM memory_enrichments WHERE memory_id = ?")
             .bind::<Text, _>(&id_str)
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(())
     }
 
-    /// Count total enrichment vectors across all engrams.
+    /// Count total enrichment vectors across all memories.
     pub fn count_enrichments(&mut self) -> StorageResult<usize> {
-        let row: CountRow = sql_query("SELECT COUNT(*) as cnt FROM engram_enrichments")
+        let row: CountRow = sql_query("SELECT COUNT(*) as cnt FROM memory_enrichments")
             .get_result(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(row.cnt as usize)
@@ -346,7 +346,7 @@ impl<'a> VectorSearch<'a> {
     /// Clear all enrichment embeddings for migration purposes.
     /// Returns the number of affected rows.
     pub fn clear_all_enrichments(&mut self) -> StorageResult<usize> {
-        let result = sql_query("DELETE FROM engram_enrichments")
+        let result = sql_query("DELETE FROM memory_enrichments")
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
         Ok(result)
@@ -356,28 +356,28 @@ impl<'a> VectorSearch<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engram::Engram;
-    use crate::engram::storage::EngramStorage;
-    use crate::engram::storage::Storage;
+    use crate::memory_core::Memory;
+    use crate::memory_core::storage::MemoryStorage;
+    use crate::memory_core::storage::Storage;
 
     #[test]
     fn vector_search_basics() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        // Create engrams with embeddings
-        let mut e1 = Engram::new("Rust programming language");
+        // Create memories with embeddings
+        let mut e1 = Memory::new("Rust programming language");
         e1.embedding = Some(vec![1.0, 0.0, 0.0]); // Unit vector along x
 
-        let mut e2 = Engram::new("Python programming language");
+        let mut e2 = Memory::new("Python programming language");
         e2.embedding = Some(vec![0.9, 0.1, 0.0]); // Similar to e1
 
-        let mut e3 = Engram::new("Cooking recipes");
+        let mut e3 = Memory::new("Cooking recipes");
         e3.embedding = Some(vec![0.0, 1.0, 0.0]); // Orthogonal to e1
 
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
-        storage.save_engram(&e3).unwrap();
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
+        storage.save_memory(&e3).unwrap();
 
         // Search for similar to e1's embedding
         let mut vs = VectorSearch::new(storage.connection());
@@ -389,22 +389,22 @@ mod tests {
     }
 
     #[test]
-    fn find_similar_to_engram() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+    fn find_similar_to_memory() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let mut e1 = Engram::new("Machine learning basics");
+        let mut e1 = Memory::new("Machine learning basics");
         e1.embedding = Some(vec![1.0, 0.0, 0.0]);
 
-        let mut e2 = Engram::new("Deep learning neural networks");
+        let mut e2 = Memory::new("Deep learning neural networks");
         e2.embedding = Some(vec![0.95, 0.05, 0.0]);
 
-        let mut e3 = Engram::new("Gardening tips");
+        let mut e3 = Memory::new("Gardening tips");
         e3.embedding = Some(vec![0.0, 0.0, 1.0]);
 
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
-        storage.save_engram(&e3).unwrap();
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
+        storage.save_memory(&e3).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
         let results = vs.find_similar_to(&e1.id, 10, 0.5).unwrap();
@@ -416,16 +416,16 @@ mod tests {
 
     #[test]
     fn count_embeddings() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let mut e1 = Engram::new("With embedding");
+        let mut e1 = Memory::new("With embedding");
         e1.embedding = Some(vec![1.0, 0.0, 0.0]);
 
-        let e2 = Engram::new("Without embedding");
+        let e2 = Memory::new("Without embedding");
 
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 
@@ -435,20 +435,20 @@ mod tests {
 
     #[test]
     fn clear_all_embeddings() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let mut e1 = Engram::new("Has embedding 1");
+        let mut e1 = Memory::new("Has embedding 1");
         e1.embedding = Some(vec![1.0, 0.0, 0.0]);
 
-        let mut e2 = Engram::new("Has embedding 2");
+        let mut e2 = Memory::new("Has embedding 2");
         e2.embedding = Some(vec![0.0, 1.0, 0.0]);
 
-        let e3 = Engram::new("No embedding");
+        let e3 = Memory::new("No embedding");
 
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
-        storage.save_engram(&e3).unwrap();
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
+        storage.save_memory(&e3).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
         assert_eq!(vs.count_with_embeddings().unwrap(), 2);
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn clear_all_embeddings_empty_db() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
@@ -478,20 +478,20 @@ mod tests {
         // Verify that the storage layer (SQL, blob format) has no hardcoded
         // dimension assumptions. Both small and large embeddings are stored
         // and retrieved correctly via the same code paths.
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         // Simulate 384-dim embedding (old model)
         let small_emb: Vec<f32> = (0..384).map(|i| (i as f32) / 384.0).collect();
-        let mut e1 = Engram::new("Small embedding");
+        let mut e1 = Memory::new("Small embedding");
         e1.embedding = Some(small_emb.clone());
-        storage.save_engram(&e1).unwrap();
+        storage.save_memory(&e1).unwrap();
 
         // Simulate 1024-dim embedding (new model)
         let large_emb: Vec<f32> = (0..1024).map(|i| (i as f32) / 1024.0).collect();
-        let mut e2 = Engram::new("Large embedding");
+        let mut e2 = Memory::new("Large embedding");
         e2.embedding = Some(large_emb.clone());
-        storage.save_engram(&e2).unwrap();
+        storage.save_memory(&e2).unwrap();
 
         // Both should be stored and retrievable
         let mut vs = VectorSearch::new(storage.connection());
@@ -527,11 +527,11 @@ mod tests {
 
     #[test]
     fn enrichment_vectors_stored_and_retrieved() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Test memory");
-        storage.save_engram(&e1).unwrap();
+        let e1 = Memory::new("Test memory");
+        storage.save_memory(&e1).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
         assert_eq!(vs.count_enrichments().unwrap(), 0);
@@ -548,13 +548,13 @@ mod tests {
 
     #[test]
     fn find_similar_includes_enrichment_vectors() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        // Engram whose primary embedding does NOT match the query
-        let mut e1 = Engram::new("Memory about cooking");
+        // Memory whose primary embedding does NOT match the query
+        let mut e1 = Memory::new("Memory about cooking");
         e1.embedding = Some(vec![0.0, 1.0, 0.0]); // orthogonal to query
-        storage.save_engram(&e1).unwrap();
+        storage.save_memory(&e1).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 
@@ -572,14 +572,14 @@ mod tests {
     }
 
     #[test]
-    fn find_similar_deduplicates_by_engram_id() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+    fn find_similar_deduplicates_by_memory_id() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        // Engram whose primary embedding also matches the query
-        let mut e1 = Engram::new("Memory that matches multiple ways");
+        // Memory whose primary embedding also matches the query
+        let mut e1 = Memory::new("Memory that matches multiple ways");
         e1.embedding = Some(vec![0.9, 0.1, 0.0]); // primary: good but not perfect
-        storage.save_engram(&e1).unwrap();
+        storage.save_memory(&e1).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 
@@ -591,7 +591,7 @@ mod tests {
         let results = vs.find_similar(&[1.0, 0.0, 0.0], 10, 0.0).unwrap();
 
         // Should only return ONE result for e1
-        assert_eq!(results.len(), 1, "Should deduplicate to one result per engram");
+        assert_eq!(results.len(), 1, "Should deduplicate to one result per memory");
         assert_eq!(results[0].id, e1.id);
         // The enrichment vector is an exact match so score should be 1.0 (highest wins)
         assert!(
@@ -603,11 +603,11 @@ mod tests {
 
     #[test]
     fn enrichment_cleanup_on_re_enrichment() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Some memory");
-        storage.save_engram(&e1).unwrap();
+        let e1 = Memory::new("Some memory");
+        storage.save_memory(&e1).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 
@@ -632,12 +632,12 @@ mod tests {
 
     #[test]
     fn delete_enrichments_removes_all() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let mut e1 = Engram::new("Memory with enrichment");
+        let mut e1 = Memory::new("Memory with enrichment");
         e1.embedding = Some(vec![0.0, 1.0, 0.0]); // orthogonal to query
-        storage.save_engram(&e1).unwrap();
+        storage.save_memory(&e1).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 
@@ -661,38 +661,38 @@ mod tests {
 
     #[test]
     fn cascade_delete_removes_enrichments() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory to delete");
-        storage.save_engram(&e1).unwrap();
+        let e1 = Memory::new("Memory to delete");
+        storage.save_memory(&e1).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
         vs.set_enrichment_embeddings(&e1.id, &[vec![1.0, 0.0, 0.0]], "llm")
             .unwrap();
         assert_eq!(vs.count_enrichments().unwrap(), 1);
 
-        // Delete the parent engram — FK CASCADE should remove enrichments too
+        // Delete the parent memory — FK CASCADE should remove enrichments too
         drop(vs);
-        storage.delete_engram(&e1.id).unwrap();
+        storage.delete_memory(&e1.id).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
         assert_eq!(
             vs.count_enrichments().unwrap(),
             0,
-            "Enrichments should be cascade-deleted with the parent engram"
+            "Enrichments should be cascade-deleted with the parent memory"
         );
     }
 
     #[test]
     fn clear_all_enrichments() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory one");
-        let e2 = Engram::new("Memory two");
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
+        let e1 = Memory::new("Memory one");
+        let e2 = Memory::new("Memory two");
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn clear_all_enrichments_empty_db() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
@@ -719,15 +719,15 @@ mod tests {
 
     #[test]
     fn get_ids_without_enrichments() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Has enrichment");
-        let e2 = Engram::new("No enrichment");
-        let e3 = Engram::new("Also no enrichment");
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
-        storage.save_engram(&e3).unwrap();
+        let e1 = Memory::new("Has enrichment");
+        let e2 = Memory::new("No enrichment");
+        let e3 = Memory::new("Also no enrichment");
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
+        storage.save_memory(&e3).unwrap();
 
         let mut vs = VectorSearch::new(storage.connection());
 

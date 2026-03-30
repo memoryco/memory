@@ -1,10 +1,10 @@
-//! Engram - A Neural Memory Substrate
+//! Memory - A Neural Memory Substrate
 //!
 //! An experimental memory system that models organic decay,
 //! associative links, and emergent behavior through feedback loops.
 //!
 //! Key concepts:
-//! - **Engrams** never get deleted, they sink through states: Active → Dormant → Deep → Archived
+//! - **Memories** never get deleted, they sink through states: Active → Dormant → Deep → Archived
 //! - **Associations** form automatically through Hebbian learning (co-access)
 //! - **Stimulation** propagates through the association network
 //! - **Decay** is organic but never destroys data - memories just become harder to access
@@ -14,7 +14,7 @@ pub mod bootstrap;
 pub mod brain;
 pub mod config_toml;
 #[allow(clippy::module_inception)]
-pub mod engram;
+pub mod memory;
 pub mod persistence;
 pub mod search;
 pub mod session;
@@ -23,7 +23,7 @@ pub mod substrate;
 
 pub use association::Association;
 pub use brain::Brain;
-pub use engram::{Engram, MemoryState};
+pub use memory::{Memory, MemoryState};
 #[allow(unused_imports)]
 pub use session::SessionContext;
 pub use session::generate_session_id;
@@ -35,8 +35,8 @@ pub use substrate::{RecallResult, SearchOptions, Substrate, SubstrateStats, TagM
 // Re-export identity types from the identity module for backwards compatibility
 pub use crate::identity::Identity;
 
-/// Unique identifier for an engram
-pub type EngramId = uuid::Uuid;
+/// Unique identifier for a memory
+pub type MemoryId = uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 

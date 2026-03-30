@@ -88,7 +88,7 @@ pub enum Command {
         command: LlmCommand,
     },
 
-    /// Generate embeddings and enrichments for all engrams
+    /// Generate embeddings and enrichments for all memories
     Generate {
         /// Only regenerate embeddings (skip enrichments)
         #[arg(long)]

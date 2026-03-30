@@ -6,7 +6,7 @@ use std::path::Path;
 const INSTRUCTIONS: &str = r#"## Lenses
 
 Lenses are task-specific context guides loaded whole into working memory.
-Unlike engrams (searched/recalled) or references (queried), lenses are
+Unlike memories (searched/recalled) or references (queried), lenses are
 meant to be held in context during an entire task.
 
 **When to use lenses:**
@@ -26,7 +26,7 @@ meant to be held in context during an entire task.
 3. Lens content is injected into conversation
 
 **Key distinction:**
-- Engrams: "What do I know about X?" → search, recall
+- Memories: "What do I know about X?" → search, recall
 - References: "What are the DSM criteria for Y?" → query, cite
 - Lenses: "Load the style guide" → hold entire guide while working
 "#;

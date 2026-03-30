@@ -1,14 +1,14 @@
-//! engram_recall - Actively recall memories to stimulate energy and Hebbian learning
+//! memory_recall - Actively recall memories to stimulate energy and Hebbian learning
 
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::tools::{format_engram, text_response};
+use crate::tools::{format_memory, text_response};
 
-pub struct EngramRecallTool;
+pub struct MemoryRecallTool;
 
 #[derive(Deserialize)]
 struct Args {
@@ -19,14 +19,14 @@ struct Args {
     session_id: String,
 }
 
-impl Tool<Context> for EngramRecallTool {
+impl Tool<Context> for MemoryRecallTool {
     fn name(&self) -> &str {
-        "engram_recall"
+        "memory_recall"
     }
 
     fn description(&self) -> &str {
         "Recall memories you are referencing in your response. Call IMMEDIATELY after \
-         engram_search, BEFORE writing your response \u{2014} while tool budget is available. \
+         memory_search, BEFORE writing your response \u{2014} while tool budget is available. \
          Do not defer to end-of-turn; that's when tool budget runs out.\n\
          \n\
          Two purposes: (1) stimulates the memory, increasing energy and preventing decay, \
@@ -82,7 +82,7 @@ impl Tool<Context> for EngramRecallTool {
             let mut total_affected = 0;
 
             for id_str in &args.ids {
-                let id: EngramId = id_str.parse().map_err(|e| {
+                let id: MemoryId = id_str.parse().map_err(|e| {
                     McpError::InvalidParams(format!("Invalid UUID '{}': {}", id_str, e))
                 })?;
 
@@ -102,8 +102,8 @@ impl Tool<Context> for EngramRecallTool {
                 recalled_count += 1;
                 total_affected += result.affected_count();
 
-                let engram = result.engram.as_ref().unwrap();
-                output.push_str(&format_engram(engram));
+                let mem = result.memory_entry.as_ref().unwrap();
+                output.push_str(&format_memory(mem));
 
                 if result.resurrected {
                     output.push_str(&format!(
@@ -129,7 +129,7 @@ impl Tool<Context> for EngramRecallTool {
                     .unwrap_or_default();
 
                 if let Some(query) = query_text {
-                    let recalled: Vec<EngramId> = args
+                    let recalled: Vec<MemoryId> = args
                         .ids
                         .iter()
                         .filter_map(|id_str| id_str.parse().ok())
@@ -158,12 +158,12 @@ impl Tool<Context> for EngramRecallTool {
             let mut session = brain
                 .load_session(&args.session_id)
                 .unwrap_or(None)
-                .unwrap_or_else(|| crate::engram::SessionContext::new(&args.session_id));
+                .unwrap_or_else(|| crate::memory_core::SessionContext::new(&args.session_id));
 
             session.touch();
 
             for id_str in &args.ids {
-                if let Ok(id) = id_str.parse::<crate::engram::EngramId>()
+                if let Ok(id) = id_str.parse::<crate::memory_core::MemoryId>()
                     && let Ok(Some(embedding)) = brain.get_embedding(&id)
                 {
                     session.update_centroid(&embedding, smoothing);
@@ -174,7 +174,7 @@ impl Tool<Context> for EngramRecallTool {
             let recalled_uuids: Vec<uuid::Uuid> = args
                 .ids
                 .iter()
-                .filter_map(|id_str| id_str.parse::<crate::engram::EngramId>().ok())
+                .filter_map(|id_str| id_str.parse::<crate::memory_core::MemoryId>().ok())
                 .collect();
             session.add_recalled(&recalled_uuids);
 

@@ -855,11 +855,11 @@
   // Build a fingerprint of what the user can actually see.
   // Ignores sub-percent energy drift that doesn't change the displayed value.
   function visualFingerprint(data) {
-    var engrams = data.engrams || [];
+    var memorys = data.memorys || [];
     var stats = data.stats;
     var parts = [];
-    for (var i = 0; i < engrams.length; i++) {
-      var e = engrams[i];
+    for (var i = 0; i < memorys.length; i++) {
+      var e = memorys[i];
       parts.push(e.id + ':' + Math.round((e.energy || 0) * 100) + ':' + (e.access_count || 0) + ':' + (e.state || ''));
     }
     if (stats) {
@@ -910,7 +910,7 @@
     var html = '';
     if (stats) {
       var total = stats.total || ((stats.active || 0) + (stats.dormant || 0) + (stats.deep || 0) + (stats.archived || 0));
-      html += row('engrams', total, 'var(--text-muted)');
+      html += row('memorys', total, 'var(--text-muted)');
       html += row('active', stats.active || 0, 'var(--accent-emerald)');
       html += row('dormant', stats.dormant || 0, 'var(--accent-amber)');
       html += row('deep', stats.deep || 0, 'var(--accent-violet)');
@@ -1683,9 +1683,9 @@
     } catch(e) { return iso; }
   }
 
-  function loadAssociations(engramId, container) {
+  function loadAssociations(memoryId, container) {
     container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">Loading...</div>';
-    apiFetch('/api/engrams/' + engramId + '/associations').then(function(data) {
+    apiFetch('/api/memorys/' + memoryId + '/associations').then(function(data) {
       var assocs = data.associations || [];
       if (assocs.length === 0) {
         container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">No associations</div>';
@@ -1706,42 +1706,42 @@
     });
   }
 
-  function renderMemory(engram) {
-    var sc = stateClass(engram.state);
-    var isExpanded = expandedMemoryId === engram.id;
-    var html = '<div class="memory-card fade-in' + (isExpanded ? ' expanded' : '') + '" onclick="toggleMemoryDetail(\'' + engram.id + '\')">';
+  function renderMemory(memory) {
+    var sc = stateClass(memory.state);
+    var isExpanded = expandedMemoryId === memory.id;
+    var html = '<div class="memory-card fade-in' + (isExpanded ? ' expanded' : '') + '" onclick="toggleMemoryDetail(\'' + memory.id + '\')">';
     html += '<div class="memory-card-header">';
     html += '<div class="memory-state">';
     html += '<span class="energy-dot ' + sc + '"></span>';
-    html += (engram.state_emoji || '') + ' ' + stateName(engram.state);
+    html += (memory.state_emoji || '') + ' ' + stateName(memory.state);
     html += '</div>';
-    html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteEngram(\'' + engram.id + '\')">DELETE</button>';
+    html += '<button class="btn btn-danger" onclick="event.stopPropagation(); deleteMemory(\'' + memory.id + '\')">DELETE</button>';
     html += '</div>';
 
     if (isExpanded) {
       html += '<div class="memory-detail">';
-      html += '<div class="memory-detail-full-content">' + escapeHtml(engram.content) + '</div>';
+      html += '<div class="memory-detail-full-content">' + escapeHtml(memory.content) + '</div>';
 
       html += '<div class="memory-detail-meta">';
-      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">id:</span><span class="memory-detail-id" onclick="event.stopPropagation(); navigator.clipboard.writeText(\'' + escapeHtml(engram.id) + '\').then(function(){showToast(\'ID copied\')})" title="Click to copy">' + escapeHtml(engram.id) + '</span></div>';
-      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">state:</span><span class="memory-detail-meta-value">' + escapeHtml((engram.state_emoji || '') + ' ' + stateName(engram.state)) + ' — ' + energyPercent(engram.energy) + '%</span></div>';
-      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">created:</span><span class="memory-detail-meta-value">' + escapeHtml(formatDate(engram.created_at)) + '</span></div>';
-      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">accessed:</span><span class="memory-detail-meta-value">' + escapeHtml(formatDate(engram.last_accessed)) + '</span></div>';
-      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">access count:</span><span class="memory-detail-meta-value">' + (engram.access_count || 0) + 'x</span></div>';
-      if (engram.confidence != null) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">confidence:</span><span class="memory-detail-meta-value">' + engram.confidence.toFixed(2) + '</span></div>';
-      if (engram.score != null) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">score:</span><span class="memory-detail-meta-value">' + engram.score.toFixed(2) + '</span></div>';
-      if (engram.tags && engram.tags.length > 0) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">tags:</span><span class="memory-detail-meta-value">' + escapeHtml(engram.tags.join(', ')) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">id:</span><span class="memory-detail-id" onclick="event.stopPropagation(); navigator.clipboard.writeText(\'' + escapeHtml(memory.id) + '\').then(function(){showToast(\'ID copied\')})" title="Click to copy">' + escapeHtml(memory.id) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">state:</span><span class="memory-detail-meta-value">' + escapeHtml((memory.state_emoji || '') + ' ' + stateName(memory.state)) + ' — ' + energyPercent(memory.energy) + '%</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">created:</span><span class="memory-detail-meta-value">' + escapeHtml(formatDate(memory.created_at)) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">accessed:</span><span class="memory-detail-meta-value">' + escapeHtml(formatDate(memory.last_accessed)) + '</span></div>';
+      html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">access count:</span><span class="memory-detail-meta-value">' + (memory.access_count || 0) + 'x</span></div>';
+      if (memory.confidence != null) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">confidence:</span><span class="memory-detail-meta-value">' + memory.confidence.toFixed(2) + '</span></div>';
+      if (memory.score != null) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">score:</span><span class="memory-detail-meta-value">' + memory.score.toFixed(2) + '</span></div>';
+      if (memory.tags && memory.tags.length > 0) html += '<div class="memory-detail-meta-row"><span class="memory-detail-meta-label">tags:</span><span class="memory-detail-meta-value">' + escapeHtml(memory.tags.join(', ')) + '</span></div>';
       html += '</div>';
 
       html += '<div class="memory-detail-section-label">Associations</div>';
-      html += '<div class="memory-associations" id="assoc-' + engram.id + '"><div style="color:var(--text-dim);font-size:0.75rem;">Loading...</div></div>';
+      html += '<div class="memory-associations" id="assoc-' + memory.id + '"><div style="color:var(--text-dim);font-size:0.75rem;">Loading...</div></div>';
       html += '</div>'; // memory-detail
     } else {
-      html += '<div class="memory-content">' + escapeHtml(truncate(engram.content, 200)) + '</div>';
+      html += '<div class="memory-content">' + escapeHtml(truncate(memory.content, 200)) + '</div>';
       html += '<div class="memory-meta">';
-      html += '<span>energy: ' + energyPercent(engram.energy) + '%</span>';
-      html += '<span>accessed: ' + (engram.access_count || 0) + 'x</span>';
-      if (engram.score != null) html += '<span>score: ' + engram.score.toFixed(2) + '</span>';
+      html += '<span>energy: ' + energyPercent(memory.energy) + '%</span>';
+      html += '<span>accessed: ' + (memory.access_count || 0) + 'x</span>';
+      if (memory.score != null) html += '<span>score: ' + memory.score.toFixed(2) + '</span>';
       html += '</div>';
     }
 
@@ -1776,7 +1776,7 @@
       return;
     }
 
-    var engrams = memoryData.engrams || [];
+    var memorys = memoryData.memorys || [];
     var stats = memoryData.stats || lastMemoryStats;
     if (memoryData.stats) {
       lastMemoryStats = memoryData.stats;
@@ -1803,7 +1803,7 @@
 
     // Filter by state if a filter is active
     if (memoryFilter) {
-      engrams = engrams.filter(function(e) {
+      memorys = memorys.filter(function(e) {
         return stateName(e.state) === memoryFilter;
       });
     }
@@ -1812,7 +1812,7 @@
     var searchInput = document.getElementById('memory-search');
     var isSearchActive = searchInput && searchInput.value.trim().length > 0;
     if (!isSearchActive) {
-      engrams.sort(function(a, b) {
+      memorys.sort(function(a, b) {
         if (memoryFilter === 'Dormant' || memoryFilter === 'Deep') {
           // Sort by energy descending first, then access_count descending
           if (b.energy !== a.energy) return b.energy - a.energy;
@@ -1825,7 +1825,7 @@
       });
     }
 
-    if (engrams.length === 0) {
+    if (memorys.length === 0) {
       var emptyHtml = '<div class="empty-state" style="min-height:30vh"><div class="icon">\u{1F9E0}</div><div class="message">No memories found</div><div class="hint">memories are created through AI conversations</div></div>';
       var temp = document.createElement('div');
       temp.innerHTML = emptyHtml;
@@ -1835,14 +1835,14 @@
     }
 
     var html = '';
-    var totalFiltered = memoryData.total_filtered || engrams.length;
+    var totalFiltered = memoryData.total_filtered || memorys.length;
     if (totalFiltered > 0) {
-      html += '<div style="font-family:\'JetBrains Mono\',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:0.75rem;">Showing ' + engrams.length + ' of ' + totalFiltered + '</div>';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:0.75rem;">Showing ' + memorys.length + ' of ' + totalFiltered + '</div>';
     }
 
     html += '<div class="memory-grid">';
-    engrams.forEach(function(engram) {
-      html += renderMemory(engram);
+    memorys.forEach(function(memory) {
+      html += renderMemory(memory);
     });
     html += '</div>';
     if (memoryData.has_more) {
@@ -1902,13 +1902,13 @@
   };
 
   window.loadMore = function() {
-    var current = memoryData ? (memoryData.engrams || []).length : 0;
+    var current = memoryData ? (memoryData.memorys || []).length : 0;
     memoryOffset = current;
     fetchMemories(true);
   };
 
-  window.deleteEngram = function(id) {
-    apiFetch('/api/engrams/' + id, { method: 'DELETE' }).then(function() {
+  window.deleteMemory = function(id) {
+    apiFetch('/api/memorys/' + id, { method: 'DELETE' }).then(function() {
       showToast('Memory deleted');
       lastVisualFingerprint = null;
       fetchMemories();
@@ -1920,16 +1920,16 @@
   function fetchMemories(append) {
     var q = document.getElementById('memory-search');
     var query = q ? q.value.trim() : '';
-    var url = '/api/engrams?limit=50&include_archived=true&include_deep=true';
+    var url = '/api/memorys?limit=50&include_archived=true&include_deep=true';
     if (query) url += '&q=' + encodeURIComponent(query);
     if (memoryFilter) url += '&state=' + encodeURIComponent(memoryFilter);
     if (memoryOffset > 0) url += '&offset=' + memoryOffset;
 
     apiFetch(url).then(function(data) {
       if (append && memoryData) {
-        var existing = memoryData.engrams || [];
-        var newEngrams = data.engrams || [];
-        data.engrams = existing.concat(newEngrams);
+        var existing = memoryData.memorys || [];
+        var newMemorys = data.memorys || [];
+        data.memorys = existing.concat(newMemorys);
       }
       // Visual fingerprint: only re-render if what the user sees actually changed.
       // Raw energy floats drift with decay but often round to the same display value.

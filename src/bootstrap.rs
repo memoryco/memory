@@ -20,8 +20,8 @@ pub fn bootstrap_all(
     references: &ReferenceManager,
     memory_home: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Engram first (core memory instructions)
-    crate::engram::bootstrap::bootstrap(identity)?;
+    // Memory first (core memory instructions)
+    crate::memory_core::bootstrap::bootstrap(identity)?;
 
     // Lenses (adds instructions + creates directory)
     crate::lenses::bootstrap(identity, lenses_dir)?;
@@ -76,7 +76,7 @@ mod tests {
         let all_text: String = after.instructions.join("\n");
         assert!(
             all_text.contains("<workflow>"),
-            "Missing engram instructions"
+            "Missing memory instructions"
         );
         assert!(
             all_text.contains("## Lenses"),

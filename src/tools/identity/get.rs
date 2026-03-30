@@ -5,7 +5,7 @@ use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::tools::engram::EngramSearchTool;
+use crate::tools::memory::MemorySearchTool;
 use crate::tools::{extract_text, text_response};
 
 pub struct IdentityGetTool;
@@ -32,10 +32,10 @@ impl Tool<Context> for IdentityGetTool {
          alongside identity in a single call.\n\
          \n\
          After calling identity_get, follow this workflow for EVERY user message:\n\
-         1. Search for context \u{2014} Call engram_search with keywords from the user's message\n\
-         2. Recall what you'll use \u{2014} Call engram_recall with IDs of memories you will reference (BEFORE responding)\n\
+         1. Search for context \u{2014} Call memory_search with keywords from the user's message\n\
+         2. Recall what you'll use \u{2014} Call memory_recall with IDs of memories you will reference (BEFORE responding)\n\
          3. Respond \u{2014} Incorporate context from search and recall\n\
-         4. Store what you learned \u{2014} Call engram_create with any new facts (MANDATORY if you learned anything)"
+         4. Store what you learned \u{2014} Call memory_create with any new facts (MANDATORY if you learned anything)"
     }
 
     fn schema(&self) -> JsonValue {
@@ -63,7 +63,7 @@ impl Tool<Context> for IdentityGetTool {
 
         // Generate a session ID for this conversation. Every subsequent tool
         // call that accepts session_id will echo it back so it survives compaction.
-        let session_id = crate::engram::generate_session_id();
+        let session_id = crate::memory_core::generate_session_id();
 
         // Phase 1: Load identity (the framing lens)
         let mut output = format!("session_id: {}\n\n", session_id);
@@ -91,7 +91,7 @@ impl Tool<Context> for IdentityGetTool {
         // Phase 2: Run search queries if provided (piggyback on the same call)
         if let Some(queries) = &args.queries {
             if !queries.is_empty() {
-                let search_tool = EngramSearchTool;
+                let search_tool = MemorySearchTool;
                 output.push_str("\n\n---\n\n# Memory Search Results\n\n");
 
                 let search_args = json!({ "queries": queries, "session_id": session_id });

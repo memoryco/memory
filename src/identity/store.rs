@@ -812,12 +812,12 @@ mod tests {
     fn upsert_multiple_instructions_by_marker() {
         let mut store = test_store();
 
-        let engram = "## Memory Workflow\nSearch, recall, store.";
+        let mem = "## Memory Workflow\nSearch, recall, store.";
         let plans = "## Plans\nTrack multi-step tasks.";
         let lenses = "## Lenses\nLoad context guides.";
 
         store
-            .upsert_instruction(engram, "## Memory Workflow")
+            .upsert_instruction(mem, "## Memory Workflow")
             .unwrap();
         store.upsert_instruction(plans, "## Plans").unwrap();
         store.upsert_instruction(lenses, "## Lenses").unwrap();
@@ -832,7 +832,7 @@ mod tests {
 
         let identity = store.get().unwrap();
         assert_eq!(identity.instructions.len(), 3);
-        assert!(identity.instructions.contains(&engram.to_string()));
+        assert!(identity.instructions.contains(&mem.to_string()));
         assert!(identity.instructions.contains(&plans_v2.to_string()));
         assert!(identity.instructions.contains(&lenses.to_string()));
         // v1 plans text should be gone

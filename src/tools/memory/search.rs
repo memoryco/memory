@@ -1,4 +1,4 @@
-//! engram_search - Semantic memory search with energy weighting
+//! memory_search - Semantic memory search with energy weighting
 
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
@@ -17,7 +17,7 @@ fn write_trace_file(
     memory_home: &Path,
     session_id: &str,
     query: &str,
-    info: &crate::engram::search::DebugInfo,
+    info: &crate::memory_core::search::DebugInfo,
 ) -> Option<PathBuf> {
     use std::fmt::Write as FmtWrite;
     use std::io::Write;
@@ -80,7 +80,7 @@ fn write_trace_file(
     }
 }
 
-pub struct EngramSearchTool;
+pub struct MemorySearchTool;
 
 #[derive(Deserialize)]
 struct Args {
@@ -134,7 +134,7 @@ struct BatchArgs {
     session_id: String,
 }
 
-impl EngramSearchTool {
+impl MemorySearchTool {
     /// Run a single search query through the full pipeline.
     /// Called by the batch `execute` wrapper and by `identity_get`.
     pub fn search_for_query(
@@ -149,20 +149,20 @@ impl EngramSearchTool {
         let limit = args.limit.unwrap_or(10);
         let include_deep = args.include_deep.unwrap_or(false);
         let include_archived = args.include_archived.unwrap_or(false);
-        let composite_query = crate::engram::search::is_composite_query(&args.query);
-        let inferential_query = crate::engram::search::is_inferential_query(&args.query);
+        let composite_query = crate::memory_core::search::is_composite_query(&args.query);
+        let inferential_query = crate::memory_core::search::is_inferential_query(&args.query);
 
         // Parse optional date-range filters
         let created_after: Option<i64> = args
             .created_after
             .as_deref()
-            .map(crate::engram::search::parse_timestamp)
+            .map(crate::memory_core::search::parse_timestamp)
             .transpose()
             .map_err(|e| McpError::InvalidParams(e))?;
         let created_before: Option<i64> = args
             .created_before
             .as_deref()
-            .map(crate::engram::search::parse_timestamp)
+            .map(crate::memory_core::search::parse_timestamp)
             .transpose()
             .map_err(|e| McpError::InvalidParams(e))?;
 
@@ -219,7 +219,7 @@ impl EngramSearchTool {
 
         // Query expansion: generate variant queries
         let variants = if query_expansion_enabled {
-            crate::engram::search::llm_query_variants(&context.llm, &args.query)
+            crate::memory_core::search::llm_query_variants(&context.llm, &args.query)
                 .unwrap_or_else(|| super::query_expansion::expand_query(&args.query))
         } else {
             vec![args.query.clone()]
@@ -262,7 +262,7 @@ impl EngramSearchTool {
             }
         };
 
-        let params = crate::engram::search::SearchPipelineParams {
+        let params = crate::memory_core::search::SearchPipelineParams {
             query: args.query.clone(),
             variants,
             fallback_terms,
@@ -289,7 +289,7 @@ impl EngramSearchTool {
         };
 
         let pipeline_result =
-            crate::engram::search::run_search_pipeline(&brain, &context.llm, &params)
+            crate::memory_core::search::run_search_pipeline(&brain, &context.llm, &params)
                 .map_err(|e| McpError::ToolError(e))?;
 
         let scored = pipeline_result.results;
@@ -319,8 +319,8 @@ impl EngramSearchTool {
         if scored.is_empty() {
             let mut output = format!(
                 "session_id: {}\n\n\
-                 ⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
-                 💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
+                 ⚡ **REQUIRED:** Call memory_recall on IDs you use. \n\
+                 💾 **REQUIRED:** Call memory_create if you learn ANY new facts this turn.\n\
                  ---\n\n",
                 args.session_id
             );
@@ -331,8 +331,8 @@ impl EngramSearchTool {
 
         let mut output = format!(
             "session_id: {}\n\n\
-             ⚡ **REQUIRED:** Call engram_recall on IDs you use. \n\
-             💾 **REQUIRED:** Call engram_create if you learn ANY new facts this turn.\n\
+             ⚡ **REQUIRED:** Call memory_recall on IDs you use. \n\
+             💾 **REQUIRED:** Call memory_create if you learn ANY new facts this turn.\n\
              ---\n\n",
             args.session_id
         );
@@ -340,9 +340,9 @@ impl EngramSearchTool {
         // Show chain hints before memory listings
         for hint in &chain_hints {
             let truncated_content =
-                crate::engram::search::truncate_chain_hint_content(&hint.anchor_content, 40);
+                crate::memory_core::search::truncate_chain_hint_content(&hint.anchor_content, 40);
             output.push_str(&format!(
-                "🔗 Procedure chain detected: {} [{}] has {} ordered steps. Use engram_associations to walk the chain.\n\n",
+                "🔗 Procedure chain detected: {} [{}] has {} ordered steps. Use memory_associations to walk the chain.\n\n",
                 truncated_content, hint.anchor_id, hint.ordered_step_count
             ));
         }
@@ -415,9 +415,9 @@ impl EngramSearchTool {
     }
 }
 
-impl Tool<Context> for EngramSearchTool {
+impl Tool<Context> for MemorySearchTool {
     fn name(&self) -> &str {
-        "engram_search"
+        "memory_search"
     }
 
     fn description(&self) -> &str {
@@ -435,7 +435,7 @@ impl Tool<Context> for EngramSearchTool {
          - Use created_after/created_before (ISO 8601 or unix epoch) for time-based \
          queries like 'what did I work on last week?'\n\
          \n\
-         If results include a \u{1f517} procedure chain hint, call engram_associations \
+         If results include a \u{1f517} procedure chain hint, call memory_associations \
          on the anchor with direction: outbound to get the full ordered steps."
     }
 

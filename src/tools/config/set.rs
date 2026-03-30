@@ -5,7 +5,7 @@ use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::engram::config_toml::{ConfigValue, write_config_key};
+use crate::memory_core::config_toml::{ConfigValue, write_config_key};
 use crate::tools::text_response;
 
 pub struct ConfigSetTool;

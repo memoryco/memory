@@ -1,6 +1,6 @@
-//! engram_graph - Get full association graph for visualization
+//! memory_graph - Get full association graph for visualization
 
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use crate::Context;
 use crate::tools::{GRAPH_TEMPLATE, text_response, truncate_content};
 
-pub struct EngramGraphTool;
+pub struct MemoryGraphTool;
 
 #[derive(Deserialize)]
 struct Args {
@@ -19,9 +19,9 @@ struct Args {
     min_weight: Option<f64>,
 }
 
-impl Tool<Context> for EngramGraphTool {
+impl Tool<Context> for MemoryGraphTool {
     fn name(&self) -> &str {
-        "engram_graph"
+        "memory_graph"
     }
 
     fn description(&self) -> &str {
@@ -73,7 +73,7 @@ impl Tool<Context> for EngramGraphTool {
             .collect();
 
         // Collect all node IDs that are part of associations
-        let mut node_ids: HashSet<EngramId> = HashSet::new();
+        let mut node_ids: HashSet<MemoryId> = HashSet::new();
         for assoc in &filtered {
             node_ids.insert(assoc.from);
             node_ids.insert(assoc.to);

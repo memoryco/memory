@@ -1,6 +1,6 @@
 //! Embedding generation for semantic search
 //!
-//! Provides vector embeddings for engram content, enabling semantic
+//! Provides vector embeddings for memory content, enabling semantic
 //! similarity search beyond keyword matching. Uses the hardcoded
 //! Nemotron embedding model via llama.cpp (GGUF).
 

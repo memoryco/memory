@@ -6,7 +6,7 @@ use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};
 
 use crate::Context;
 use crate::identity::{classify, IdentityField};
-use crate::engram::{Value, Preference, Relationship, Antipattern};
+use crate::memory_core::{Value, Preference, Relationship, Antipattern};
 use crate::tools::text_response;
 
 pub struct IdentityAddTool;

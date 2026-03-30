@@ -1,22 +1,22 @@
-//! Diesel model types for engram database rows
+//! Diesel model types for memory database rows
 //!
 //! These are the DB-layer representations. They get converted to/from
-//! the domain types in `crate::engram::*`.
+//! the domain types in `crate::memory_core::*`.
 
 use super::schema::*;
 use diesel::prelude::*;
 
 // ============================================================================
-// ENGRAMS
+// MEMORIES
 // ============================================================================
 
-/// Queryable engram row (SELECT)
+/// Queryable memory row (SELECT)
 /// Field order MUST match schema.rs column order
 #[allow(dead_code)] // Fields mapped from DB schema
 #[derive(Debug, Clone, Queryable, Selectable)]
-#[diesel(table_name = engrams)]
+#[diesel(table_name = memories)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct EngramRow {
+pub struct MemoryRow {
     pub id: String,
     pub content: String,
     pub energy: f32,
@@ -29,10 +29,10 @@ pub struct EngramRow {
     pub embedding: Option<Vec<u8>>,
 }
 
-/// Insertable engram (INSERT/REPLACE)
+/// Insertable memory (INSERT/REPLACE)
 #[derive(Debug, Clone, Insertable, AsChangeset)]
-#[diesel(table_name = engrams)]
-pub struct NewEngram<'a> {
+#[diesel(table_name = memories)]
+pub struct NewMemory<'a> {
     pub id: &'a str,
     pub content: &'a str,
     pub energy: f32,
@@ -160,12 +160,12 @@ pub struct NewAccessLogEntry<'a> {
 // CONVERSIONS: DB rows -> Domain types
 // ============================================================================
 
-use crate::engram::{Association, Engram, MemoryState};
+use crate::memory_core::{Association, Memory, MemoryState};
 use crate::storage::StorageError;
 
-impl EngramRow {
-    /// Convert DB row to domain Engram
-    pub fn into_engram(self) -> Result<Engram, StorageError> {
+impl MemoryRow {
+    /// Convert DB row to domain Memory
+    pub fn into_memory(self) -> Result<Memory, StorageError> {
         let id = uuid::Uuid::parse_str(&self.id)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
 
@@ -185,7 +185,7 @@ impl EngramRow {
         let tags: Vec<String> = serde_json::from_str(&self.tags)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
 
-        Ok(Engram {
+        Ok(Memory {
             id,
             content: self.content,
             energy: self.energy as f64,

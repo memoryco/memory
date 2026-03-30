@@ -118,7 +118,7 @@ These are currently hardcoded. They're tunable but unlikely to need user-facing 
 ## Bench-Specific Notes
 
 The bench harness (`bench/locomo/config.py`) has its own search settings:
-- `SEARCH_LIMIT = 10` (passed to engram_search as `limit`)
+- `SEARCH_LIMIT = 10` (passed to memory_search as `limit`)
 - `SEARCH_MIN_SCORE = 0.3` (passed as `min_score`)
 
 These are caller-side. The server-side config provides defaults when callers don't specify. The bench always specifies, so server defaults only matter for real MCP usage (Claude Desktop, etc).

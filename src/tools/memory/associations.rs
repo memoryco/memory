@@ -1,6 +1,6 @@
-//! engram_associations - Inspect associations for a single memory
+//! memory_associations - Inspect associations for a single memory
 
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
@@ -8,7 +8,7 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::{text_response, truncate_content};
 
-pub struct EngramAssociationsTool;
+pub struct MemoryAssociationsTool;
 
 #[derive(Deserialize)]
 struct Args {
@@ -17,9 +17,9 @@ struct Args {
     direction: Option<String>,
 }
 
-impl Tool<Context> for EngramAssociationsTool {
+impl Tool<Context> for MemoryAssociationsTool {
     fn name(&self) -> &str {
-        "engram_associations"
+        "memory_associations"
     }
 
     fn description(&self) -> &str {
@@ -55,7 +55,7 @@ impl Tool<Context> for EngramAssociationsTool {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let id: EngramId = args
+        let id: MemoryId = args
             .id
             .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;

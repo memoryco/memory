@@ -1,7 +1,7 @@
-//! MCP tools for the engram memory system.
+//! MCP tools for the memory system.
 //!
 //! Tools are organized by category:
-//! - `engram` - Memory CRUD and graph operations
+//! - `memory` - Memory CRUD and graph operations
 //! - `identity` - Persona, values, preferences management
 //! - `config` - System configuration
 //! - `lenses` - Task-specific context guides
@@ -9,28 +9,28 @@
 
 pub mod config;
 pub mod date_resolve;
-pub mod engram;
+pub mod memory;
 pub mod identity;
 pub mod lenses;
 pub mod open_dashboard;
 
 pub mod reference;
 
-use crate::engram::Engram;
+use crate::memory_core::Memory;
 use sml_mcps::{CallToolResult, Content};
 
 // Re-export all tools for easy registration
-pub use engram::{
-    EngramAssociateTool,
-    EngramAssociationsTool,
-    // tools::engram (tool implementations)
-    EngramCreateTool,
-    EngramDeleteTool,
-    EngramGetTool,
-    EngramGraphTool,
-    EngramRecallTool,
-    EngramSearchTool,
-    EngramStatsTool,
+pub use memory::{
+    MemoryAssociateTool,
+    MemoryAssociationsTool,
+    // tools::memory (tool implementations)
+    MemoryCreateTool,
+    MemoryDeleteTool,
+    MemoryGetTool,
+    MemoryGraphTool,
+    MemoryRecallTool,
+    MemorySearchTool,
+    MemoryStatsTool,
 };
 
 pub use identity::{
@@ -91,8 +91,8 @@ pub fn extract_text(result: &CallToolResult) -> String {
         .join("\n")
 }
 
-/// Format an engram for display
-pub fn format_engram(e: &Engram) -> String {
+/// Format a memory for display
+pub fn format_memory(e: &Memory) -> String {
     format!(
         "ID: {}\nContent: {}\nState: {} (energy: {:.2})\nAccess count: {}\nCreated: {}",
         e.id,

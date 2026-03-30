@@ -3,27 +3,27 @@
 **Status:** Draft
 **Author:** Brandon Sneed + Porter
 **Date:** March 14, 2026
-**Inspired by:** DeepSeek Engram paper (arXiv:2601.07372) — context-aware gating mechanism
+**Inspired by:** DeepSeek Memory paper (arXiv:2601.07372) — context-aware gating mechanism
 
 ---
 
 ## Problem
 
-When MemoryCo's memory MCP server receives an `engram_recall` query, it has no knowledge
+When MemoryCo's memory MCP server receives an `memory_recall` query, it has no knowledge
 of the broader conversation context. A query for "Mochi" returns results ranked purely by
 semantic/keyword relevance — the server can't distinguish between the user's cat and Japanese
 rice cakes because it doesn't know what the conversation is about.
 
-DeepSeek's Engram paper solved an analogous problem inside the transformer by gating
+DeepSeek's Memory paper solved an analogous problem inside the transformer by gating
 retrieved memory against the current hidden state. We need the same capability at the MCP
 layer, but we can't see the model's hidden state — we only see tool call parameters.
 
 ## Insight
 
 We already receive signal for free. Every tool call is a breadcrumb:
-- `engram_recall("twilio destination implementation")` → conversation is about Rust/Twilio work
-- `engram_recall("mock server encryption")` → topic narrows
-- `engram_create(...)` → content tells us what's being discussed
+- `memory_recall("twilio destination implementation")` → conversation is about Rust/Twilio work
+- `memory_recall("mock server encryption")` → topic narrows
+- `memory_create(...)` → content tells us what's being discussed
 - `identity_get(session_id=...)` → session starts, we know who this is
 
 We don't need the LLM to summarize context for us. We don't need the caller to pass extra
@@ -65,8 +65,8 @@ time and effectively zero collision risk — you'd need ~65K sessions in the sam
 
 ### session_id is Required, Per-Call, and Echoed
 
-`session_id` is a **required parameter** on `engram_recall`, `engram_search`, and
-`engram_create`. Every response from these tools echoes the session_id as the first
+`session_id` is a **required parameter** on `memory_recall`, `memory_search`, and
+`memory_create`. Every response from these tools echoes the session_id as the first
 line of output:
 
 ```
@@ -99,9 +99,9 @@ The stateless per-call design works correctly in both transport modes.
 
 | Tool | Signal contributed | Rationale |
 |------|-------------------|-----------|
-| `engram_recall` | Recalled memory embeddings | Direct topic signal — what the user is asking about |
-| `engram_search` | Query string | Same as recall — semantic search query = topic signal |
-| `engram_create` | Memory content | If you're creating memories about a topic, strong signal |
+| `memory_recall` | Recalled memory embeddings | Direct topic signal — what the user is asking about |
+| `memory_search` | Query string | Same as recall — semantic search query = topic signal |
+| `memory_create` | Memory content | If you're creating memories about a topic, strong signal |
 
 `identity_get` **generates** the session_id and passes it to any piggy-backed searches.
 
@@ -109,9 +109,9 @@ All other tools are excluded:
 
 | Tool | Why excluded |
 |------|-------------|
-| `engram_associate` | Structural operation on IDs. The IDs were already found via recall/search, so the topic signal already entered the session. Would require extra DB lookups for marginal gain. |
-| `engram_get` | Fetch by ID — same reasoning as associate. Already found via recall/search. |
-| `engram_delete` | Destructive housekeeping, not topic signal. |
+| `memory_associate` | Structural operation on IDs. The IDs were already found via recall/search, so the topic signal already entered the session. Would require extra DB lookups for marginal gain. |
+| `memory_get` | Fetch by ID — same reasoning as associate. Already found via recall/search. |
+| `memory_delete` | Destructive housekeeping, not topic signal. |
 | `identity_*` | Persona/config, not conversation topic. |
 | `reference_search` | Different domain (clinical references). Don't want DSM-5 queries biasing personal memory retrieval. |
 | `plan_*`, `lenses_*`, `config_*` | Administrative, not topic signal. |
@@ -141,8 +141,8 @@ On every tool call that includes a `session_id`:
 1. Load session from DB (or create)
 2. Update `last_seen_at`
 3. Extract topic signal from the call:
-   - `engram_recall` / `engram_search`: the query string
-   - `engram_create`: the memory content
+   - `memory_recall` / `memory_search`: the query string
+   - `memory_create`: the memory content
 4. If signal was extracted:
    a. Append text to `queries` JSON array (capped at `session_max_queries`)
    b. Embed the text using the existing embedding model
@@ -153,7 +153,7 @@ On every tool call that includes a `session_id`:
 
 ### Retrieval Biasing (Read Path)
 
-When `engram_recall` or `engram_search` is called with a `session_id` that has an
+When `memory_recall` or `memory_search` is called with a `session_id` that has an
 accumulated centroid:
 
 1. Run existing retrieval pipeline (FTS5 + vector search)
@@ -211,7 +211,7 @@ Query arrives with session_id
 ### Session Expiry
 
 Sessions use a simple age-based expiry rather than the Hebbian energy/decay model used
-by engrams. This is intentional — sessions are lightweight operational state, not memories.
+by memorys. This is intentional — sessions are lightweight operational state, not memories.
 They don't need to "fade" gradually; they're either still useful or they're not.
 
 - On server startup (in `apply_maintenance`), delete all sessions where
@@ -256,13 +256,13 @@ about weekend plans.
 ### Predictive Prefetch (Future)
 Once we have session centroids, we can precompute "memories this session is likely to
 need" and have them ready before the next tool call arrives. The centroid tells us the
-topic neighborhood — we can prefetch the top N engrams in that neighborhood.
+topic neighborhood — we can prefetch the top N memorys in that neighborhood.
 
 ## Action Items
 
 - [x] Add `sessions` table to brain.db schema
 - [x] Add `SessionContext` struct with accumulation + centroid update logic
-- [x] ~~Add `session_id` as optional param~~ → Made `session_id` **required** on `engram_recall`, `engram_search`, `engram_create`
+- [x] ~~Add `session_id` as optional param~~ → Made `session_id` **required** on `memory_recall`, `memory_search`, `memory_create`
 - [x] Add `generate_session_id()` — timestamp-prefixed hex (16 chars), generated in `identity_get`
 - [x] Echo `session_id: <id>` at top of every tool response (survives context compaction)
 - [x] Forward session_id through internal call paths (identity_get→search, recall→create)

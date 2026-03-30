@@ -4,7 +4,7 @@
 //! No MCP dependencies. Operates on domain types only.
 
 use crate::embedding::{EmbeddingGenerator, cosine_similarity};
-use crate::engram::{Brain, SimilarityResult};
+use crate::memory_core::{Brain, SimilarityResult};
 use crate::llm::{LlmTier, SharedLlmService};
 use std::collections::{HashMap, HashSet};
 
@@ -350,7 +350,7 @@ fn run_variant(
         if bm25_results.is_empty() {
             vector_results
         } else {
-            use crate::engram::storage::rrf;
+            use crate::memory_core::storage::rrf;
             let merged = rrf::reciprocal_rank_fusion(
                 &[&vector_results, &bm25_results],
                 rrf::DEFAULT_K,
@@ -407,7 +407,7 @@ pub fn truncate_chain_hint_content(content: &str, max_bytes: usize) -> String {
 
 /// Check seed results for procedure chain anchors.
 ///
-/// A procedure anchor is an engram that has outbound associations where
+/// A procedure anchor is a memory that has outbound associations where
 /// at least one has an ordinal set. Returns hints for each anchor found.
 pub fn detect_procedure_chains(brain: &Brain, seed_ids: &[uuid::Uuid]) -> Vec<ChainHint> {
     let mut hints = Vec::new();
@@ -473,7 +473,7 @@ pub fn run_search_pipeline(
 
     // Find similar memories (fetch extra to allow for filtering)
     // When reranking is enabled, fetch more candidates for the reranker to work with
-    // Run retrieval for each variant, merging results (keep highest score per engram).
+    // Run retrieval for each variant, merging results (keep highest score per memory).
     // Cache the original query embedding (variants[0]) so we don't compute it twice —
     // it's also needed for association discovery later.
     let mut all_results: HashMap<uuid::Uuid, SimilarityResult> = HashMap::new();
@@ -585,15 +585,15 @@ pub fn run_search_pipeline(
     let mut scored: Vec<ScoredResult> = merged_results
         .iter()
         .filter_map(|r| {
-            let engram = brain.get(&r.id)?;
+            let mem = brain.get(&r.id)?;
 
             // State filter
             let state_ok = if params.include_archived {
                 true
             } else if params.include_deep {
-                !engram.is_archived()
+                !mem.is_archived()
             } else {
-                engram.is_searchable()
+                mem.is_searchable()
             };
             if !state_ok {
                 return None;
@@ -601,26 +601,26 @@ pub fn run_search_pipeline(
 
             // Date-range filter
             if let Some(after) = params.created_after {
-                if engram.created_at <= after {
+                if mem.created_at <= after {
                     return None;
                 }
             }
             if let Some(before) = params.created_before {
-                if engram.created_at >= before {
+                if mem.created_at >= before {
                     return None;
                 }
             }
 
-            let blended = r.score * (0.5 + (engram.energy as f32) * 0.5);
+            let blended = r.score * (0.5 + (mem.energy as f32) * 0.5);
 
             Some(ScoredResult {
                 id: r.id,
                 content: r.content.clone(),
-                created_at: engram.created_at,
+                created_at: mem.created_at,
                 similarity: r.score,
-                energy: engram.energy,
+                energy: mem.energy,
                 blended,
-                state_emoji: engram.state.emoji(),
+                state_emoji: mem.state.emoji(),
             })
         })
         .collect();
@@ -760,8 +760,8 @@ pub fn run_search_pipeline(
 
         // Merge discovered memories into scored results
         for d in capped {
-            // After sync_from_storage, all engrams are in substrate cache.
-            let engram = match brain.get(&d.id) {
+            // After sync_from_storage, all memories are in substrate cache.
+            let mem = match brain.get(&d.id) {
                 Some(e) => e,
                 None => continue,
             };
@@ -770,9 +770,9 @@ pub fn run_search_pipeline(
             let state_ok = if params.include_archived {
                 true
             } else if params.include_deep {
-                !engram.is_archived()
+                !mem.is_archived()
             } else {
-                engram.is_searchable()
+                mem.is_searchable()
             };
             if !state_ok {
                 continue;
@@ -780,24 +780,24 @@ pub fn run_search_pipeline(
 
             // Date-range filter (same as above)
             if let Some(after) = params.created_after {
-                if engram.created_at <= after {
+                if mem.created_at <= after {
                     continue;
                 }
             }
             if let Some(before) = params.created_before {
-                if engram.created_at >= before {
+                if mem.created_at >= before {
                     continue;
                 }
             }
 
             scored.push(ScoredResult {
                 id: d.id,
-                content: engram.content.clone(),
-                created_at: engram.created_at,
+                content: mem.content.clone(),
+                created_at: mem.created_at,
                 similarity: d.similarity,
                 energy: d.energy,
                 blended: d.blended_score,
-                state_emoji: engram.state.emoji(),
+                state_emoji: mem.state.emoji(),
             });
         }
 
@@ -1022,12 +1022,12 @@ pub fn run_search_pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engram::{Brain, storage::EngramStorage};
+    use crate::memory_core::{Brain, storage::MemoryStorage};
 
     /// Helper: create a Brain backed by in-memory SQLite
     fn brain_with_sqlite() -> Brain {
-        let storage = EngramStorage::in_memory().unwrap();
-        Brain::new(storage, crate::engram::Config::default()).unwrap()
+        let storage = MemoryStorage::in_memory().unwrap();
+        Brain::new(storage, crate::memory_core::Config::default()).unwrap()
     }
 
     #[test]
@@ -1605,7 +1605,7 @@ mod tests {
     fn jaccard_fallback_when_embedding_unavailable() {
         let mut brain = brain_with_sqlite();
 
-        // Create engrams but do NOT set embeddings — simulates embedding unavailability
+        // Create memories but do NOT set embeddings — simulates embedding unavailability
         let id1 = brain
             .create("Caroline moved from Portland to Seattle last year")
             .unwrap();
@@ -1797,7 +1797,7 @@ mod tests {
 
         let mut brain = brain_with_sqlite();
 
-        // Two engrams: one whose embedding aligns with the session centroid, one orthogonal.
+        // Two memories: one whose embedding aligns with the session centroid, one orthogonal.
         let id_matching = brain.create("Rust memory management and ownership").unwrap();
         let id_unrelated = brain.create("Banana bread recipe with walnuts").unwrap();
 

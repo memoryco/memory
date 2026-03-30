@@ -22,7 +22,7 @@ Use for clinical guidelines, standards, legal codes - sources requiring citation
 - `reference_citation` - get APA 7 in-text and full reference formats
 
 **Key distinction:**
-- Engrams: personal memory, decays without use
+- Memories: personal memory, decays without use
 - Lenses: hold entire guide in context for a task
 - References: query authoritative docs, always cite sources
 "#;

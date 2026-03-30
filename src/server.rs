@@ -7,7 +7,7 @@
 //! Run `memoryco generate` to rebuild vectors after a model change.
 
 use crate::config;
-use crate::engram::Brain;
+use crate::memory_core::Brain;
 use crate::identity::{DieselIdentityStorage, IdentityStore};
 
 use crate::reference::ReferenceManager;
@@ -107,7 +107,7 @@ pub fn run() {
     // Write default config.toml if missing, then load brain config from it.
     let config_toml_path = memory_home.join("config.toml");
     if !config_toml_path.exists() {
-        if let Err(e) = crate::engram::config_toml::ensure_default_config_toml(&memory_home) {
+        if let Err(e) = crate::memory_core::config_toml::ensure_default_config_toml(&memory_home) {
             eprintln!("Warning: Failed to write default config.toml: {}", e);
         } else {
             eprintln!("  Config: wrote default config.toml");
@@ -118,7 +118,7 @@ pub fn run() {
         eprintln!("Warning: Failed to write LLM config defaults: {}", e);
     }
 
-    let mut brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
+    let mut brain_config = crate::memory_core::config_toml::load_config_from_toml(&memory_home);
     validate_config(&mut brain_config, &llm);
     eprintln!(
         "  Config: embedding_model={}, rerank_mode={}, hybrid_search={}",
@@ -271,7 +271,7 @@ fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
 ///
 /// Called after both the LLM service and brain config are loaded, before Brain::open_path().
 /// Degrades LLM-dependent rerank mode to safe fallback when no LLM is available.
-fn validate_config(config: &mut crate::engram::Config, llm: &crate::llm::SharedLlmService) {
+fn validate_config(config: &mut crate::memory_core::Config, llm: &crate::llm::SharedLlmService) {
     if !llm.available() && config.rerank_mode == "llm" {
         eprintln!(
             "⚠ rerank_mode=\"llm\" requires [llm] but none is available — degrading to \"off\""
@@ -288,32 +288,32 @@ fn build_server() -> Server<Context> {
         ..Default::default()
     });
 
-    // Engram tools
+    // Memory tools
     server
-        .add_tool(tools::EngramCreateTool)
-        .expect("engram_create");
+        .add_tool(tools::MemoryCreateTool)
+        .expect("memory_create");
     server
-        .add_tool(tools::EngramRecallTool)
-        .expect("engram_recall");
+        .add_tool(tools::MemoryRecallTool)
+        .expect("memory_recall");
     server
-        .add_tool(tools::EngramSearchTool)
-        .expect("engram_search");
-    server.add_tool(tools::EngramGetTool).expect("engram_get");
+        .add_tool(tools::MemorySearchTool)
+        .expect("memory_search");
+    server.add_tool(tools::MemoryGetTool).expect("memory_get");
     server
-        .add_tool(tools::EngramDeleteTool)
-        .expect("engram_delete");
+        .add_tool(tools::MemoryDeleteTool)
+        .expect("memory_delete");
     server
-        .add_tool(tools::EngramAssociateTool)
-        .expect("engram_associate");
+        .add_tool(tools::MemoryAssociateTool)
+        .expect("memory_associate");
     server
-        .add_tool(tools::EngramStatsTool)
-        .expect("engram_stats");
+        .add_tool(tools::MemoryStatsTool)
+        .expect("memory_stats");
     server
-        .add_tool(tools::EngramAssociationsTool)
-        .expect("engram_associations");
+        .add_tool(tools::MemoryAssociationsTool)
+        .expect("memory_associations");
     server
-        .add_tool(tools::EngramGraphTool)
-        .expect("engram_graph");
+        .add_tool(tools::MemoryGraphTool)
+        .expect("memory_graph");
 
     // Identity tools
     server
@@ -440,8 +440,8 @@ mod tests {
         Arc::new(MockLlmAvailable)
     }
 
-    fn config_with_rerank(mode: &str) -> crate::engram::Config {
-        let mut c = crate::engram::Config::default();
+    fn config_with_rerank(mode: &str) -> crate::memory_core::Config {
+        let mut c = crate::memory_core::Config::default();
         c.rerank_mode = mode.to_string();
         c
     }

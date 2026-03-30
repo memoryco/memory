@@ -11,7 +11,7 @@
 //! raw RRF magnitudes (~0.01-0.03 with k=60) get swamped by other terms.
 
 use super::SimilarityResult;
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use std::collections::HashMap;
 
 /// Default k constant from the original RRF paper (Cormack, Clarke, Buettcher 2009).
@@ -32,8 +32,8 @@ pub fn reciprocal_rank_fusion(
     result_lists: &[&[SimilarityResult]],
     k: f64,
 ) -> Vec<SimilarityResult> {
-    // Map from engram ID to (accumulated RRF score, best SimilarityResult)
-    let mut scores: HashMap<EngramId, (f64, SimilarityResult)> = HashMap::new();
+    // Map from memory ID to (accumulated RRF score, best SimilarityResult)
+    let mut scores: HashMap<MemoryId, (f64, SimilarityResult)> = HashMap::new();
 
     for list in result_lists {
         for (rank, result) in list.iter().enumerate() {

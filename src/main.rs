@@ -1,4 +1,4 @@
-//! Memory MCP Server — Cognitive AI memory powered by engram
+//! Memory MCP Server — Cognitive AI memory powered by memory
 //!
 //! This server provides MCP tools for a neural memory system with:
 //! - Organic decay (memories fade without use)
@@ -12,7 +12,7 @@ mod commands;
 pub mod config;
 mod dashboard;
 mod embedding;
-mod engram;
+mod memory_core;
 mod generate;
 mod identity;
 mod install;
@@ -27,7 +27,7 @@ mod server;
 mod storage;
 mod tools;
 
-use crate::engram::{Brain, EngramId};
+use crate::memory_core::{Brain, MemoryId};
 use crate::identity::IdentityStore;
 
 use crate::reference::ReferenceManager;
@@ -47,7 +47,7 @@ pub struct Context {
     /// Last search query text (for access log correlation with recall)
     pub last_search_query: Mutex<Option<String>>,
     /// Result IDs from the last search (for access log)
-    pub last_search_result_ids: Mutex<Vec<EngramId>>,
+    pub last_search_result_ids: Mutex<Vec<MemoryId>>,
 }
 
 fn main() {

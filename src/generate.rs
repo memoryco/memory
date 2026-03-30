@@ -5,7 +5,7 @@
 //! exclusively in a background thread at server startup.
 
 use crate::embedding::EmbeddingGenerator;
-use crate::engram::Brain;
+use crate::memory_core::Brain;
 use std::io::Write;
 use std::sync::{Arc, RwLock};
 
@@ -23,7 +23,7 @@ pub struct EnrichmentStats {
     pub vectors: usize,
 }
 
-/// Generate embeddings for every engram that is missing one.
+/// Generate embeddings for every memory that is missing one.
 ///
 /// Uses read locks throughout — safe to call while the server is running.
 /// When `show_progress` is true, prints a `\r`-overwritten progress line to
@@ -116,12 +116,12 @@ pub fn generate_embeddings(brain: Arc<RwLock<Brain>>, show_progress: bool) -> Em
     }
 }
 
-/// Generate enrichment embeddings for engrams that don't have them yet.
+/// Generate enrichment embeddings for memories that don't have them yet.
 ///
 /// Enrichments are multi-vector representations built from LLM-generated
 /// training queries. They require an available LLM service.
 ///
-/// Skips engrams that already have enrichments — safe to interrupt and re-run.
+/// Skips memories that already have enrichments — safe to interrupt and re-run.
 /// Uses read locks throughout — safe to call while the server is running.
 /// When `show_progress` is true, prints a `\r`-overwritten progress line to
 /// stderr and a final newline on completion.
@@ -130,8 +130,8 @@ pub fn generate_enrichments(
     llm: crate::llm::SharedLlmService,
     show_progress: bool,
 ) -> EnrichmentStats {
-    // Only fetch IDs that have no enrichments yet — skip already-enriched engrams.
-    let ids: Vec<crate::engram::EngramId> = match brain.read() {
+    // Only fetch IDs that have no enrichments yet — skip already-enriched memories.
+    let ids: Vec<crate::memory_core::MemoryId> = match brain.read() {
         Ok(b) => b.get_ids_without_enrichments().unwrap_or_default(),
         Err(_) => {
             return EnrichmentStats {

@@ -44,11 +44,11 @@ pub struct SessionContext {
     pub created_at: i64,
     /// Unix epoch seconds when this session was last touched.
     pub last_seen_at: i64,
-    /// Engram IDs returned by searches in this session (may contain duplicates across searches).
+    /// Memory IDs returned by searches in this session (may contain duplicates across searches).
     pub search_result_ids: Vec<String>,
-    /// Engram IDs explicitly recalled by the client in this session.
+    /// Memory IDs explicitly recalled by the client in this session.
     pub recalled_ids: Vec<String>,
-    /// Engram IDs created during this session.
+    /// Memory IDs created during this session.
     pub created_ids: Vec<String>,
 }
 
@@ -114,7 +114,7 @@ impl SessionContext {
         self.last_seen_at = now_secs();
     }
 
-    /// Record engram IDs returned by a search. Deduplicates across calls.
+    /// Record memory IDs returned by a search. Deduplicates across calls.
     pub fn add_search_results(&mut self, ids: &[uuid::Uuid]) {
         for id in ids {
             let s = id.to_string();
@@ -124,7 +124,7 @@ impl SessionContext {
         }
     }
 
-    /// Record engram IDs explicitly recalled by the client. Deduplicates across calls.
+    /// Record memory IDs explicitly recalled by the client. Deduplicates across calls.
     pub fn add_recalled(&mut self, ids: &[uuid::Uuid]) {
         for id in ids {
             let s = id.to_string();
@@ -134,7 +134,7 @@ impl SessionContext {
         }
     }
 
-    /// Record engram IDs created during this session. Deduplicates across calls.
+    /// Record memory IDs created during this session. Deduplicates across calls.
     pub fn add_created(&mut self, ids: &[uuid::Uuid]) {
         for id in ids {
             let s = id.to_string();
@@ -332,10 +332,10 @@ mod tests {
     #[cfg(feature = "sqlite")]
     mod storage_tests {
         use super::*;
-        use crate::engram::storage::{EngramStorage, Storage};
+        use crate::memory_core::storage::{MemoryStorage, Storage};
 
-        fn make_storage() -> EngramStorage {
-            let mut s = EngramStorage::in_memory().unwrap();
+        fn make_storage() -> MemoryStorage {
+            let mut s = MemoryStorage::in_memory().unwrap();
             s.initialize().unwrap();
             s
         }

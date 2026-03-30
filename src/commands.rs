@@ -4,8 +4,8 @@
 
 use crate::cli::LlmCommand;
 use crate::config;
-use crate::engram::Brain;
-use crate::engram::storage::Storage as _;
+use crate::memory_core::Brain;
+use crate::memory_core::storage::Storage as _;
 use crate::install::{self, InstallStatus};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -213,7 +213,7 @@ fn generate_inner(embeddings_only: bool, enrichments_only: bool) -> i32 {
         return 1;
     }
 
-    let brain_config = crate::engram::config_toml::load_config_from_toml(&memory_home);
+    let brain_config = crate::memory_core::config_toml::load_config_from_toml(&memory_home);
     let brain = match Brain::open_path(&db_path, brain_config) {
         Ok(b) => b,
         Err(e) => {
@@ -225,14 +225,14 @@ fn generate_inner(embeddings_only: bool, enrichments_only: bool) -> i32 {
     let do_embeddings = !enrichments_only;
     let do_enrichments = !embeddings_only;
 
-    // Warn if enrichments-only but most engrams lack embeddings.
+    // Warn if enrichments-only but most memories lack embeddings.
     if enrichments_only {
         let without = brain.count_without_embeddings().unwrap_or(0);
         let with_emb = brain.count_with_embeddings().unwrap_or(0);
         let total = without + with_emb;
         if total > 0 && without > total / 2 {
             eprintln!(
-                "⚠ Most engrams have no embeddings. \
+                "⚠ Most memories have no embeddings. \
                  Run `memoryco generate` (without flags) to generate both."
             );
         }
@@ -375,8 +375,8 @@ pub fn doctor() {
         eprintln!("Embeddings");
         eprintln!("────────────");
 
-        use crate::engram::storage::EngramStorage;
-        match EngramStorage::open(&db_path) {
+        use crate::memory_core::storage::MemoryStorage;
+        match MemoryStorage::open(&db_path) {
             Err(e) => {
                 eprintln!("✗ {:20} {}", "Brain DB", e);
             }
@@ -384,7 +384,7 @@ pub fn doctor() {
                 // initialize() is idempotent — just ensures tables exist
                 if storage.initialize().is_ok() {
                     let brain_config =
-                        crate::engram::config_toml::load_config_from_toml(&memory_home);
+                        crate::memory_core::config_toml::load_config_from_toml(&memory_home);
                     let desired_model = &brain_config.embedding_model;
                     let active_model = storage
                         .get_metadata("embedding_model_active")
@@ -415,15 +415,15 @@ pub fn doctor() {
 
                     let with_emb = storage.count_with_embeddings().unwrap_or(0);
                     let without_emb = storage.count_without_embeddings().unwrap_or(0);
-                    let total_engrams = with_emb + without_emb;
+                    let total_memories = with_emb + without_emb;
                     let enrichments = storage.count_enrichments().unwrap_or(0);
 
                     // Embedding coverage
-                    let embed_ok = without_emb == 0 && total_engrams > 0;
-                    let embed_detail = if total_engrams == 0 {
-                        "no engrams yet".to_string()
+                    let embed_ok = without_emb == 0 && total_memories > 0;
+                    let embed_detail = if total_memories == 0 {
+                        "no memories yet".to_string()
                     } else {
-                        format!("{}/{} engrams", with_emb, total_engrams)
+                        format!("{}/{} memories", with_emb, total_memories)
                     };
                     let embed_suffix = if without_emb > 0 {
                         format!(
@@ -433,19 +433,19 @@ pub fn doctor() {
                     } else {
                         embed_detail
                     };
-                    check("Embeddings", &embed_suffix, embed_ok || total_engrams == 0);
+                    check("Embeddings", &embed_suffix, embed_ok || total_memories == 0);
 
                     // Enrichment coverage
-                    let enrich_ok = enrichments > 0 || total_engrams == 0;
-                    let enrich_detail = if total_engrams == 0 {
-                        "no engrams yet".to_string()
+                    let enrich_ok = enrichments > 0 || total_memories == 0;
+                    let enrich_detail = if total_memories == 0 {
+                        "no memories yet".to_string()
                     } else if enrichments == 0 {
                         format!(
-                            "0/{} engrams — run `memoryco generate --enrichments`",
-                            total_engrams
+                            "0/{} memories — run `memoryco generate --enrichments`",
+                            total_memories
                         )
                     } else {
-                        format!("{} vector(s) across {} engram(s)", enrichments, with_emb)
+                        format!("{} vector(s) across {} memory(s)", enrichments, with_emb)
                     };
                     check("Enrichments", &enrich_detail, enrich_ok);
                 }

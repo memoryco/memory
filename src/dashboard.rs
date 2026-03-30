@@ -5,7 +5,7 @@
 //! the association graph. Runs on a background daemon thread, completely
 //! independent of the MCP stdio transport.
 
-use crate::engram::Brain;
+use crate::memory_core::Brain;
 use crate::identity::IdentityStore;
 use crate::reference::{self, ReferenceManager};
 use serde_json::{Value as JsonValue, json};
@@ -135,8 +135,8 @@ fn route(method: &str, url: &str, mut request: tiny_http::Request, state: &Arc<D
         // Updates
         ("GET", "/api/updates") => handle_check_updates(),
 
-        // Engrams
-        ("GET", "/api/engrams") => handle_list_engrams(query, state),
+        // Memorys
+        ("GET", "/api/memories") => handle_list_memories(query, state),
 
         // Graph
         ("GET", "/api/graph") => handle_graph(query, state),
@@ -180,8 +180,8 @@ fn route_delete(
     match segments.as_slice() {
         // DELETE /api/identity/:id
         ["api", "identity", id] => handle_identity_remove(id, state),
-        // DELETE /api/engrams/:id
-        ["api", "engrams", id] => handle_delete_engram(id, state),
+        // DELETE /api/memories/:id
+        ["api", "memories", id] => handle_delete_memory(id, state),
         // DELETE /api/references/:name
         ["api", "references", name] => handle_delete_reference(name, state),
         // DELETE /api/lenses/:name
@@ -197,8 +197,8 @@ fn route_get(
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
     match segments.as_slice() {
-        // GET /api/engrams/:id/associations
-        ["api", "engrams", id, "associations"] => handle_engram_associations(id, state),
+        // GET /api/memories/:id/associations
+        ["api", "memories", id, "associations"] => handle_memory_associations(id, state),
         _ => json_response(404, r#"{"error":"Not found"}"#),
     }
 }
@@ -792,10 +792,10 @@ fn handle_delete_lens(
 }
 
 // ---------------------------------------------------------------------------
-// Engram handlers
+// Memory handlers
 // ---------------------------------------------------------------------------
 
-fn handle_list_engrams(
+fn handle_list_memories(
     query: &str,
     state: &Arc<DashboardState>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
@@ -822,7 +822,7 @@ fn handle_list_engrams(
 
     if let Some(q) = search_query {
         if q.is_empty() {
-            return list_recent_engrams(
+            return list_recent_memories(
                 &brain,
                 limit,
                 offset,
@@ -834,15 +834,15 @@ fn handle_list_engrams(
 
         // Direct lookup if the query is a UUID
         if is_uuid(q) {
-            let engrams: Vec<JsonValue> = uuid::Uuid::parse_str(q)
+            let memories: Vec<JsonValue> = uuid::Uuid::parse_str(q)
                 .ok()
                 .and_then(|id| brain.get(&id))
                 .into_iter()
-                .map(|e| engram_to_json(e, None))
+                .map(|e| memory_to_json(e, None))
                 .collect();
-            let engrams = filter_json_engrams_by_state(engrams, state_filter);
+            let memories = filter_json_memories_by_state(memories, state_filter);
             return json_ok(&json!({
-                "engrams": engrams,
+                "memories": memories,
                 "search": q,
                 "method": "id"
             }));
@@ -867,7 +867,7 @@ fn handle_list_engrams(
                             if bm25_results.is_empty() {
                                 vector_results
                             } else {
-                                use crate::engram::storage::rrf;
+                                use crate::memory_core::storage::rrf;
                                 rrf::reciprocal_rank_fusion(
                                     &[&vector_results, &bm25_results],
                                     rrf::DEFAULT_K,
@@ -876,15 +876,15 @@ fn handle_list_engrams(
                         } else {
                             vector_results
                         };
-                        let engrams: Vec<JsonValue> = results
+                        let memories: Vec<JsonValue> = results
                             .iter()
                             .filter_map(|r| {
-                                brain.get(&r.id).map(|e| engram_to_json(e, Some(r.score)))
+                                brain.get(&r.id).map(|e| memory_to_json(e, Some(r.score)))
                             })
                             .collect();
-                        let engrams = filter_json_engrams_by_state(engrams, state_filter);
+                        let memories = filter_json_memories_by_state(memories, state_filter);
                         json_ok(&json!({
-                            "engrams": engrams,
+                            "memories": memories,
                             "search": q,
                             "method": "semantic"
                         }))
@@ -892,14 +892,14 @@ fn handle_list_engrams(
                     Err(_) => {
                         // Fall back to text search
                         let results = brain.search(q);
-                        let engrams: Vec<JsonValue> = results
+                        let memories: Vec<JsonValue> = results
                             .iter()
                             .take(limit)
-                            .map(|e| engram_to_json(e, None))
+                            .map(|e| memory_to_json(e, None))
                             .collect();
-                        let engrams = filter_json_engrams_by_state(engrams, state_filter);
+                        let memories = filter_json_memories_by_state(memories, state_filter);
                         json_ok(&json!({
-                            "engrams": engrams,
+                            "memories": memories,
                             "search": q,
                             "method": "text"
                         }))
@@ -909,21 +909,21 @@ fn handle_list_engrams(
             Err(_) => {
                 // Fall back to text search
                 let results = brain.search(q);
-                let engrams: Vec<JsonValue> = results
+                let memories: Vec<JsonValue> = results
                     .iter()
                     .take(limit)
-                    .map(|e| engram_to_json(e, None))
+                    .map(|e| memory_to_json(e, None))
                     .collect();
-                let engrams = filter_json_engrams_by_state(engrams, state_filter);
+                let memories = filter_json_memories_by_state(memories, state_filter);
                 json_ok(&json!({
-                    "engrams": engrams,
+                    "memories": memories,
                     "search": q,
                     "method": "text"
                 }))
             }
         }
     } else {
-        list_recent_engrams(
+        list_recent_memories(
             &brain,
             limit,
             offset,
@@ -934,7 +934,7 @@ fn handle_list_engrams(
     }
 }
 
-fn list_recent_engrams(
+fn list_recent_memories(
     brain: &Brain,
     limit: usize,
     offset: usize,
@@ -942,55 +942,55 @@ fn list_recent_engrams(
     include_deep: bool,
     state_filter: Option<&str>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let mut engrams: Vec<&crate::engram::Engram> = if let Some(state_str) = state_filter {
+    let mut memories: Vec<&crate::memory_core::Memory> = if let Some(state_str) = state_filter {
         if let Some(target_state) = parse_memory_state(state_str) {
             brain
-                .all_engrams()
+                .all_memories()
                 .filter(|e| e.state == target_state)
                 .collect()
         } else {
             Vec::new()
         }
     } else if include_archived {
-        brain.all_engrams().collect()
+        brain.all_memories().collect()
     } else if include_deep {
-        brain.all_engrams().filter(|e| !e.is_archived()).collect()
+        brain.all_memories().filter(|e| !e.is_archived()).collect()
     } else {
-        brain.searchable_engrams().collect()
+        brain.searchable_memories().collect()
     };
 
     // Sort by last_accessed descending (most recent first)
-    engrams.sort_by(|a, b| b.last_accessed.cmp(&a.last_accessed));
+    memories.sort_by(|a, b| b.last_accessed.cmp(&a.last_accessed));
 
-    let total_filtered = engrams.len();
+    let total_filtered = memories.len();
 
-    let result: Vec<JsonValue> = engrams
+    let result: Vec<JsonValue> = memories
         .iter()
         .skip(offset)
         .take(limit)
-        .map(|e| engram_to_json(e, None))
+        .map(|e| memory_to_json(e, None))
         .collect();
 
     let stats = brain.stats();
     json_ok(&json!({
-        "engrams": result,
+        "memories": result,
         "total_filtered": total_filtered,
         "has_more": offset + result.len() < total_filtered,
         "offset": offset,
         "limit": limit,
         "stats": {
-            "total": stats.total_engrams,
-            "active": stats.active_engrams,
-            "dormant": stats.dormant_engrams,
-            "deep": stats.deep_engrams,
-            "archived": stats.archived_engrams,
+            "total": stats.total_memories,
+            "active": stats.active_memories,
+            "dormant": stats.dormant_memories,
+            "deep": stats.deep_memories,
+            "archived": stats.archived_memories,
             "associations": stats.total_associations,
             "average_energy": stats.average_energy,
         }
     }))
 }
 
-fn engram_to_json(e: &crate::engram::Engram, score: Option<f32>) -> JsonValue {
+fn memory_to_json(e: &crate::memory_core::Memory, score: Option<f32>) -> JsonValue {
     let mut obj = json!({
         "id": e.id.to_string(),
         "content": e.content,
@@ -1009,14 +1009,14 @@ fn engram_to_json(e: &crate::engram::Engram, score: Option<f32>) -> JsonValue {
     obj
 }
 
-/// Filter a Vec of JSON engrams by state. The "state" field in JSON is the
+/// Filter a Vec of JSON memories by state. The "state" field in JSON is the
 /// Debug format like "Active", "Dormant", etc., so we case-insensitive match.
-fn filter_json_engrams_by_state(
-    engrams: Vec<JsonValue>,
+fn filter_json_memories_by_state(
+    memories: Vec<JsonValue>,
     state_filter: Option<&str>,
 ) -> Vec<JsonValue> {
     if let Some(state_str) = state_filter {
-        engrams
+        memories
             .into_iter()
             .filter(|e| {
                 e.get("state")
@@ -1026,32 +1026,32 @@ fn filter_json_engrams_by_state(
             })
             .collect()
     } else {
-        engrams
+        memories
     }
 }
 
-fn handle_delete_engram(
+fn handle_delete_memory(
     id: &str,
     state: &Arc<DashboardState>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let engram_id = match uuid::Uuid::parse_str(id) {
+    let memory_id = match uuid::Uuid::parse_str(id) {
         Ok(id) => id,
         Err(e) => return json_response(400, &format!(r#"{{"error":"Invalid UUID: {}"}}"#, e)),
     };
 
     let mut brain = state.brain.write().unwrap();
-    match brain.delete(engram_id) {
+    match brain.delete(memory_id) {
         Ok(true) => json_ok(&json!({"deleted": id})),
-        Ok(false) => json_response(404, &format!(r#"{{"error":"Engram '{}' not found"}}"#, id)),
+        Ok(false) => json_response(404, &format!(r#"{{"error":"Memory '{}' not found"}}"#, id)),
         Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e)),
     }
 }
 
-fn handle_engram_associations(
+fn handle_memory_associations(
     id: &str,
     state: &Arc<DashboardState>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let engram_id = match uuid::Uuid::parse_str(id) {
+    let memory_id = match uuid::Uuid::parse_str(id) {
         Ok(id) => id,
         Err(e) => return json_response(400, &format!(r#"{{"error":"Invalid UUID: {}"}}"#, e)),
     };
@@ -1062,10 +1062,10 @@ fn handle_engram_associations(
     let all_assocs = brain.all_associations();
     let related: Vec<JsonValue> = all_assocs
         .iter()
-        .filter(|a| a.from == engram_id || a.to == engram_id)
+        .filter(|a| a.from == memory_id || a.to == memory_id)
         .filter_map(|a| {
-            let other_id = if a.from == engram_id { a.to } else { a.from };
-            let direction = if a.from == engram_id { "outbound" } else { "inbound" };
+            let other_id = if a.from == memory_id { a.to } else { a.from };
+            let direction = if a.from == memory_id { "outbound" } else { "inbound" };
             brain.get(&other_id).map(|e| {
                 json!({
                     "id": other_id.to_string(),
@@ -1419,12 +1419,12 @@ fn hex_val(b: u8) -> Option<u8> {
 }
 
 /// Parse a state string (from query param) into a MemoryState.
-fn parse_memory_state(s: &str) -> Option<crate::engram::MemoryState> {
+fn parse_memory_state(s: &str) -> Option<crate::memory_core::MemoryState> {
     match s.to_lowercase().as_str() {
-        "active" => Some(crate::engram::MemoryState::Active),
-        "dormant" => Some(crate::engram::MemoryState::Dormant),
-        "deep" => Some(crate::engram::MemoryState::Deep),
-        "archived" => Some(crate::engram::MemoryState::Archived),
+        "active" => Some(crate::memory_core::MemoryState::Active),
+        "dormant" => Some(crate::memory_core::MemoryState::Dormant),
+        "deep" => Some(crate::memory_core::MemoryState::Deep),
+        "archived" => Some(crate::memory_core::MemoryState::Archived),
         _ => None,
     }
 }
@@ -1652,15 +1652,15 @@ mod tests {
     }
 
     #[test]
-    fn route_delete_engram() {
-        let segments: Vec<&str> = "api/engrams/550e8400-e29b-41d4-a716-446655440000"
+    fn route_delete_memory() {
+        let segments: Vec<&str> = "api/memories/550e8400-e29b-41d4-a716-446655440000"
             .split('/')
             .collect();
         match segments.as_slice() {
-            ["api", "engrams", id] => {
+            ["api", "memories", id] => {
                 assert_eq!(*id, "550e8400-e29b-41d4-a716-446655440000");
             }
-            _ => panic!("Should match engram delete"),
+            _ => panic!("Should match memory delete"),
         }
     }
 

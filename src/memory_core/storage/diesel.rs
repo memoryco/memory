@@ -1,14 +1,14 @@
-//! Diesel-backed storage implementation for Engrams
+//! Diesel-backed storage implementation for Memories
 //!
 //! This module provides database storage using Diesel ORM.
 //! The actual database backend (SQLite, Postgres, MySQL) is selected
 //! via feature flags at compile time.
 
 use super::models::*;
-use super::schema::{associations, engrams, identity, metadata};
+use super::schema::{associations, memories, identity, metadata};
 use super::{SimilarityResult, Storage, StorageError, StorageResult};
-use crate::engram::session::SessionContext;
-use crate::engram::{Association, Config, Engram, EngramId, Identity, MemoryState};
+use crate::memory_core::session::SessionContext;
+use crate::memory_core::{Association, Config, Memory, MemoryId, Identity, MemoryState};
 
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
@@ -24,16 +24,16 @@ use super::VectorSearch;
 #[cfg(feature = "postgres")]
 use diesel::pg::PgConnection as DbConnection;
 
-/// Database-backed storage implementation for Engrams
+/// Database-backed storage implementation for Memories
 ///
 /// The underlying database is selected at compile time via feature flags:
 /// - `sqlite` (default) - Uses SQLite, suitable for local/embedded use
 /// - `postgres` - Uses PostgreSQL, suitable for server/SaaS deployments
-pub struct EngramStorage {
+pub struct MemoryStorage {
     conn: DbConnection,
 }
 
-impl EngramStorage {
+impl MemoryStorage {
     /// Open storage at the given connection string/path
     ///
     /// For SQLite: Pass a file path (e.g., "/path/to/brain.db")
@@ -109,8 +109,8 @@ impl EngramStorage {
                 value TEXT NOT NULL
             );
             
-            -- Engrams table
-            CREATE TABLE IF NOT EXISTS engrams (
+            -- Memories table
+            CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
                 energy REAL NOT NULL,
@@ -124,8 +124,8 @@ impl EngramStorage {
             );
             
             -- Indices for common queries
-            CREATE INDEX IF NOT EXISTS idx_engrams_state ON engrams(state);
-            CREATE INDEX IF NOT EXISTS idx_engrams_energy ON engrams(energy);
+            CREATE INDEX IF NOT EXISTS idx_memories_state ON memories(state);
+            CREATE INDEX IF NOT EXISTS idx_memories_energy ON memories(energy);
             
             -- Associations table
             CREATE TABLE IF NOT EXISTS associations (
@@ -152,17 +152,17 @@ impl EngramStorage {
 
             CREATE INDEX IF NOT EXISTS idx_access_log_timestamp ON access_log(timestamp);
 
-            -- Engram enrichment embeddings (multi-vector support)
-            CREATE TABLE IF NOT EXISTS engram_enrichments (
-                engram_id TEXT NOT NULL,
+            -- Memory enrichment embeddings (multi-vector support)
+            CREATE TABLE IF NOT EXISTS memory_enrichments (
+                memory_id TEXT NOT NULL,
                 seq INTEGER NOT NULL,
                 embedding BLOB NOT NULL,
                 source TEXT NOT NULL DEFAULT 'llm',
                 created_at INTEGER NOT NULL,
-                PRIMARY KEY (engram_id, seq),
-                FOREIGN KEY (engram_id) REFERENCES engrams(id) ON DELETE CASCADE
+                PRIMARY KEY (memory_id, seq),
+                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_enrichments_engram ON engram_enrichments(engram_id);
+            CREATE INDEX IF NOT EXISTS idx_enrichments_memory ON memory_enrichments(memory_id);
         "#,
             )
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -171,14 +171,95 @@ impl EngramStorage {
         self.conn
             .batch_execute(
                 r#"
-            CREATE VIRTUAL TABLE IF NOT EXISTS engram_fts USING fts5(
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
                 content,
-                engram_id UNINDEXED,
+                memory_id UNINDEXED,
                 tokenize='porter unicode61'
             );
         "#,
             )
             .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Migrate existing databases: rename `engrams` table to `memories`.
+    /// Also renames `engram_fts` to `memory_fts` and the FTS `engram_id` column.
+    #[cfg(feature = "sqlite")]
+    fn migrate_engrams_to_memories(&mut self) -> StorageResult<()> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let result: Result<CountResult, _> = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='engrams'",
+        )
+        .get_result(&mut self.conn);
+
+        let has_old_table = match result {
+            Ok(r) => r.cnt > 0,
+            Err(_) => false,
+        };
+
+        if has_old_table {
+            self.conn
+                .batch_execute("ALTER TABLE engrams RENAME TO memories")
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            eprintln!("[migration] Renamed table engrams → memories");
+
+            // Rebuild FTS table with new name and column name
+            let has_old_fts: Result<CountResult, _> = diesel::sql_query(
+                "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='engram_fts'",
+            )
+            .get_result(&mut self.conn);
+
+            if matches!(has_old_fts, Ok(r) if r.cnt > 0) {
+                self.conn
+                    .batch_execute(
+                        r#"
+                        DROP TABLE IF EXISTS engram_fts;
+                        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                            content,
+                            memory_id UNINDEXED,
+                            tokenize='porter unicode61'
+                        );
+                        INSERT INTO memory_fts(content, memory_id) SELECT content, id FROM memories;
+                    "#,
+                    )
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+                eprintln!("[migration] Rebuilt FTS table as memory_fts");
+            }
+
+            // Rename engram_id column in memory_enrichments if it exists with old name
+            let has_enrichments: Result<CountResult, _> = diesel::sql_query(
+                "SELECT COUNT(*) as cnt FROM pragma_table_info('memory_enrichments') WHERE name = 'engram_id'",
+            )
+            .get_result(&mut self.conn);
+
+            if matches!(has_enrichments, Ok(r) if r.cnt > 0) {
+                self.conn
+                    .batch_execute("ALTER TABLE memory_enrichments RENAME COLUMN engram_id TO memory_id")
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+                eprintln!("[migration] Renamed memory_enrichments.engram_id → memory_id");
+            }
+
+            // SQLite ALTER TABLE RENAME doesn't rename indexes — they keep their
+            // old names but still work. We drop the old-named indexes here so
+            // create_schema() can recreate them with the new names. No data is
+            // lost — indexes are derived lookup structures, not stored data.
+            self.conn
+                .batch_execute(
+                    r#"
+                    DROP INDEX IF EXISTS idx_engrams_state;
+                    DROP INDEX IF EXISTS idx_engrams_energy;
+                    DROP INDEX IF EXISTS idx_enrichments_engram;
+                "#,
+                )
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            eprintln!("[migration] Rebuilding indexes with new names (no data affected)");
+        }
 
         Ok(())
     }
@@ -194,7 +275,7 @@ impl EngramStorage {
         }
 
         let result: Result<CountResult, _> = diesel::sql_query(
-            "SELECT COUNT(*) as cnt FROM pragma_table_info('engrams') WHERE name = 'embedding'",
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('memories') WHERE name = 'embedding'",
         )
         .get_result(&mut self.conn);
 
@@ -205,14 +286,14 @@ impl EngramStorage {
 
         if !has_embedding {
             self.conn
-                .batch_execute("ALTER TABLE engrams ADD COLUMN embedding BLOB")
+                .batch_execute("ALTER TABLE memories ADD COLUMN embedding BLOB")
                 .map_err(|e| StorageError::Database(e.to_string()))?;
         }
 
         Ok(())
     }
 
-    /// Migrate existing database to add engram_enrichments table if missing (SQLite)
+    /// Migrate existing database to add memory_enrichments table if missing (SQLite)
     #[cfg(feature = "sqlite")]
     fn migrate_enrichments_table(&mut self) -> StorageResult<()> {
         #[derive(QueryableByName)]
@@ -222,7 +303,7 @@ impl EngramStorage {
         }
 
         let result: Result<CountResult, _> = diesel::sql_query(
-            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='engram_enrichments'",
+            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='memory_enrichments'",
         )
         .get_result(&mut self.conn);
 
@@ -235,16 +316,16 @@ impl EngramStorage {
             self.conn
                 .batch_execute(
                     r#"
-                CREATE TABLE IF NOT EXISTS engram_enrichments (
-                    engram_id TEXT NOT NULL,
+                CREATE TABLE IF NOT EXISTS memory_enrichments (
+                    memory_id TEXT NOT NULL,
                     seq INTEGER NOT NULL,
                     embedding BLOB NOT NULL,
                     source TEXT NOT NULL DEFAULT 'llm',
                     created_at INTEGER NOT NULL,
-                    PRIMARY KEY (engram_id, seq),
-                    FOREIGN KEY (engram_id) REFERENCES engrams(id) ON DELETE CASCADE
+                    PRIMARY KEY (memory_id, seq),
+                    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
                 );
-                CREATE INDEX IF NOT EXISTS idx_enrichments_engram ON engram_enrichments(engram_id);
+                CREATE INDEX IF NOT EXISTS idx_enrichments_memory ON memory_enrichments(memory_id);
             "#,
                 )
                 .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -348,9 +429,10 @@ impl EngramStorage {
     }
 }
 
-impl Storage for EngramStorage {
+impl Storage for MemoryStorage {
     #[cfg(feature = "sqlite")]
     fn initialize(&mut self) -> StorageResult<()> {
+        self.migrate_engrams_to_memories()?;
         self.create_schema()?;
         self.migrate_embeddings()?;
         self.migrate_association_ordinal()?;
@@ -397,36 +479,36 @@ impl Storage for EngramStorage {
     }
 
     // ==================
-    // ENGRAMS
+    // MEMORIES
     // ==================
 
-    fn save_engram(&mut self, engram: &Engram) -> StorageResult<()> {
-        let id_str = engram.id.to_string();
-        let state_str = state_to_str(engram.state);
-        let tags_json = serde_json::to_string(&engram.tags)?;
+    fn save_memory(&mut self, mem: &Memory) -> StorageResult<()> {
+        let id_str = mem.id.to_string();
+        let state_str = state_to_str(mem.state);
+        let tags_json = serde_json::to_string(&mem.tags)?;
 
-        diesel::replace_into(engrams::table)
-            .values(NewEngram {
+        diesel::replace_into(memories::table)
+            .values(NewMemory {
                 id: &id_str,
-                content: &engram.content,
-                energy: engram.energy as f32,
+                content: &mem.content,
+                energy: mem.energy as f32,
                 state: state_str,
-                confidence: engram.confidence as f32,
-                created_at: engram.created_at,
-                last_accessed: engram.last_accessed,
-                access_count: engram.access_count as i64,
+                confidence: mem.confidence as f32,
+                created_at: mem.created_at,
+                last_accessed: mem.last_accessed,
+                access_count: mem.access_count as i64,
                 tags: tags_json,
-                embedding: engram.embedding.as_ref().map(|e| embedding_to_bytes(e)),
+                embedding: mem.embedding.as_ref().map(|e| embedding_to_bytes(e)),
             })
             .execute(&mut self.conn)?;
 
         // Sync FTS5: delete existing entry (if any) then insert fresh
-        diesel::sql_query("DELETE FROM engram_fts WHERE engram_id = ?1")
+        diesel::sql_query("DELETE FROM memory_fts WHERE memory_id = ?1")
             .bind::<diesel::sql_types::Text, _>(&id_str)
             .execute(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
-        diesel::sql_query("INSERT INTO engram_fts(content, engram_id) VALUES (?1, ?2)")
-            .bind::<diesel::sql_types::Text, _>(&engram.content)
+        diesel::sql_query("INSERT INTO memory_fts(content, memory_id) VALUES (?1, ?2)")
+            .bind::<diesel::sql_types::Text, _>(&mem.content)
             .bind::<diesel::sql_types::Text, _>(&id_str)
             .execute(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -434,36 +516,36 @@ impl Storage for EngramStorage {
         Ok(())
     }
 
-    fn save_engrams(&mut self, engram_list: &[&Engram]) -> StorageResult<()> {
+    fn save_memories(&mut self, memory_list: &[&Memory]) -> StorageResult<()> {
         self.conn
             .transaction::<_, diesel::result::Error, _>(|conn| {
-                for engram in engram_list {
-                    let id_str = engram.id.to_string();
-                    let state_str = state_to_str(engram.state);
-                    let tags_json = serde_json::to_string(&engram.tags)
+                for mem in memory_list {
+                    let id_str = mem.id.to_string();
+                    let state_str = state_to_str(mem.state);
+                    let tags_json = serde_json::to_string(&mem.tags)
                         .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(e)))?;
 
-                    diesel::replace_into(engrams::table)
-                        .values(NewEngram {
+                    diesel::replace_into(memories::table)
+                        .values(NewMemory {
                             id: &id_str,
-                            content: &engram.content,
-                            energy: engram.energy as f32,
+                            content: &mem.content,
+                            energy: mem.energy as f32,
                             state: state_str,
-                            confidence: engram.confidence as f32,
-                            created_at: engram.created_at,
-                            last_accessed: engram.last_accessed,
-                            access_count: engram.access_count as i64,
+                            confidence: mem.confidence as f32,
+                            created_at: mem.created_at,
+                            last_accessed: mem.last_accessed,
+                            access_count: mem.access_count as i64,
                             tags: tags_json,
-                            embedding: engram.embedding.as_ref().map(|e| embedding_to_bytes(e)),
+                            embedding: mem.embedding.as_ref().map(|e| embedding_to_bytes(e)),
                         })
                         .execute(conn)?;
 
                     // Sync FTS5: delete existing entry (if any) then insert fresh
-                    diesel::sql_query("DELETE FROM engram_fts WHERE engram_id = ?1")
+                    diesel::sql_query("DELETE FROM memory_fts WHERE memory_id = ?1")
                         .bind::<diesel::sql_types::Text, _>(&id_str)
                         .execute(conn)?;
-                    diesel::sql_query("INSERT INTO engram_fts(content, engram_id) VALUES (?1, ?2)")
-                        .bind::<diesel::sql_types::Text, _>(&engram.content)
+                    diesel::sql_query("INSERT INTO memory_fts(content, memory_id) VALUES (?1, ?2)")
+                        .bind::<diesel::sql_types::Text, _>(&mem.content)
                         .bind::<diesel::sql_types::Text, _>(&id_str)
                         .execute(conn)?;
                 }
@@ -473,69 +555,69 @@ impl Storage for EngramStorage {
         Ok(())
     }
 
-    fn load_engram(&mut self, id: &EngramId) -> StorageResult<Option<Engram>> {
+    fn load_memory(&mut self, id: &MemoryId) -> StorageResult<Option<Memory>> {
         let id_str = id.to_string();
 
-        let result: Option<EngramRow> = engrams::table
-            .filter(engrams::id.eq(&id_str))
-            .select(EngramRow::as_select())
+        let result: Option<MemoryRow> = memories::table
+            .filter(memories::id.eq(&id_str))
+            .select(MemoryRow::as_select())
             .first(&mut self.conn)
             .optional()?;
 
         match result {
-            Some(row) => Ok(Some(row.into_engram()?)),
+            Some(row) => Ok(Some(row.into_memory()?)),
             None => Ok(None),
         }
     }
 
-    fn load_all_engrams(&mut self) -> StorageResult<Vec<Engram>> {
-        let rows: Vec<EngramRow> = engrams::table
-            .select(EngramRow::as_select())
+    fn load_all_memories(&mut self) -> StorageResult<Vec<Memory>> {
+        let rows: Vec<MemoryRow> = memories::table
+            .select(MemoryRow::as_select())
             .load(&mut self.conn)?;
 
-        rows.into_iter().map(|row| row.into_engram()).collect()
+        rows.into_iter().map(|row| row.into_memory()).collect()
     }
 
-    fn load_engrams_by_state(&mut self, state: MemoryState) -> StorageResult<Vec<Engram>> {
+    fn load_memories_by_state(&mut self, state: MemoryState) -> StorageResult<Vec<Memory>> {
         let state_str = state_to_str(state);
 
-        let rows: Vec<EngramRow> = engrams::table
-            .filter(engrams::state.eq(state_str))
-            .select(EngramRow::as_select())
+        let rows: Vec<MemoryRow> = memories::table
+            .filter(memories::state.eq(state_str))
+            .select(MemoryRow::as_select())
             .load(&mut self.conn)?;
 
-        rows.into_iter().map(|row| row.into_engram()).collect()
+        rows.into_iter().map(|row| row.into_memory()).collect()
     }
 
-    fn load_engrams_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Engram>> {
+    fn load_memories_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Memory>> {
         // Tags are stored as JSON array, search with LIKE
         let pattern = format!("%\"{}%", tag.to_lowercase());
 
-        let rows: Vec<EngramRow> = engrams::table
+        let rows: Vec<MemoryRow> = memories::table
             .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(&format!(
                 "LOWER(tags) LIKE '{}'",
                 pattern.replace("'", "''")
             )))
-            .select(EngramRow::as_select())
+            .select(MemoryRow::as_select())
             .load(&mut self.conn)?;
 
-        rows.into_iter().map(|row| row.into_engram()).collect()
+        rows.into_iter().map(|row| row.into_memory()).collect()
     }
 
-    fn delete_engram(&mut self, id: &EngramId) -> StorageResult<bool> {
+    fn delete_memory(&mut self, id: &MemoryId) -> StorageResult<bool> {
         let id_str = id.to_string();
 
-        // Delete the engram
-        let deleted = diesel::delete(engrams::table.filter(engrams::id.eq(&id_str)))
+        // Delete the memory
+        let deleted = diesel::delete(memories::table.filter(memories::id.eq(&id_str)))
             .execute(&mut self.conn)?;
 
         // Delete from FTS5 index
-        diesel::sql_query("DELETE FROM engram_fts WHERE engram_id = ?1")
+        diesel::sql_query("DELETE FROM memory_fts WHERE memory_id = ?1")
             .bind::<diesel::sql_types::Text, _>(&id_str)
             .execute(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        // Delete associations from/to this engram
+        // Delete associations from/to this memory
         diesel::delete(
             associations::table.filter(
                 associations::from_id
@@ -548,14 +630,14 @@ impl Storage for EngramStorage {
         Ok(deleted > 0)
     }
 
-    fn count_engrams(&mut self) -> StorageResult<usize> {
-        let count: i64 = engrams::table.count().get_result(&mut self.conn)?;
+    fn count_memories(&mut self) -> StorageResult<usize> {
+        let count: i64 = memories::table.count().get_result(&mut self.conn)?;
         Ok(count as usize)
     }
 
-    fn save_engram_energies(
+    fn save_memory_energies(
         &mut self,
-        updates: &[(&EngramId, f64, MemoryState)],
+        updates: &[(&MemoryId, f64, MemoryState)],
     ) -> StorageResult<()> {
         if updates.is_empty() {
             return Ok(());
@@ -567,10 +649,10 @@ impl Storage for EngramStorage {
                     let id_str = id.to_string();
                     let state_str = state_to_str(*state);
 
-                    diesel::update(engrams::table.filter(engrams::id.eq(&id_str)))
+                    diesel::update(memories::table.filter(memories::id.eq(&id_str)))
                         .set((
-                            engrams::energy.eq(*energy as f32),
-                            engrams::state.eq(state_str),
+                            memories::energy.eq(*energy as f32),
+                            memories::state.eq(state_str),
                         ))
                         .execute(conn)?;
                 }
@@ -628,7 +710,7 @@ impl Storage for EngramStorage {
         Ok(())
     }
 
-    fn load_associations_from(&mut self, from: &EngramId) -> StorageResult<Vec<Association>> {
+    fn load_associations_from(&mut self, from: &MemoryId) -> StorageResult<Vec<Association>> {
         let from_str = from.to_string();
 
         let rows: Vec<AssociationRow> = associations::table
@@ -655,8 +737,8 @@ impl Storage for EngramStorage {
     fn prune_orphan_associations(&mut self) -> StorageResult<usize> {
         let deleted = diesel::sql_query(
             "DELETE FROM associations \
-             WHERE from_id NOT IN (SELECT id FROM engrams) \
-             OR to_id NOT IN (SELECT id FROM engrams)",
+             WHERE from_id NOT IN (SELECT id FROM memories) \
+             OR to_id NOT IN (SELECT id FROM memories)",
         )
         .execute(&mut self.conn)
         .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -770,25 +852,25 @@ impl Storage for EngramStorage {
     }
 
     #[cfg(feature = "sqlite")]
-    fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<EngramId>> {
+    fn get_ids_without_embeddings(&mut self, limit: usize) -> StorageResult<Vec<MemoryId>> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.get_ids_without_embeddings(limit)
     }
 
     #[cfg(feature = "sqlite")]
-    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<MemoryId>> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.get_ids_without_enrichments()
     }
 
     #[cfg(feature = "sqlite")]
-    fn set_embedding(&mut self, id: &EngramId, embedding: &[f32]) -> StorageResult<()> {
+    fn set_embedding(&mut self, id: &MemoryId, embedding: &[f32]) -> StorageResult<()> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.set_embedding(id, embedding)
     }
 
     #[cfg(feature = "sqlite")]
-    fn get_embedding(&mut self, id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+    fn get_embedding(&mut self, id: &MemoryId) -> StorageResult<Option<Vec<f32>>> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.get_embedding(id)
     }
@@ -816,22 +898,22 @@ impl Storage for EngramStorage {
     }
 
     #[cfg(feature = "postgres")]
-    fn get_ids_without_embeddings(&mut self, _limit: usize) -> StorageResult<Vec<EngramId>> {
+    fn get_ids_without_embeddings(&mut self, _limit: usize) -> StorageResult<Vec<MemoryId>> {
         Ok(Vec::new()) // TODO
     }
 
     #[cfg(feature = "postgres")]
-    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<EngramId>> {
+    fn get_ids_without_enrichments(&mut self) -> StorageResult<Vec<MemoryId>> {
         Ok(Vec::new()) // TODO
     }
 
     #[cfg(feature = "postgres")]
-    fn set_embedding(&mut self, _id: &EngramId, _embedding: &[f32]) -> StorageResult<()> {
+    fn set_embedding(&mut self, _id: &MemoryId, _embedding: &[f32]) -> StorageResult<()> {
         Ok(()) // TODO
     }
 
     #[cfg(feature = "postgres")]
-    fn get_embedding(&mut self, _id: &EngramId) -> StorageResult<Option<Vec<f32>>> {
+    fn get_embedding(&mut self, _id: &MemoryId) -> StorageResult<Option<Vec<f32>>> {
         Ok(None) // TODO
     }
 
@@ -849,7 +931,7 @@ impl Storage for EngramStorage {
     #[cfg(feature = "sqlite")]
     fn set_enrichment_embeddings(
         &mut self,
-        id: &EngramId,
+        id: &MemoryId,
         embeddings: &[Vec<f32>],
         source: &str,
     ) -> StorageResult<()> {
@@ -858,7 +940,7 @@ impl Storage for EngramStorage {
     }
 
     #[cfg(feature = "sqlite")]
-    fn delete_enrichments(&mut self, id: &EngramId) -> StorageResult<()> {
+    fn delete_enrichments(&mut self, id: &MemoryId) -> StorageResult<()> {
         let mut vs = VectorSearch::new(&mut self.conn);
         vs.delete_enrichments(id)
     }
@@ -906,11 +988,11 @@ impl Storage for EngramStorage {
         }
 
         let rows: Vec<FtsRow> = diesel::sql_query(
-            "SELECT e.id, e.content, -bm25(engram_fts) as score \
-             FROM engram_fts f \
-             JOIN engrams e ON e.id = f.engram_id \
-             WHERE engram_fts MATCH ?1 \
-             ORDER BY bm25(engram_fts) \
+            "SELECT e.id, e.content, -bm25(memory_fts) as score \
+             FROM memory_fts f \
+             JOIN memories e ON e.id = f.memory_id \
+             WHERE memory_fts MATCH ?1 \
+             ORDER BY bm25(memory_fts) \
              LIMIT ?2",
         )
         .bind::<diesel::sql_types::Text, _>(&sanitized)
@@ -949,21 +1031,21 @@ impl Storage for EngramStorage {
             cnt: i32,
         }
 
-        let fts_count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+        let fts_count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_fts")
             .get_result(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        let engram_count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engrams")
+        let memory_count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM memories")
             .get_result(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        if fts_count.cnt > 0 || engram_count.cnt == 0 {
+        if fts_count.cnt > 0 || memory_count.cnt == 0 {
             return Ok(0);
         }
 
-        // Backfill FTS5 from existing engrams
+        // Backfill FTS5 from existing memorys
         let affected = diesel::sql_query(
-            "INSERT INTO engram_fts(content, engram_id) SELECT content, id FROM engrams",
+            "INSERT INTO memory_fts(content, memory_id) SELECT content, id FROM memories",
         )
         .execute(&mut self.conn)
         .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -983,8 +1065,8 @@ impl Storage for EngramStorage {
     fn log_access(
         &mut self,
         query_text: &str,
-        result_ids: &[EngramId],
-        recalled_ids: &[EngramId],
+        result_ids: &[MemoryId],
+        recalled_ids: &[MemoryId],
     ) -> StorageResult<()> {
         use super::models::NewAccessLogEntry;
         use super::schema::access_log;
@@ -1161,16 +1243,16 @@ mod tests {
     use crate::identity::{Preference, Value};
 
     #[test]
-    fn save_and_load_engram() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+    fn save_and_load_memory() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let engram = Engram::with_tags("Test memory", vec!["work".into(), "rust".into()]);
-        let id = engram.id;
+        let mem = Memory::with_tags("Test memory", vec!["work".into(), "rust".into()]);
+        let id = mem.id;
 
-        storage.save_engram(&engram).unwrap();
+        storage.save_memory(&mem).unwrap();
 
-        let loaded = storage.load_engram(&id).unwrap();
+        let loaded = storage.load_memory(&id).unwrap();
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.content, "Test memory");
@@ -1179,7 +1261,7 @@ mod tests {
 
     #[test]
     fn save_and_load_identity() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         let identity = Identity::new()
@@ -1199,11 +1281,11 @@ mod tests {
 
     #[test]
     fn save_and_load_association() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory 1");
-        let e2 = Engram::new("Memory 2");
+        let e1 = Memory::new("Memory 1");
+        let e2 = Memory::new("Memory 2");
         let assoc = Association::with_weight(e1.id, e2.id, 0.8);
 
         storage.save_association(&assoc).unwrap();
@@ -1215,41 +1297,41 @@ mod tests {
     }
 
     #[test]
-    fn batch_save_engrams() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+    fn batch_save_memories() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory 1");
-        let e2 = Engram::new("Memory 2");
-        let e3 = Engram::new("Memory 3");
+        let e1 = Memory::new("Memory 1");
+        let e2 = Memory::new("Memory 2");
+        let e3 = Memory::new("Memory 3");
 
-        storage.save_engrams(&[&e1, &e2, &e3]).unwrap();
+        storage.save_memories(&[&e1, &e2, &e3]).unwrap();
 
-        let all = storage.load_all_engrams().unwrap();
+        let all = storage.load_all_memories().unwrap();
         assert_eq!(all.len(), 3);
     }
 
     #[test]
     fn load_by_state() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let mut active = Engram::new("Active memory");
+        let mut active = Memory::new("Active memory");
         active.state = MemoryState::Active;
 
-        let mut archived = Engram::new("Archived memory");
+        let mut archived = Memory::new("Archived memory");
         archived.state = MemoryState::Archived;
         archived.energy = 0.01;
 
-        storage.save_engram(&active).unwrap();
-        storage.save_engram(&archived).unwrap();
+        storage.save_memory(&active).unwrap();
+        storage.save_memory(&archived).unwrap();
 
-        let active_only = storage.load_engrams_by_state(MemoryState::Active).unwrap();
+        let active_only = storage.load_memories_by_state(MemoryState::Active).unwrap();
         assert_eq!(active_only.len(), 1);
         assert_eq!(active_only[0].content, "Active memory");
 
         let archived_only = storage
-            .load_engrams_by_state(MemoryState::Archived)
+            .load_memories_by_state(MemoryState::Archived)
             .unwrap();
         assert_eq!(archived_only.len(), 1);
         assert_eq!(archived_only[0].content, "Archived memory");
@@ -1257,16 +1339,16 @@ mod tests {
 
     #[test]
     fn load_by_tag() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let work = Engram::with_tags("Work memory", vec!["work".into()]);
-        let personal = Engram::with_tags("Personal memory", vec!["personal".into()]);
+        let work = Memory::with_tags("Work memory", vec!["work".into()]);
+        let personal = Memory::with_tags("Personal memory", vec!["personal".into()]);
 
-        storage.save_engram(&work).unwrap();
-        storage.save_engram(&personal).unwrap();
+        storage.save_memory(&work).unwrap();
+        storage.save_memory(&personal).unwrap();
 
-        let work_only = storage.load_engrams_by_tag("work").unwrap();
+        let work_only = storage.load_memories_by_tag("work").unwrap();
         assert_eq!(work_only.len(), 1);
         assert_eq!(work_only[0].content, "Work memory");
     }
@@ -1275,7 +1357,7 @@ mod tests {
     fn config_persistence() {
         // Config is now stored in config.toml, not SQLite.
         // save_config/load_config are no-ops kept for trait compatibility.
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         let config = Config {
@@ -1293,11 +1375,11 @@ mod tests {
 
     #[test]
     fn brain_with_diesel() {
-        use crate::engram::Brain;
+        use crate::memory_core::Brain;
 
         // Create a brain with Diesel backend
-        let storage = EngramStorage::in_memory().unwrap();
-        let mut brain = Brain::open(storage, crate::engram::Config::default()).unwrap();
+        let storage = MemoryStorage::in_memory().unwrap();
+        let mut brain = Brain::open(storage, crate::memory_core::Config::default()).unwrap();
 
         // Create some memories
         let rust_talk = brain
@@ -1328,7 +1410,7 @@ mod tests {
 
         // Stats
         let stats = brain.stats();
-        assert_eq!(stats.total_engrams, 2);
+        assert_eq!(stats.total_memories, 2);
     }
 
     // ==================
@@ -1338,12 +1420,12 @@ mod tests {
     #[test]
     fn migration_adds_ordinal_column() {
         // Fresh DB should have ordinal column after initialize
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         // Verify by saving an association with ordinal
-        let e1 = Engram::new("Step 1");
-        let e2 = Engram::new("Step 2");
+        let e1 = Memory::new("Step 1");
+        let e2 = Memory::new("Step 2");
         let assoc = Association::with_ordinal(e1.id, e2.id, 0.8, Some(1));
 
         storage.save_association(&assoc).unwrap();
@@ -1354,13 +1436,13 @@ mod tests {
 
     #[test]
     fn ordinal_roundtrip_with_value() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Anchor");
-        let e2 = Engram::new("Step 1");
-        let e3 = Engram::new("Step 2");
-        let e4 = Engram::new("Step 3");
+        let e1 = Memory::new("Anchor");
+        let e2 = Memory::new("Step 1");
+        let e3 = Memory::new("Step 2");
+        let e4 = Memory::new("Step 3");
 
         let a1 = Association::with_ordinal(e1.id, e2.id, 0.9, Some(1));
         let a2 = Association::with_ordinal(e1.id, e3.id, 0.9, Some(2));
@@ -1382,11 +1464,11 @@ mod tests {
 
     #[test]
     fn ordinal_roundtrip_null() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory A");
-        let e2 = Engram::new("Memory B");
+        let e1 = Memory::new("Memory A");
+        let e2 = Memory::new("Memory B");
 
         // Legacy association without ordinal
         let assoc = Association::with_weight(e1.id, e2.id, 0.7);
@@ -1400,13 +1482,13 @@ mod tests {
 
     #[test]
     fn mixed_ordinal_and_null_associations() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let anchor = Engram::new("Procedure anchor");
-        let step1 = Engram::new("Step 1");
-        let step2 = Engram::new("Step 2");
-        let related = Engram::new("Related note");
+        let anchor = Memory::new("Procedure anchor");
+        let step1 = Memory::new("Step 1");
+        let step2 = Memory::new("Step 2");
+        let related = Memory::new("Related note");
 
         // Ordered chain
         let a1 = Association::with_ordinal(anchor.id, step1.id, 0.9, Some(1));
@@ -1431,12 +1513,12 @@ mod tests {
 
     #[test]
     fn ordinal_chain_five_steps() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let anchor = Engram::new("Deploy procedure");
-        let steps: Vec<Engram> = (1..=5)
-            .map(|i| Engram::new(format!("Step {}", i)))
+        let anchor = Memory::new("Deploy procedure");
+        let steps: Vec<Memory> = (1..=5)
+            .map(|i| Memory::new(format!("Step {}", i)))
             .collect();
 
         for (i, step) in steps.iter().enumerate() {
@@ -1455,12 +1537,12 @@ mod tests {
 
     #[test]
     fn ordinal_survives_batch_save() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("A");
-        let e2 = Engram::new("B");
-        let e3 = Engram::new("C");
+        let e1 = Memory::new("A");
+        let e2 = Memory::new("B");
+        let e3 = Memory::new("C");
 
         let a1 = Association::with_ordinal(e1.id, e2.id, 0.8, Some(1));
         let a2 = Association::with_ordinal(e1.id, e3.id, 0.8, Some(2));
@@ -1477,11 +1559,11 @@ mod tests {
 
     #[test]
     fn load_all_associations_includes_ordinal() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("X");
-        let e2 = Engram::new("Y");
+        let e1 = Memory::new("X");
+        let e2 = Memory::new("Y");
 
         let assoc = Association::with_ordinal(e1.id, e2.id, 0.7, Some(42));
         storage.save_association(&assoc).unwrap();
@@ -1497,7 +1579,7 @@ mod tests {
 
     #[test]
     fn fts_table_created_on_init() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         // Verify the FTS5 table exists by querying it
@@ -1507,44 +1589,44 @@ mod tests {
             cnt: i32,
         }
 
-        let result: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+        let result: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_fts")
             .get_result(&mut storage.conn)
-            .expect("engram_fts table should exist after init");
+            .expect("memory_fts table should exist after init");
         assert_eq!(result.cnt, 0);
     }
 
     #[test]
     fn fts_populated_on_create() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let engram = Engram::new("Rust programming language features");
-        storage.save_engram(&engram).unwrap();
+        let mem = Memory::new("Rust programming language features");
+        storage.save_memory(&mem).unwrap();
 
         // Check FTS5 has the entry
         #[derive(QueryableByName)]
         struct FtsCheck {
             #[diesel(sql_type = diesel::sql_types::Text)]
-            engram_id: String,
+            memory_id: String,
         }
 
         let rows: Vec<FtsCheck> =
-            diesel::sql_query("SELECT engram_id FROM engram_fts WHERE engram_fts MATCH '\"Rust\"'")
+            diesel::sql_query("SELECT memory_id FROM memory_fts WHERE memory_fts MATCH '\"Rust\"'")
                 .load(&mut storage.conn)
                 .unwrap();
 
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].engram_id, engram.id.to_string());
+        assert_eq!(rows[0].memory_id, mem.id.to_string());
     }
 
     #[test]
     fn fts_cleaned_on_delete() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let engram = Engram::new("Temporary memory for testing");
-        let id = engram.id;
-        storage.save_engram(&engram).unwrap();
+        let mem = Memory::new("Temporary memory for testing");
+        let id = mem.id;
+        storage.save_memory(&mem).unwrap();
 
         // Verify it's in FTS
         #[derive(QueryableByName)]
@@ -1553,16 +1635,16 @@ mod tests {
             cnt: i32,
         }
 
-        let before: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+        let before: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_fts")
             .get_result(&mut storage.conn)
             .unwrap();
         assert_eq!(before.cnt, 1);
 
-        // Delete the engram
-        storage.delete_engram(&id).unwrap();
+        // Delete the memory
+        storage.delete_memory(&id).unwrap();
 
         // FTS should be cleaned
-        let after: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+        let after: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_fts")
             .get_result(&mut storage.conn)
             .unwrap();
         assert_eq!(after.cnt, 0);
@@ -1570,17 +1652,17 @@ mod tests {
 
     #[test]
     fn keyword_search_basic() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         storage
-            .save_engram(&Engram::new("Rust programming language"))
+            .save_memory(&Memory::new("Rust programming language"))
             .unwrap();
         storage
-            .save_engram(&Engram::new("Python programming language"))
+            .save_memory(&Memory::new("Python programming language"))
             .unwrap();
         storage
-            .save_engram(&Engram::new("Cooking delicious pasta"))
+            .save_memory(&Memory::new("Cooking delicious pasta"))
             .unwrap();
 
         let results = storage.keyword_search("programming", 10).unwrap();
@@ -1594,11 +1676,11 @@ mod tests {
 
     #[test]
     fn keyword_search_stemming() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         storage
-            .save_engram(&Engram::new("Researching machine learning techniques"))
+            .save_memory(&Memory::new("Researching machine learning techniques"))
             .unwrap();
 
         // "research" should match "Researching" via porter stemmer
@@ -1612,11 +1694,11 @@ mod tests {
 
     #[test]
     fn keyword_search_no_results() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         storage
-            .save_engram(&Engram::new("Rust programming"))
+            .save_memory(&Memory::new("Rust programming"))
             .unwrap();
 
         let results = storage.keyword_search("quantum physics", 10).unwrap();
@@ -1625,10 +1707,10 @@ mod tests {
 
     #[test]
     fn keyword_search_empty_query() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        storage.save_engram(&Engram::new("Some content")).unwrap();
+        storage.save_memory(&Memory::new("Some content")).unwrap();
 
         let results = storage.keyword_search("", 10).unwrap();
         assert!(results.is_empty(), "Empty query should return no results");
@@ -1636,19 +1718,19 @@ mod tests {
 
     #[test]
     fn fts_updated_on_content_change() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let mut engram = Engram::new("Original content about dogs");
-        storage.save_engram(&engram).unwrap();
+        let mut mem = Memory::new("Original content about dogs");
+        storage.save_memory(&mem).unwrap();
 
         // Should find "dogs"
         let results = storage.keyword_search("dogs", 10).unwrap();
         assert_eq!(results.len(), 1);
 
         // Update content
-        engram.content = "Updated content about cats".to_string();
-        storage.save_engram(&engram).unwrap();
+        mem.content = "Updated content about cats".to_string();
+        storage.save_memory(&mem).unwrap();
 
         // Should no longer find "dogs"
         let results = storage.keyword_search("dogs", 10).unwrap();
@@ -1661,20 +1743,20 @@ mod tests {
 
     #[test]
     fn ensure_fts_populated_backfills() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        // Create engrams directly in the engrams table without FTS sync
-        // by using raw SQL to bypass the save_engram FTS logic
-        let e1 = Engram::new("Memory about Rust");
-        let e2 = Engram::new("Memory about Python");
+        // Create memories directly in the memories table without FTS sync
+        // by using raw SQL to bypass the save_memory FTS logic
+        let e1 = Memory::new("Memory about Rust");
+        let e2 = Memory::new("Memory about Python");
 
         // Save normally (which populates FTS)
-        storage.save_engram(&e1).unwrap();
-        storage.save_engram(&e2).unwrap();
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
 
         // Clear FTS manually to simulate pre-FTS data
-        diesel::sql_query("DELETE FROM engram_fts")
+        diesel::sql_query("DELETE FROM memory_fts")
             .execute(&mut storage.conn)
             .unwrap();
 
@@ -1685,14 +1767,14 @@ mod tests {
             cnt: i32,
         }
 
-        let count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM engram_fts")
+        let count: CountResult = diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_fts")
             .get_result(&mut storage.conn)
             .unwrap();
         assert_eq!(count.cnt, 0, "FTS should be empty after manual clear");
 
         // Run backfill
         let backfilled = storage.ensure_fts_populated().unwrap();
-        assert_eq!(backfilled, 2, "Should backfill 2 engrams");
+        assert_eq!(backfilled, 2, "Should backfill 2 memories");
 
         // Verify search works after backfill
         let results = storage.keyword_search("Rust", 10).unwrap();
@@ -1702,11 +1784,11 @@ mod tests {
 
     #[test]
     fn ensure_fts_populated_noop_when_already_populated() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
         storage
-            .save_engram(&Engram::new("Already indexed"))
+            .save_memory(&Memory::new("Already indexed"))
             .unwrap();
 
         // FTS already has data, should be a no-op
@@ -1728,27 +1810,27 @@ mod tests {
 
     #[test]
     fn fts_batch_save_populates() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Batch item alpha");
-        let e2 = Engram::new("Batch item beta");
-        let e3 = Engram::new("Batch item gamma");
+        let e1 = Memory::new("Batch item alpha");
+        let e2 = Memory::new("Batch item beta");
+        let e3 = Memory::new("Batch item gamma");
 
-        storage.save_engrams(&[&e1, &e2, &e3]).unwrap();
+        storage.save_memories(&[&e1, &e2, &e3]).unwrap();
 
         let results = storage.keyword_search("batch", 10).unwrap();
-        assert_eq!(results.len(), 3, "All batch-saved engrams should be in FTS");
+        assert_eq!(results.len(), 3, "All batch-saved memories should be in FTS");
     }
 
     #[test]
     fn access_log_records_search_recall_cycle() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Brandon prefers ale");
-        let e2 = Engram::new("Brandon lives in Oregon City");
-        let e3 = Engram::new("Brandon is an engineer");
+        let e1 = Memory::new("Brandon prefers ale");
+        let e2 = Memory::new("Brandon lives in Oregon City");
+        let e3 = Memory::new("Brandon is an engineer");
 
         // Log an access cycle: searched for "drink preference",
         // got all 3 results, recalled only e1
@@ -1791,11 +1873,11 @@ mod tests {
 
     #[test]
     fn access_log_multiple_entries() {
-        let mut storage = EngramStorage::in_memory().unwrap();
+        let mut storage = MemoryStorage::in_memory().unwrap();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory one");
-        let e2 = Engram::new("Memory two");
+        let e1 = Memory::new("Memory one");
+        let e2 = Memory::new("Memory two");
 
         storage
             .log_access("first query", &[e1.id], &[e1.id])

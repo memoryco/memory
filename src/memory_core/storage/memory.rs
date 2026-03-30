@@ -3,14 +3,14 @@
 //! Useful for testing and ephemeral usage.
 
 use super::{Storage, StorageResult};
-use crate::engram::{Association, Config, Engram, EngramId, Identity, MemoryState};
+use crate::memory_core::{Association, Config, Memory, MemoryId, Identity, MemoryState};
 use std::collections::HashMap;
 
 /// In-memory storage implementation (for testing)
 #[derive(Debug, Default)]
 pub struct MemoryStorage {
     identity: Option<Identity>,
-    engrams: HashMap<EngramId, Engram>,
+    memories: HashMap<MemoryId, Memory>,
     associations: Vec<Association>,
     config: Option<Config>,
     last_decay_at: Option<i64>,
@@ -33,50 +33,50 @@ impl Storage for MemoryStorage {
         Ok(self.identity.clone())
     }
 
-    fn save_engram(&mut self, engram: &Engram) -> StorageResult<()> {
-        self.engrams.insert(engram.id, engram.clone());
+    fn save_memory(&mut self, mem: &Memory) -> StorageResult<()> {
+        self.memories.insert(mem.id, mem.clone());
         Ok(())
     }
 
-    fn load_engram(&mut self, id: &EngramId) -> StorageResult<Option<Engram>> {
-        Ok(self.engrams.get(id).cloned())
+    fn load_memory(&mut self, id: &MemoryId) -> StorageResult<Option<Memory>> {
+        Ok(self.memories.get(id).cloned())
     }
 
-    fn load_all_engrams(&mut self) -> StorageResult<Vec<Engram>> {
-        Ok(self.engrams.values().cloned().collect())
+    fn load_all_memories(&mut self) -> StorageResult<Vec<Memory>> {
+        Ok(self.memories.values().cloned().collect())
     }
 
-    fn load_engrams_by_state(&mut self, state: MemoryState) -> StorageResult<Vec<Engram>> {
+    fn load_memories_by_state(&mut self, state: MemoryState) -> StorageResult<Vec<Memory>> {
         Ok(self
-            .engrams
+            .memories
             .values()
             .filter(|e| e.state == state)
             .cloned()
             .collect())
     }
 
-    fn load_engrams_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Engram>> {
+    fn load_memories_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Memory>> {
         let tag_lower = tag.to_lowercase();
         Ok(self
-            .engrams
+            .memories
             .values()
             .filter(|e| e.tags.iter().any(|t| t.to_lowercase() == tag_lower))
             .cloned()
             .collect())
     }
 
-    fn delete_engram(&mut self, id: &EngramId) -> StorageResult<bool> {
-        // Remove the engram
-        let existed = self.engrams.remove(id).is_some();
+    fn delete_memory(&mut self, id: &MemoryId) -> StorageResult<bool> {
+        // Remove the memory
+        let existed = self.memories.remove(id).is_some();
 
-        // Remove associations from/to this engram
+        // Remove associations from/to this memory
         self.associations.retain(|a| a.from != *id && a.to != *id);
 
         Ok(existed)
     }
 
-    fn count_engrams(&mut self) -> StorageResult<usize> {
-        Ok(self.engrams.len())
+    fn count_memories(&mut self) -> StorageResult<usize> {
+        Ok(self.memories.len())
     }
 
     fn save_association(&mut self, assoc: &Association) -> StorageResult<()> {
@@ -87,7 +87,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
 
-    fn load_associations_from(&mut self, from: &EngramId) -> StorageResult<Vec<Association>> {
+    fn load_associations_from(&mut self, from: &MemoryId) -> StorageResult<Vec<Association>> {
         Ok(self
             .associations
             .iter()
@@ -108,8 +108,8 @@ impl Storage for MemoryStorage {
     fn prune_orphan_associations(&mut self) -> StorageResult<usize> {
         let before = self.associations.len();
         self.associations.retain(|a| {
-            self.engrams.contains_key(&a.from)
-                && self.engrams.contains_key(&a.to)
+            self.memories.contains_key(&a.from)
+                && self.memories.contains_key(&a.to)
         });
         Ok(before - self.associations.len())
     }
@@ -152,16 +152,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn memory_storage_engrams() {
+    fn memory_storage_memories() {
         let mut storage = MemoryStorage::new();
         storage.initialize().unwrap();
 
-        let engram = Engram::new("Test memory");
-        let id = engram.id;
+        let mem = Memory::new("Test memory");
+        let id = mem.id;
 
-        storage.save_engram(&engram).unwrap();
+        storage.save_memory(&mem).unwrap();
 
-        let loaded = storage.load_engram(&id).unwrap();
+        let loaded = storage.load_memory(&id).unwrap();
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().content, "Test memory");
     }
@@ -171,8 +171,8 @@ mod tests {
         let mut storage = MemoryStorage::new();
         storage.initialize().unwrap();
 
-        let e1 = Engram::new("Memory 1");
-        let e2 = Engram::new("Memory 2");
+        let e1 = Memory::new("Memory 1");
+        let e2 = Memory::new("Memory 2");
 
         let assoc = Association::new(e1.id, e2.id);
 
@@ -188,19 +188,19 @@ mod tests {
         let mut storage = MemoryStorage::new();
         storage.initialize().unwrap();
 
-        let mut engram = Engram::new("Original");
-        let id = engram.id;
+        let mut mem = Memory::new("Original");
+        let id = mem.id;
 
-        storage.save_engram(&engram).unwrap();
+        storage.save_memory(&mem).unwrap();
 
-        engram.content = "Updated".to_string();
-        storage.save_engram(&engram).unwrap();
+        mem.content = "Updated".to_string();
+        storage.save_memory(&mem).unwrap();
 
-        let loaded = storage.load_engram(&id).unwrap().unwrap();
+        let loaded = storage.load_memory(&id).unwrap().unwrap();
         assert_eq!(loaded.content, "Updated");
 
-        // Should still be just one engram
-        assert_eq!(storage.load_all_engrams().unwrap().len(), 1);
+        // Should still be just one memory
+        assert_eq!(storage.load_all_memories().unwrap().len(), 1);
     }
 
     #[test]
@@ -208,17 +208,17 @@ mod tests {
         let mut storage = MemoryStorage::new();
         storage.initialize().unwrap();
 
-        let mut active = Engram::new("Active memory");
+        let mut active = Memory::new("Active memory");
         active.state = MemoryState::Active;
 
-        let mut archived = Engram::new("Archived memory");
+        let mut archived = Memory::new("Archived memory");
         archived.state = MemoryState::Archived;
         archived.energy = 0.01;
 
-        storage.save_engram(&active).unwrap();
-        storage.save_engram(&archived).unwrap();
+        storage.save_memory(&active).unwrap();
+        storage.save_memory(&archived).unwrap();
 
-        let active_only = storage.load_engrams_by_state(MemoryState::Active).unwrap();
+        let active_only = storage.load_memories_by_state(MemoryState::Active).unwrap();
         assert_eq!(active_only.len(), 1);
         assert_eq!(active_only[0].content, "Active memory");
     }
@@ -228,16 +228,16 @@ mod tests {
         let mut storage = MemoryStorage::new();
         storage.initialize().unwrap();
 
-        let mut work = Engram::new("Work memory");
+        let mut work = Memory::new("Work memory");
         work.tags = vec!["work".to_string(), "rust".to_string()];
 
-        let mut personal = Engram::new("Personal memory");
+        let mut personal = Memory::new("Personal memory");
         personal.tags = vec!["personal".to_string()];
 
-        storage.save_engram(&work).unwrap();
-        storage.save_engram(&personal).unwrap();
+        storage.save_memory(&work).unwrap();
+        storage.save_memory(&personal).unwrap();
 
-        let work_only = storage.load_engrams_by_tag("work").unwrap();
+        let work_only = storage.load_memories_by_tag("work").unwrap();
         assert_eq!(work_only.len(), 1);
         assert_eq!(work_only[0].content, "Work memory");
     }

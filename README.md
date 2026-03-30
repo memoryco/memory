@@ -1,6 +1,6 @@
 # Memory
 
-A cognitive AI memory system powered by [engram](../../rust/engram).
+A cognitive AI memory system powered by [memory](../../rust/memory).
 
 ## Features
 
@@ -42,15 +42,15 @@ At conversation start, bootstrap by loading your identity and operational contex
 
 ```
 memory:identity_get
-memory:engram_search(tags: ["operational"])
+memory:memory_search(tags: ["operational"])
 ```
 
 **Identity** is your permanent self - persona, values, preferences, relationships. It never decays.
 
-**Engrams** are memories that can strengthen or fade based on use:
-- Use `engram_recall` when actively referencing a memory (strengthens it, triggers learning)
-- Use `engram_search` for passive lookups (no side effects)
-- Use `engram_create` to store new facts/events
+**Memorys** are memories that can strengthen or fade based on use:
+- Use `memory_recall` when actively referencing a memory (strengthens it, triggers learning)
+- Use `memory_search` for passive lookups (no side effects)
+- Use `memory_create` to store new facts/events
 
 Follow what you find in your identity and operational memories.
 ```
@@ -65,16 +65,16 @@ Follow what you find in your identity and operational memories.
 | `identity_set` | Replace your identity from JSON |
 | `identity_search` | Search identity for specific content |
 
-### Engram Tools
+### Memory Tools
 
 | Tool | Description |
 |------|-------------|
-| `engram_create` | Create a new memory with optional tags |
-| `engram_recall` | **Active** recall - stimulates memory, triggers Hebbian learning, can resurrect |
-| `engram_search` | **Passive** search - no side effects, just lookup |
-| `engram_get` | Get by ID without stimulation |
-| `engram_associate` | Create explicit link between memories |
-| `engram_stats` | Get substrate statistics |
+| `memory_create` | Create a new memory with optional tags |
+| `memory_recall` | **Active** recall - stimulates memory, triggers Hebbian learning, can resurrect |
+| `memory_search` | **Passive** search - no side effects, just lookup |
+| `memory_get` | Get by ID without stimulation |
+| `memory_associate` | Create explicit link between memories |
+| `memory_stats` | Get substrate statistics |
 
 ### Config Tools
 
@@ -109,7 +109,7 @@ Memories never delete - they just sink deeper.
 ┌─────────────────────────────────────┐
 │ MCP Server (memory)                 │
 ├─────────────────────────────────────┤
-│ engram::Brain                       │
+│ memory::Brain                       │
 │  ├─ Identity (permanent)            │
 │  ├─ Substrate (organic decay)       │
 │  └─ SqliteStorage (persistence)     │

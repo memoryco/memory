@@ -1,4 +1,4 @@
-//! Diesel schema definitions for engram storage
+//! Diesel schema definitions for memory storage
 //!
 //! Note: Manually maintained to ensure correct types.
 //! SQLite doesn't have strict types, so we specify what Rust expects.
@@ -23,7 +23,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    engrams (id) {
+    memories (id) {
         id -> Text,
         content -> Text,
         energy -> Float,

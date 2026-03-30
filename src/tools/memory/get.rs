@@ -1,27 +1,27 @@
-//! engram_get - Get a specific memory by ID (no side effects)
+//! memory_get - Get a specific memory by ID (no side effects)
 
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::tools::{format_engram, text_response};
+use crate::tools::{format_memory, text_response};
 
-pub struct EngramGetTool;
+pub struct MemoryGetTool;
 
 #[derive(Deserialize)]
 struct Args {
     id: String,
 }
 
-impl Tool<Context> for EngramGetTool {
+impl Tool<Context> for MemoryGetTool {
     fn name(&self) -> &str {
-        "engram_get"
+        "memory_get"
     }
 
     fn description(&self) -> &str {
-        "Get a memory by ID without stimulating it. Use engram_recall if you \
+        "Get a memory by ID without stimulating it. Use memory_recall if you \
          want to actively use the memory."
     }
 
@@ -47,7 +47,7 @@ impl Tool<Context> for EngramGetTool {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let id: EngramId = args
+        let id: MemoryId = args
             .id
             .parse()
             .map_err(|e| McpError::InvalidParams(format!("Invalid UUID: {}", e)))?;
@@ -56,7 +56,7 @@ impl Tool<Context> for EngramGetTool {
         let _ = brain.sync_from_storage();
 
         match brain.get_or_load(&id) {
-            Some(engram) => Ok(text_response(format_engram(engram))),
+            Some(mem) => Ok(text_response(format_memory(mem))),
             None => Ok(text_response(format!("Memory {} not found.", id))),
         }
     }

@@ -1,7 +1,7 @@
 //! Substrate - the neural memory container
 
-use super::engram::MemoryState;
-use super::{Association, Config, Engram, EngramId};
+use super::memory::MemoryState;
+use super::{Association, Config, Memory, MemoryId};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,24 +13,24 @@ fn now_unix() -> i64 {
         .as_secs() as i64
 }
 
-/// The neural substrate - holds engrams and their associations
+/// The neural substrate - holds memories and their associations
 #[derive(Debug)]
 pub struct Substrate {
     /// Configuration for decay, propagation, etc.
     pub config: Config,
 
-    /// All engrams in the substrate
-    engrams: HashMap<EngramId, Engram>,
+    /// All memories in the substrate
+    memories: HashMap<MemoryId, Memory>,
 
-    /// Associations between engrams (keyed by source id)
+    /// Associations between memories (keyed by source id)
     /// Each source can have multiple targets
-    associations: HashMap<EngramId, Vec<Association>>,
+    associations: HashMap<MemoryId, Vec<Association>>,
 
-    /// Reverse lookup: which engrams point TO this one?
-    reverse_associations: HashMap<EngramId, Vec<EngramId>>,
+    /// Reverse lookup: which memories point TO this one?
+    reverse_associations: HashMap<MemoryId, Vec<MemoryId>>,
 
-    /// Track recently accessed engrams for Hebbian learning
-    recent_accesses: Vec<EngramId>,
+    /// Track recently accessed memories for Hebbian learning
+    recent_accesses: Vec<MemoryId>,
 
     /// How many recent accesses to track for co-activation
     recent_window: usize,
@@ -49,7 +49,7 @@ impl Substrate {
     pub fn with_config(config: Config) -> Self {
         Self {
             config,
-            engrams: HashMap::new(),
+            memories: HashMap::new(),
             associations: HashMap::new(),
             reverse_associations: HashMap::new(),
             recent_accesses: Vec::new(),
@@ -63,10 +63,10 @@ impl Substrate {
         &self.config
     }
 
-    /// Insert an engram directly (used when loading from storage)
+    /// Insert a memory directly (used when loading from storage)
     /// This bypasses the normal create flow - use for hydration only
-    pub fn insert_engram(&mut self, engram: Engram) {
-        self.engrams.insert(engram.id, engram);
+    pub fn insert_memory(&mut self, memory_entry: Memory) {
+        self.memories.insert(memory_entry.id, memory_entry);
     }
 
     /// Insert an association directly (used when loading from storage)
@@ -85,66 +85,66 @@ impl Substrate {
             .push(assoc.from);
     }
 
-    /// Add a new engram to the substrate
-    pub fn add(&mut self, engram: Engram) -> EngramId {
-        let id = engram.id;
-        self.engrams.insert(id, engram);
+    /// Add a new memory to the substrate
+    pub fn add(&mut self, memory_entry: Memory) -> MemoryId {
+        let id = memory_entry.id;
+        self.memories.insert(id, memory_entry);
         id
     }
 
-    /// Create and add a new engram, returning its ID
-    pub fn create(&mut self, content: impl Into<String>) -> EngramId {
-        let engram = Engram::new(content);
-        self.add(engram)
+    /// Create and add a new memory, returning its ID
+    pub fn create(&mut self, content: impl Into<String>) -> MemoryId {
+        let mem = Memory::new(content);
+        self.add(mem)
     }
 
-    /// Create and add a new engram with an explicit creation timestamp
+    /// Create and add a new memory with an explicit creation timestamp
     pub fn create_with_timestamp(
         &mut self,
         content: impl Into<String>,
         created_at: i64,
-    ) -> EngramId {
-        let engram = Engram::new_with_timestamp(content, created_at);
-        self.add(engram)
+    ) -> MemoryId {
+        let mem = Memory::new_with_timestamp(content, created_at);
+        self.add(mem)
     }
 
-    /// Create an engram with tags
-    pub fn create_with_tags(&mut self, content: impl Into<String>, tags: Vec<String>) -> EngramId {
-        let engram = Engram::with_tags(content, tags);
-        self.add(engram)
+    /// Create a memory with tags
+    pub fn create_with_tags(&mut self, content: impl Into<String>, tags: Vec<String>) -> MemoryId {
+        let mem = Memory::with_tags(content, tags);
+        self.add(mem)
     }
 
-    /// Get an engram by ID (immutable) - works for ANY state
-    pub fn get(&self, id: &EngramId) -> Option<&Engram> {
-        self.engrams.get(id)
+    /// Get a memory by ID (immutable) - works for ANY state
+    pub fn get(&self, id: &MemoryId) -> Option<&Memory> {
+        self.memories.get(id)
     }
 
-    /// Get an engram by ID (mutable) - only if writable
+    /// Get a memory by ID (mutable) - only if writable
     #[allow(dead_code)]
-    pub fn get_mut(&mut self, id: &EngramId) -> Option<&mut Engram> {
-        self.engrams.get_mut(id).filter(|e| e.state.is_writable())
+    pub fn get_mut(&mut self, id: &MemoryId) -> Option<&mut Memory> {
+        self.memories.get_mut(id).filter(|e| e.state.is_writable())
     }
 
-    /// Get an engram by ID (mutable) - bypass write check for internal ops
-    fn get_mut_unchecked(&mut self, id: &EngramId) -> Option<&mut Engram> {
-        self.engrams.get_mut(id)
+    /// Get a memory by ID (mutable) - bypass write check for internal ops
+    fn get_mut_unchecked(&mut self, id: &MemoryId) -> Option<&mut Memory> {
+        self.memories.get_mut(id)
     }
 
-    /// Remove an engram from the substrate entirely
-    /// Also removes all associations from/to this engram
-    /// Returns the removed engram if it existed
-    pub fn remove(&mut self, id: &EngramId) -> Option<Engram> {
-        // Remove the engram
-        let removed = self.engrams.remove(id);
+    /// Remove a memory from the substrate entirely
+    /// Also removes all associations from/to this memory
+    /// Returns the removed memory if it existed
+    pub fn remove(&mut self, id: &MemoryId) -> Option<Memory> {
+        // Remove the memory
+        let removed = self.memories.remove(id);
 
         if removed.is_some() {
             // Remove from recent accesses
             self.recent_accesses.retain(|&acc_id| acc_id != *id);
 
-            // Remove associations FROM this engram
+            // Remove associations FROM this memory
             self.associations.remove(id);
 
-            // Remove associations TO this engram (in other engrams' association lists)
+            // Remove associations TO this memory (in other memories' association lists)
             for assocs in self.associations.values_mut() {
                 assocs.retain(|a| a.to != *id);
             }
@@ -159,29 +159,29 @@ impl Substrate {
         removed
     }
 
-    /// Stimulate an engram and propagate to neighbors
+    /// Stimulate a memory and propagate to neighbors
     /// This is the main "access" operation
-    /// Returns list of affected engrams and any resurrections that occurred
-    pub fn stimulate(&mut self, id: EngramId, amount: f64) -> StimulationResult {
+    /// Returns list of affected memories and any resurrections that occurred
+    pub fn stimulate(&mut self, id: MemoryId, amount: f64) -> StimulationResult {
         let mut result = StimulationResult::default();
         result.affected.push(id);
 
-        // Stimulate the target engram
-        if let Some(engram) = self.get_mut_unchecked(&id) {
-            if let Some(old_state) = engram.stimulate(amount) {
+        // Stimulate the target memory
+        if let Some(mem) = self.get_mut_unchecked(&id) {
+            if let Some(old_state) = mem.stimulate(amount) {
                 result.resurrections.push((id, old_state));
             }
         } else {
             return result;
         }
 
-        // Only do Hebbian learning and propagation for searchable engrams
+        // Only do Hebbian learning and propagation for searchable memories
         if self
             .get(&id)
             .map(|e| e.state.can_propagate())
             .unwrap_or(false)
         {
-            // Hebbian learning: strengthen associations with recently accessed engrams
+            // Hebbian learning: strengthen associations with recently accessed memories
             let modified = self.apply_hebbian_learning(id);
             result.modified_associations = modified;
 
@@ -212,18 +212,18 @@ impl Substrate {
     /// - Can resurrect archived memories
     /// - Triggers Hebbian learning with other recent recalls
     /// - Propagates to associated memories
-    pub fn recall(&mut self, id: EngramId) -> RecallResult {
+    pub fn recall(&mut self, id: MemoryId) -> RecallResult {
         let strength = self.config.recall_strength;
         self.recall_with_strength(id, strength)
     }
 
     /// Recall with custom stimulation strength
-    pub fn recall_with_strength(&mut self, id: EngramId, strength: f64) -> RecallResult {
+    pub fn recall_with_strength(&mut self, id: MemoryId, strength: f64) -> RecallResult {
         let stimulation = self.stimulate(id, strength);
-        let engram = self.get(&id).cloned();
+        let mem = self.get(&id).cloned();
 
         RecallResult {
-            engram,
+            memory_entry: mem,
             resurrected: !stimulation.resurrections.is_empty(),
             previous_state: stimulation.resurrections.first().map(|(_, s)| *s),
             affected_ids: stimulation.affected,
@@ -233,12 +233,12 @@ impl Substrate {
 
     /// Recall multiple memories at once
     /// Good for when referencing several related memories together
-    pub fn recall_many(&mut self, ids: &[EngramId]) -> Vec<RecallResult> {
+    pub fn recall_many(&mut self, ids: &[MemoryId]) -> Vec<RecallResult> {
         ids.iter().map(|id| self.recall(*id)).collect()
     }
 
-    /// Propagate stimulation to connected engrams
-    fn propagate(&mut self, source_id: EngramId, source_energy: f64) -> Vec<EngramId> {
+    /// Propagate stimulation to connected memories
+    fn propagate(&mut self, source_id: MemoryId, source_energy: f64) -> Vec<MemoryId> {
         let mut affected = Vec::new();
 
         // Get associations from this source
@@ -263,18 +263,18 @@ impl Substrate {
         affected
     }
 
-    /// Apply Hebbian learning: strengthen connections between co-accessed engrams
+    /// Apply Hebbian learning: strengthen connections between co-accessed memories
     /// Returns list of (from, to) pairs that were modified
-    fn apply_hebbian_learning(&mut self, current_id: EngramId) -> Vec<(EngramId, EngramId)> {
+    fn apply_hebbian_learning(&mut self, current_id: MemoryId) -> Vec<(MemoryId, MemoryId)> {
         let learning_rate = self.config.hebbian_learning_rate;
         let mut modified = Vec::new();
 
         // Clone to avoid borrow conflict
-        let recent: Vec<EngramId> = self.recent_accesses.clone();
+        let recent: Vec<MemoryId> = self.recent_accesses.clone();
 
         for recent_id in recent {
             if recent_id != current_id {
-                // Only form associations with searchable engrams
+                // Only form associations with searchable memories
                 let recent_searchable = self
                     .get(&recent_id)
                     .map(|e| e.is_searchable())
@@ -299,8 +299,8 @@ impl Substrate {
     /// Returns true if an association was created or strengthened
     fn strengthen_or_create_association(
         &mut self,
-        from: EngramId,
-        to: EngramId,
+        from: MemoryId,
+        to: MemoryId,
         amount: f64,
     ) -> bool {
         let assocs = self.associations.entry(from).or_default();
@@ -320,8 +320,8 @@ impl Substrate {
         }
     }
 
-    /// Manually create an association between two engrams
-    pub fn associate(&mut self, from: EngramId, to: EngramId, weight: f64, ordinal: Option<u32>) {
+    /// Manually create an association between two memories
+    pub fn associate(&mut self, from: MemoryId, to: MemoryId, weight: f64, ordinal: Option<u32>) {
         let assoc = Association::with_ordinal(from, to, weight, ordinal);
 
         self.associations.entry(from).or_default().push(assoc);
@@ -331,7 +331,7 @@ impl Substrate {
 
     /// Create an association only if one does not already exist between from→to.
     /// Returns true if a new association was created, false if one already existed.
-    pub fn associate_if_absent(&mut self, from: EngramId, to: EngramId, weight: f64) -> bool {
+    pub fn associate_if_absent(&mut self, from: MemoryId, to: MemoryId, weight: f64) -> bool {
         let assocs = self.associations.entry(from).or_default();
         if assocs.iter().any(|a| a.to == to) {
             return false;
@@ -352,7 +352,7 @@ impl Substrate {
         self.last_decay_at = timestamp;
     }
 
-    /// Apply time-based decay to all engrams
+    /// Apply time-based decay to all memories
     /// Calculates decay based on elapsed time since last decay
     /// Returns true if decay was applied, false if not enough time elapsed
     pub fn apply_time_decay(&mut self) -> bool {
@@ -368,9 +368,9 @@ impl Substrate {
         let elapsed_days = elapsed_hours / 24.0;
         let total_decay = self.config.decay_rate_per_day * elapsed_days;
 
-        // Apply decay to all engrams
-        for engram in self.engrams.values_mut() {
-            engram.decay(total_decay);
+        // Apply decay to all memories
+        for mem in self.memories.values_mut() {
+            mem.decay(total_decay);
         }
 
         // Also decay associations (configurable rate)
@@ -392,8 +392,8 @@ impl Substrate {
         // For backwards compat, treat one tick as 1 hour
         let decay_rate = self.config.decay_rate_per_day / 24.0;
 
-        for engram in self.engrams.values_mut() {
-            engram.decay(decay_rate);
+        for mem in self.memories.values_mut() {
+            mem.decay(decay_rate);
         }
 
         // Also decay associations (configurable rate)
@@ -438,35 +438,35 @@ impl Substrate {
         }
     }
 
-    /// Get all engrams that are currently searchable (Active or Dormant)
-    pub fn searchable_engrams(&self) -> impl Iterator<Item = &Engram> {
-        self.engrams.values().filter(|e| e.is_searchable())
+    /// Get all memories that are currently searchable (Active or Dormant)
+    pub fn searchable_memories(&self) -> impl Iterator<Item = &Memory> {
+        self.memories.values().filter(|e| e.is_searchable())
     }
 
-    /// Get all engrams in deep storage
+    /// Get all memories in deep storage
     #[allow(dead_code)]
-    pub fn deep_engrams(&self) -> impl Iterator<Item = &Engram> {
-        self.engrams.values().filter(|e| e.is_deep())
+    pub fn deep_memories(&self) -> impl Iterator<Item = &Memory> {
+        self.memories.values().filter(|e| e.is_deep())
     }
 
-    /// Get all archived engrams
-    pub fn archived_engrams(&self) -> impl Iterator<Item = &Engram> {
-        self.engrams.values().filter(|e| e.is_archived())
+    /// Get all archived memories
+    pub fn archived_memories(&self) -> impl Iterator<Item = &Memory> {
+        self.memories.values().filter(|e| e.is_archived())
     }
 
-    /// Get all engrams (for iteration/inspection)
-    pub fn all_engrams(&self) -> impl Iterator<Item = &Engram> {
-        self.engrams.values()
+    /// Get all memories (for iteration/inspection)
+    pub fn all_memories(&self) -> impl Iterator<Item = &Memory> {
+        self.memories.values()
     }
 
     // ==================
     // DISCOVERY METHODS
     // ==================
 
-    /// List all unique tags across all engrams
+    /// List all unique tags across all memories
     pub fn list_tags(&self) -> Vec<String> {
         let mut tags: Vec<String> = self
-            .engrams
+            .memories
             .values()
             .flat_map(|e| e.tags.iter().cloned())
             .collect();
@@ -480,8 +480,8 @@ impl Substrate {
         let mut tag_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
 
-        for engram in self.engrams.values() {
-            for tag in &engram.tags {
+        for mem in self.memories.values() {
+            for tag in &mem.tags {
                 *tag_counts.entry(tag.clone()).or_insert(0) += 1;
             }
         }
@@ -495,18 +495,18 @@ impl Substrate {
     // SEARCH METHODS
     // ==================
 
-    /// Search engrams by content (case-insensitive substring match)
+    /// Search memories by content (case-insensitive substring match)
     /// Only searches Active and Dormant by default
-    pub fn search(&self, query: &str) -> Vec<&Engram> {
+    pub fn search(&self, query: &str) -> Vec<&Memory> {
         self.search_with_options(query, SearchOptions::default())
     }
 
-    /// Search engrams with options
-    pub fn search_with_options(&self, query: &str, options: SearchOptions) -> Vec<&Engram> {
+    /// Search memories with options
+    pub fn search_with_options(&self, query: &str, options: SearchOptions) -> Vec<&Memory> {
         let q = query.to_lowercase();
 
-        let mut results: Vec<&Engram> = self
-            .engrams
+        let mut results: Vec<&Memory> = self
+            .memories
             .values()
             .filter(|e| {
                 // State filter
@@ -542,17 +542,17 @@ impl Substrate {
         results
     }
 
-    /// Search engrams by tag
-    pub fn search_by_tag(&self, tag: &str) -> Vec<&Engram> {
+    /// Search memories by tag
+    pub fn search_by_tag(&self, tag: &str) -> Vec<&Memory> {
         self.search_by_tag_with_options(tag, SearchOptions::default())
     }
 
-    /// Search engrams by tag with options
-    pub fn search_by_tag_with_options(&self, tag: &str, options: SearchOptions) -> Vec<&Engram> {
+    /// Search memories by tag with options
+    pub fn search_by_tag_with_options(&self, tag: &str, options: SearchOptions) -> Vec<&Memory> {
         let tag_lower = tag.to_lowercase();
 
-        let mut results: Vec<&Engram> = self
-            .engrams
+        let mut results: Vec<&Memory> = self
+            .memories
             .values()
             .filter(|e| {
                 // State filter
@@ -586,22 +586,22 @@ impl Substrate {
         results
     }
 
-    /// Search engrams by multiple tags
-    pub fn search_by_tags(&self, tags: &[&str], mode: TagMatchMode) -> Vec<&Engram> {
+    /// Search memories by multiple tags
+    pub fn search_by_tags(&self, tags: &[&str], mode: TagMatchMode) -> Vec<&Memory> {
         self.search_by_tags_with_options(tags, mode, SearchOptions::default())
     }
 
-    /// Search engrams by multiple tags with options
+    /// Search memories by multiple tags with options
     pub fn search_by_tags_with_options(
         &self,
         tags: &[&str],
         mode: TagMatchMode,
         options: SearchOptions,
-    ) -> Vec<&Engram> {
+    ) -> Vec<&Memory> {
         let tags_lower: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
 
-        let mut results: Vec<&Engram> = self
-            .engrams
+        let mut results: Vec<&Memory> = self
+            .memories
             .values()
             .filter(|e| {
                 // State filter
@@ -616,11 +616,11 @@ impl Substrate {
                 }
 
                 // Tag match based on mode
-                let engram_tags: Vec<String> = e.tags.iter().map(|t| t.to_lowercase()).collect();
+                let memory_tags: Vec<String> = e.tags.iter().map(|t| t.to_lowercase()).collect();
 
                 match mode {
-                    TagMatchMode::All => tags_lower.iter().all(|t| engram_tags.contains(t)),
-                    TagMatchMode::Any => tags_lower.iter().any(|t| engram_tags.contains(t)),
+                    TagMatchMode::All => tags_lower.iter().all(|t| memory_tags.contains(t)),
+                    TagMatchMode::Any => tags_lower.iter().any(|t| memory_tags.contains(t)),
                 }
             })
             .collect();
@@ -640,14 +640,14 @@ impl Substrate {
         results
     }
 
-    /// Find engrams associated with a given engram
-    /// Follows outbound associations and returns connected engrams
-    pub fn find_associated(&self, id: &EngramId) -> Vec<(&Engram, f64)> {
-        let mut results: Vec<(&Engram, f64)> = Vec::new();
+    /// Find memories associated with a given memory
+    /// Follows outbound associations and returns connected memories
+    pub fn find_associated(&self, id: &MemoryId) -> Vec<(&Memory, f64)> {
+        let mut results: Vec<(&Memory, f64)> = Vec::new();
 
         if let Some(assocs) = self.associations.get(id) {
             for assoc in assocs {
-                if let Some(target) = self.engrams.get(&assoc.to) {
+                if let Some(target) = self.memories.get(&assoc.to) {
                     results.push((target, assoc.weight));
                 }
             }
@@ -658,13 +658,13 @@ impl Substrate {
         results
     }
 
-    /// Get associations from a specific engram
-    pub fn associations_from(&self, id: &EngramId) -> Option<&Vec<Association>> {
+    /// Get associations from a specific memory
+    pub fn associations_from(&self, id: &MemoryId) -> Option<&Vec<Association>> {
         self.associations.get(id)
     }
 
-    /// Get IDs of engrams that point to the given engram
-    pub fn associations_to(&self, id: &EngramId) -> Option<&Vec<EngramId>> {
+    /// Get IDs of memories that point to the given memory
+    pub fn associations_to(&self, id: &MemoryId) -> Option<&Vec<MemoryId>> {
         self.reverse_associations.get(id)
     }
 
@@ -673,21 +673,21 @@ impl Substrate {
         self.associations.values().flat_map(|v| v.iter()).collect()
     }
 
-    /// Count of engrams in the substrate (all states)
+    /// Count of memories in the substrate (all states)
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        self.engrams.len()
+        self.memories.len()
     }
 
     /// Is the substrate empty?
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.engrams.is_empty()
+        self.memories.is_empty()
     }
 
     /// Get substrate statistics
     pub fn stats(&self) -> SubstrateStats {
-        let total = self.engrams.len();
+        let total = self.memories.len();
 
         let mut active = 0;
         let mut dormant = 0;
@@ -695,7 +695,7 @@ impl Substrate {
         let mut archived = 0;
         let mut total_energy = 0.0;
 
-        for e in self.engrams.values() {
+        for e in self.memories.values() {
             total_energy += e.energy;
             match e.state {
                 MemoryState::Active => active += 1,
@@ -714,11 +714,11 @@ impl Substrate {
         let association_count: usize = self.associations.values().map(|v| v.len()).sum();
 
         SubstrateStats {
-            total_engrams: total,
-            active_engrams: active,
-            dormant_engrams: dormant,
-            deep_engrams: deep,
-            archived_engrams: archived,
+            total_memories: total,
+            active_memories: active,
+            dormant_memories: dormant,
+            deep_memories: deep,
+            archived_memories: archived,
             total_associations: association_count,
             average_energy: avg_energy,
         }
@@ -734,43 +734,43 @@ impl Default for Substrate {
 /// Result of a stimulation operation
 #[derive(Debug, Default)]
 pub struct StimulationResult {
-    /// All engrams that were affected (directly or through propagation)
-    pub affected: Vec<EngramId>,
-    /// Engrams that were resurrected from Deep or Archived state
-    pub resurrections: Vec<(EngramId, MemoryState)>,
+    /// All memories that were affected (directly or through propagation)
+    pub affected: Vec<MemoryId>,
+    /// Memorys that were resurrected from Deep or Archived state
+    pub resurrections: Vec<(MemoryId, MemoryState)>,
     /// Associations that were created or strengthened by Hebbian learning
     /// Stored as (from_id, to_id) pairs
-    pub modified_associations: Vec<(EngramId, EngramId)>,
+    pub modified_associations: Vec<(MemoryId, MemoryId)>,
 }
 
 /// Result of a recall operation
 #[derive(Debug, Clone)]
 pub struct RecallResult {
-    /// The recalled engram (None if not found)
-    pub engram: Option<Engram>,
+    /// The recalled memory (None if not found)
+    pub memory_entry: Option<Memory>,
     /// Whether this recall resurrected the memory
     pub resurrected: bool,
     /// The state it was resurrected from (if applicable)
     pub previous_state: Option<MemoryState>,
-    /// IDs of all engrams affected (the recalled one + propagation targets)
-    pub affected_ids: Vec<EngramId>,
+    /// IDs of all memories affected (the recalled one + propagation targets)
+    pub affected_ids: Vec<MemoryId>,
     /// Associations that were created or strengthened by Hebbian learning
     /// Stored as (from_id, to_id) pairs
-    pub modified_associations: Vec<(EngramId, EngramId)>,
+    pub modified_associations: Vec<(MemoryId, MemoryId)>,
 }
 
 impl RecallResult {
     /// Check if the recall found a memory
     pub fn found(&self) -> bool {
-        self.engram.is_some()
+        self.memory_entry.is_some()
     }
 
     /// Get the content if found
     pub fn content(&self) -> Option<&str> {
-        self.engram.as_ref().map(|e| e.content.as_str())
+        self.memory_entry.as_ref().map(|e| e.content.as_str())
     }
 
-    /// How many engrams were affected
+    /// How many memories were affected
     pub fn affected_count(&self) -> usize {
         self.affected_ids.len()
     }
@@ -779,11 +779,11 @@ impl RecallResult {
 /// Statistics about the substrate state
 #[derive(Debug, Clone)]
 pub struct SubstrateStats {
-    pub total_engrams: usize,
-    pub active_engrams: usize,
-    pub dormant_engrams: usize,
-    pub deep_engrams: usize,
-    pub archived_engrams: usize,
+    pub total_memories: usize,
+    pub active_memories: usize,
+    pub dormant_memories: usize,
+    pub deep_memories: usize,
+    pub archived_memories: usize,
     pub total_associations: usize,
     pub average_energy: f64,
 }
@@ -882,13 +882,13 @@ mod tests {
     }
 
     #[test]
-    fn create_and_retrieve_engram() {
+    fn create_and_retrieve_memory() {
         let mut substrate = Substrate::new();
         let id = substrate.create("test memory");
 
-        let engram = substrate.get(&id).unwrap();
-        assert_eq!(engram.content, "test memory");
-        assert_eq!(engram.energy, 1.0);
+        let mem = substrate.get(&id).unwrap();
+        assert_eq!(mem.content, "test memory");
+        assert_eq!(mem.energy, 1.0);
     }
 
     #[test]
@@ -901,9 +901,9 @@ mod tests {
 
         substrate.stimulate(id, 0.3);
 
-        let engram = substrate.get(&id).unwrap();
-        assert!((engram.energy - 0.8).abs() < 0.001);
-        assert_eq!(engram.access_count, 1);
+        let mem = substrate.get(&id).unwrap();
+        assert!((mem.energy - 0.8).abs() < 0.001);
+        assert_eq!(mem.access_count, 1);
     }
 
     #[test]
@@ -971,12 +971,12 @@ mod tests {
         substrate.set_last_decay_at(substrate.last_decay_at - 86400);
         substrate.apply_time_decay();
 
-        let engram = substrate.get(&id).unwrap();
-        assert!(engram.energy < 1.0);
+        let mem = substrate.get(&id).unwrap();
+        assert!(mem.energy < 1.0);
     }
 
     #[test]
-    fn engrams_sink_to_deep_and_archive() {
+    fn memories_sink_to_deep_and_archive() {
         let mut substrate = Substrate::new();
         let id = substrate.create("sinking memory");
 
@@ -1025,8 +1025,8 @@ mod tests {
         assert_eq!(result.resurrections[0].1, MemoryState::Archived);
 
         // Now active again
-        let engram = substrate.get(&id).unwrap();
-        assert_eq!(engram.state, MemoryState::Active);
+        let mem = substrate.get(&id).unwrap();
+        assert_eq!(mem.state, MemoryState::Active);
     }
 
     #[test]
@@ -1055,11 +1055,11 @@ mod tests {
 
         let stats = substrate.stats();
 
-        assert_eq!(stats.total_engrams, 4);
-        assert_eq!(stats.active_engrams, 1); // a
-        assert_eq!(stats.dormant_engrams, 1); // b
-        assert_eq!(stats.deep_engrams, 1); // c
-        assert_eq!(stats.archived_engrams, 1); // d
+        assert_eq!(stats.total_memories, 4);
+        assert_eq!(stats.active_memories, 1); // a
+        assert_eq!(stats.dormant_memories, 1); // b
+        assert_eq!(stats.deep_memories, 1); // c
+        assert_eq!(stats.archived_memories, 1); // d
     }
 
     // =================
@@ -1161,7 +1161,7 @@ mod tests {
     fn search_respects_state_filter() {
         let mut substrate = build_test_substrate();
 
-        // Archive one of the engrams
+        // Archive one of the memorys
         let archived_id = substrate.search("Wedding")[0].id;
         {
             let e = substrate.get_mut_unchecked(&archived_id).unwrap();
@@ -1212,7 +1212,7 @@ mod tests {
     // =================
 
     #[test]
-    fn recall_returns_engram() {
+    fn recall_returns_memory() {
         let mut substrate = Substrate::new();
         let id = substrate.create("Test memory");
 
@@ -1233,7 +1233,7 @@ mod tests {
         let result = substrate.recall(id);
 
         // Energy should have increased
-        assert!(result.engram.unwrap().energy > 0.5);
+        assert!(result.memory_entry.unwrap().energy > 0.5);
     }
 
     #[test]
@@ -1269,7 +1269,7 @@ mod tests {
 
         assert!(result.resurrected);
         assert_eq!(result.previous_state, Some(MemoryState::Archived));
-        assert!(result.engram.unwrap().state != MemoryState::Archived);
+        assert!(result.memory_entry.unwrap().state != MemoryState::Archived);
     }
 
     #[test]

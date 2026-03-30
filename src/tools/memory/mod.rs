@@ -1,4 +1,4 @@
-//! Engram (memory) tools - CRUD and graph operations
+//! Memory (memory) tools - CRUD and graph operations
 
 mod associate;
 mod associations;
@@ -11,15 +11,15 @@ mod recall;
 mod search;
 mod stats;
 
-pub use associate::EngramAssociateTool;
-pub use associations::EngramAssociationsTool;
-pub use create::EngramCreateTool;
-pub use delete::EngramDeleteTool;
-pub use get::EngramGetTool;
-pub use graph::EngramGraphTool;
-pub use recall::EngramRecallTool;
-pub use search::EngramSearchTool;
-pub use stats::EngramStatsTool;
+pub use associate::MemoryAssociateTool;
+pub use associations::MemoryAssociationsTool;
+pub use create::MemoryCreateTool;
+pub use delete::MemoryDeleteTool;
+pub use get::MemoryGetTool;
+pub use graph::MemoryGraphTool;
+pub use recall::MemoryRecallTool;
+pub use search::MemorySearchTool;
+pub use stats::MemoryStatsTool;
 
 /// Accumulate a text signal into a session's running centroid.
 ///
@@ -28,10 +28,10 @@ pub use stats::EngramStatsTool;
 /// propagated — session context is best-effort.
 ///
 /// Optional ID tracking: pass `search_result_ids` or `created_ids` to record
-/// which engrams were touched in this session, avoiding a separate load/save cycle.
+/// which memories were touched in this session, avoiding a separate load/save cycle.
 ///
 /// Returns the embedding generated for the text, if successful. Callers can
-/// reuse this embedding (e.g. to store on the engram) to avoid regenerating it.
+/// reuse this embedding (e.g. to store on the memory) to avoid regenerating it.
 pub(crate) fn accumulate_session_signal(
     context: &crate::Context,
     session_id: &str,
@@ -47,7 +47,7 @@ pub(crate) fn accumulate_session_signal(
     let mut session = brain
         .load_session(session_id)
         .unwrap_or(None)
-        .unwrap_or_else(|| crate::engram::SessionContext::new(session_id));
+        .unwrap_or_else(|| crate::memory_core::SessionContext::new(session_id));
 
     session.touch();
     session.add_query(text, max_queries);

@@ -12,15 +12,15 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
-use super::storage::{EngramStorage, Storage};
-use super::{Association, EngramId, MemoryState};
+use super::storage::{MemoryStorage, Storage};
+use super::{Association, MemoryId, MemoryState};
 
 /// Work item for the persistence worker
 /// Contains all owned data needed to persist recall effects
 #[derive(Debug)]
 pub struct PersistenceWork {
     /// Energy updates: (id, new_energy, new_state)
-    pub energy_updates: Vec<(EngramId, f64, MemoryState)>,
+    pub energy_updates: Vec<(MemoryId, f64, MemoryState)>,
     /// Associations that were created or strengthened
     pub associations: Vec<Association>,
 }
@@ -75,7 +75,7 @@ impl PersistenceWorker {
     /// The worker thread's main loop
     fn worker_loop(db_path: PathBuf, receiver: Receiver<PersistenceWork>) {
         // Open our own storage connection
-        let mut storage = match EngramStorage::open(&db_path) {
+        let mut storage = match MemoryStorage::open(&db_path) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[persistence] Failed to open storage: {:?}", e);
@@ -105,7 +105,7 @@ impl PersistenceWorker {
                     .map(|(id, energy, state)| (id, *energy, *state))
                     .collect();
 
-                if let Err(e) = storage.save_engram_energies(&updates) {
+                if let Err(e) = storage.save_memory_energies(&updates) {
                     eprintln!("[persistence] Failed to save energies: {:?}", e);
                 }
             }
@@ -172,7 +172,7 @@ impl Drop for PersistenceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engram::storage::Storage;
+    use crate::memory_core::storage::Storage;
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -193,7 +193,7 @@ mod tests {
         let db_path = dir.path().join("test.db");
 
         // Create and initialize storage first
-        let mut storage = EngramStorage::open(&db_path).unwrap();
+        let mut storage = MemoryStorage::open(&db_path).unwrap();
         storage.initialize().unwrap();
         drop(storage);
 

@@ -1,4 +1,4 @@
-//! engram_stats - Get substrate statistics
+//! memory_stats - Get substrate statistics
 
 use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, Tool, ToolEnv};
@@ -6,11 +6,11 @@ use sml_mcps::{CallToolResult, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
-pub struct EngramStatsTool;
+pub struct MemoryStatsTool;
 
-impl Tool<Context> for EngramStatsTool {
+impl Tool<Context> for MemoryStatsTool {
     fn name(&self) -> &str {
-        "engram_stats"
+        "memory_stats"
     }
 
     fn description(&self) -> &str {
@@ -49,11 +49,11 @@ impl Tool<Context> for EngramStatsTool {
              Total associations: {}\n\
              Enrichment vectors: {}\n\
              Average energy: {:.2}",
-            stats.total_engrams,
-            stats.active_engrams,
-            stats.dormant_engrams,
-            stats.deep_engrams,
-            stats.archived_engrams,
+            stats.total_memories,
+            stats.active_memories,
+            stats.dormant_memories,
+            stats.deep_memories,
+            stats.archived_memories,
             stats.total_associations,
             enrichment_count,
             stats.average_energy

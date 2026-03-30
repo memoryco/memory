@@ -1,7 +1,7 @@
-//! engram_create - Create new memories (batch)
+//! memory_create - Create new memories (batch)
 
 use crate::embedding::EmbeddingGenerator;
-use crate::engram::EngramId;
+use crate::memory_core::MemoryId;
 use crate::llm::SharedLlmService;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
@@ -10,7 +10,7 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
-pub struct EngramCreateTool;
+pub struct MemoryCreateTool;
 
 #[derive(Deserialize, Clone)]
 struct MemoryInput {
@@ -28,9 +28,9 @@ struct Args {
     session_id: String,
 }
 
-impl Tool<Context> for EngramCreateTool {
+impl Tool<Context> for MemoryCreateTool {
     fn name(&self) -> &str {
-        "engram_create"
+        "memory_create"
     }
 
     fn description(&self) -> &str {
@@ -92,14 +92,14 @@ impl Tool<Context> for EngramCreateTool {
         let args: Args =
             serde_json::from_value(args).map_err(|e| McpError::InvalidParams(e.to_string()))?;
 
-        let mut created: Vec<(EngramId, String)> = Vec::new();
+        let mut created: Vec<(MemoryId, String)> = Vec::new();
         let mut output = String::new();
 
         // Phase 1: Create memories (holding write lock briefly)
         {
             let mut brain = context.brain.write().unwrap();
             for memory in &args.memories {
-                let id: EngramId = if let Some(ref ts) = memory.created_at {
+                let id: MemoryId = if let Some(ref ts) = memory.created_at {
                     let epoch = parse_timestamp(ts).map_err(|e| {
                         McpError::InvalidParams(format!("Invalid created_at '{}': {}", ts, e))
                     })?;
@@ -117,7 +117,7 @@ impl Tool<Context> for EngramCreateTool {
 
         // Session accumulation: feed each memory's content into the session context,
         // track created IDs, and collect precomputed embeddings — all in one load/save.
-        let mut precomputed_embeddings: std::collections::HashMap<EngramId, Vec<f32>> =
+        let mut precomputed_embeddings: std::collections::HashMap<MemoryId, Vec<f32>> =
             std::collections::HashMap::new();
         {
             let brain = context.brain.read().unwrap();
@@ -128,7 +128,7 @@ impl Tool<Context> for EngramCreateTool {
             let mut session = brain
                 .load_session(&args.session_id)
                 .unwrap_or(None)
-                .unwrap_or_else(|| crate::engram::SessionContext::new(&args.session_id));
+                .unwrap_or_else(|| crate::memory_core::SessionContext::new(&args.session_id));
 
             session.touch();
 
@@ -190,7 +190,7 @@ impl Tool<Context> for EngramCreateTool {
         {
             let brain_clone = context.brain.clone();
             let llm_clone: SharedLlmService = context.llm.clone();
-            let batch: Vec<(EngramId, String)> = created.clone();
+            let batch: Vec<(MemoryId, String)> = created.clone();
 
             std::thread::spawn(move || {
                 if !llm_clone.available() {

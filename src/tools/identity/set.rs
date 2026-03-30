@@ -1,6 +1,6 @@
 //! identity_set - Set the identity from JSON
 
-use crate::engram::Identity;
+use crate::memory_core::Identity;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use sml_mcps::{Tool, ToolEnv, CallToolResult, McpError};

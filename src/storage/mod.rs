@@ -8,8 +8,8 @@
 //! - [`StorageError`] - Unified error type for all storage operations
 //! - [`StorageResult`] - Result type alias
 //!
-//! Each domain (engram, identity) owns its own schema and models.
-//! See `engram::storage` for domain-specific types.
+//! Each domain (memory, identity) owns its own schema and models.
+//! See `memory_core::storage` for domain-specific types.
 
 mod error;
 

@@ -204,6 +204,23 @@ impl MemoryStorage {
         };
 
         if has_old_table {
+            // Check if 'memories' table already exists (partial previous migration)
+            let has_new_table: Result<CountResult, _> = diesel::sql_query(
+                "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='memories'",
+            )
+            .get_result(&mut self.conn);
+            let memories_exists = matches!(has_new_table, Ok(r) if r.cnt > 0);
+
+            if memories_exists {
+                // Both tables exist — previous migration partially completed.
+                // Data lives in engrams (the original). Drop the empty memories
+                // table so the rename can proceed.
+                self.conn
+                    .batch_execute("DROP TABLE memories")
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+                eprintln!("[migration] Dropped empty 'memories' table from partial previous migration");
+            }
+
             self.conn
                 .batch_execute("ALTER TABLE engrams RENAME TO memories")
                 .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -220,7 +237,8 @@ impl MemoryStorage {
                     .batch_execute(
                         r#"
                         DROP TABLE IF EXISTS engram_fts;
-                        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                        DROP TABLE IF EXISTS memory_fts;
+                        CREATE VIRTUAL TABLE memory_fts USING fts5(
                             content,
                             memory_id UNINDEXED,
                             tokenize='porter unicode61'
@@ -232,13 +250,30 @@ impl MemoryStorage {
                 eprintln!("[migration] Rebuilt FTS table as memory_fts");
             }
 
-            // Rename engram_id column in memory_enrichments if it exists with old name
-            let has_enrichments: Result<CountResult, _> = diesel::sql_query(
+            // Handle engram_enrichments → memory_enrichments migration
+            let has_old_enrichments: Result<CountResult, _> = diesel::sql_query(
+                "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='engram_enrichments'",
+            )
+            .get_result(&mut self.conn);
+
+            if matches!(has_old_enrichments, Ok(r) if r.cnt > 0) {
+                // Drop empty memory_enrichments if create_schema() already made it
+                self.conn
+                    .batch_execute("DROP TABLE IF EXISTS memory_enrichments")
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+                self.conn
+                    .batch_execute("ALTER TABLE engram_enrichments RENAME TO memory_enrichments")
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+                eprintln!("[migration] Renamed table engram_enrichments → memory_enrichments");
+            }
+
+            // Rename engram_id column in memory_enrichments if it still has the old name
+            let has_old_column: Result<CountResult, _> = diesel::sql_query(
                 "SELECT COUNT(*) as cnt FROM pragma_table_info('memory_enrichments') WHERE name = 'engram_id'",
             )
             .get_result(&mut self.conn);
 
-            if matches!(has_enrichments, Ok(r) if r.cnt > 0) {
+            if matches!(has_old_column, Ok(r) if r.cnt > 0) {
                 self.conn
                     .batch_execute("ALTER TABLE memory_enrichments RENAME COLUMN engram_id TO memory_id")
                     .map_err(|e| StorageError::Database(e.to_string()))?;

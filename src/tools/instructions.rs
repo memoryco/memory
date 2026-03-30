@@ -97,7 +97,7 @@ mod tests {
         let refs = ReferenceManager::new();
         let text = assemble_instructions(tmp.path(), &refs);
 
-        assert!(text.contains("<workflow>"), "Missing memory instructions");
+        assert!(text.contains("## Workflow"), "Missing memory instructions");
         assert!(text.contains("Lenses"), "Missing lenses instructions");
         assert!(text.contains("References"), "Missing reference instructions");
     }
@@ -135,7 +135,7 @@ mod tests {
         let text = assemble_instructions(tmp.path(), &refs);
 
         // Should still have the hardcoded instructions
-        assert!(text.contains("<workflow>"));
+        assert!(text.contains("## Workflow"));
     }
 
     #[test]
@@ -145,7 +145,7 @@ mod tests {
         let refs = ReferenceManager::new();
         let text = assemble_instructions(tmp.path(), &refs);
 
-        assert!(text.contains("<workflow>"));
+        assert!(text.contains("## Workflow"));
     }
 
     #[test]
@@ -156,7 +156,7 @@ mod tests {
         let refs = ReferenceManager::new();
         let text = assemble_instructions(tmp.path(), &refs);
 
-        assert!(text.contains("<workflow>"));
+        assert!(text.contains("## Workflow"));
         assert!(text.contains("Lenses"));
         assert!(text.contains("References"));
     }

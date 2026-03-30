@@ -17,7 +17,7 @@
 //! is the prompt name. If the first line starts with `#`, it becomes
 //! the description.
 
-mod bootstrap;
+pub mod bootstrap;
 
 pub use bootstrap::bootstrap;
 

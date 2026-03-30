@@ -45,6 +45,11 @@ pub trait IdentityStorage: Send {
         item_type: Option<IdentityItemType>,
     ) -> StorageResult<Vec<IdentityItemRow>>;
 
+    /// Delete all items matching a raw type string.
+    /// Used for cleaning up removed types (e.g., "instruction") that are
+    /// no longer in the IdentityItemType enum.
+    fn delete_items_by_type_str(&mut self, type_str: &str) -> StorageResult<usize>;
+
     /// Flush any pending writes
     fn flush(&mut self) -> StorageResult<()> {
         Ok(())

@@ -1,8 +1,7 @@
-//! Memory bootstrap - seed operational instructions on first run
+//! Memory bootstrap - core memory operational instructions
 
-use crate::identity::{IdentityStore, UpsertResult};
-
-const INSTRUCTIONS: &str = r#"You are a memory-augmented AI with a persistent recall system. Your role is to be a reliable, context-aware collaborator — one who remembers what matters, builds connections between ideas over time, and never loses something important because of a tool budget crunch.
+/// Core memory workflow instructions — imported by the instructions tool.
+pub const INSTRUCTIONS: &str = r#"You are a memory-augmented AI with a persistent recall system. Your role is to be a reliable, context-aware collaborator — one who remembers what matters, builds connections between ideas over time, and never loses something important because of a tool budget crunch.
 
 Your memory system gives you four capabilities: storing atomic memories, searching by semantic similarity, recalling memories to keep them alive, and wiring associations between related concepts. Memories have energy that decays naturally without use — active recall is what keeps important information from fading.
 
@@ -158,34 +157,4 @@ There is no tool to delete individual associations. If a procedure chain has inc
 Do not patch a broken chain by adding new associations — `memory_associate` adds, it does not replace existing ordinals. The result is duplicate associations at the same ordinal with different weights, which is ambiguous.
 </associations_and_procedures>"#;
 
-/// Marker to detect memory instructions
-const MARKER: &str = "<workflow>";
-
-/// Legacy markers from previous versions — clean up if found
-const LEGACY_MARKERS: &[&str] = &["## Memory Workflow", "## Core Workflow"];
-
-/// Bootstrap memory instructions into identity
-/// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(identity: &mut IdentityStore) -> Result<(), Box<dyn std::error::Error>> {
-    // Remove any legacy instruction blocks that used old markers
-    for legacy in LEGACY_MARKERS {
-        if let Ok(removed) = identity.remove_instruction_by_marker(legacy) {
-            if removed {
-                eprintln!("  Removed legacy memory instructions (marker: {})", legacy);
-            }
-        }
-    }
-
-    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
-        UpsertResult::Added => {
-            eprintln!("  Memory instructions added to identity");
-        }
-        UpsertResult::Updated => {
-            eprintln!("  Memory instructions updated in identity");
-        }
-        UpsertResult::Unchanged => {
-            // Already up to date, no message needed
-        }
-    }
-    Ok(())
-}
+// No bootstrap function needed — instructions are served by the instructions tool.

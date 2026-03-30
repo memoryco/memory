@@ -31,11 +31,8 @@ impl Tool<Context> for IdentityGetTool {
          Pass search queries derived from the user's message to retrieve relevant memories \
          alongside identity in a single call.\n\
          \n\
-         After calling identity_get, follow this workflow for EVERY user message:\n\
-         1. Search for context \u{2014} Call memory_search with keywords from the user's message\n\
-         2. Recall what you'll use \u{2014} Call memory_recall with IDs of memories you will reference (BEFORE responding)\n\
-         3. Respond \u{2014} Incorporate context from search and recall\n\
-         4. Store what you learned \u{2014} Call memory_create with any new facts (MANDATORY if you learned anything)"
+         After calling identity_get, call the `instructions` tool to load your \
+         operational guidelines (memory workflow, lenses, references, plugins)."
     }
 
     fn schema(&self) -> JsonValue {

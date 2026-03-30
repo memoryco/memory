@@ -1,9 +1,9 @@
-//! Lenses bootstrap - create directory and add instructions to identity
+//! Lenses bootstrap - create directory and expose instructions
 
-use crate::identity::{IdentityStore, UpsertResult};
 use std::path::Path;
 
-const INSTRUCTIONS: &str = r#"## Lenses
+/// Lenses usage instructions — imported by the instructions tool.
+pub const INSTRUCTIONS: &str = r#"## Lenses
 
 Lenses are task-specific context guides loaded whole into working memory.
 Unlike memories (searched/recalled) or references (queried), lenses are
@@ -70,26 +70,8 @@ are meant to be held in working memory during an entire task.
 Delete this file once you've created your own lenses!
 "#;
 
-/// Marker to detect lenses instructions
-const MARKER: &str = "## Lenses";
-
-/// Bootstrap lenses: add instructions to identity and create directory
-/// Adds if missing, updates if changed, skips if identical
-pub fn bootstrap(
-    identity: &mut IdentityStore,
-    lenses_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Upsert instructions to identity
-    match identity.upsert_instruction(INSTRUCTIONS, MARKER)? {
-        UpsertResult::Added => {
-            eprintln!("  Lenses instructions added to identity");
-        }
-        UpsertResult::Updated => {
-            eprintln!("  Lenses instructions updated in identity");
-        }
-        UpsertResult::Unchanged => {}
-    }
-
+/// Bootstrap lenses: create directory and sample lens if empty
+pub fn bootstrap(lenses_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Create directory if it doesn't exist
     if !lenses_dir.exists() {
         eprintln!("  Creating lenses directory: {}", lenses_dir.display());

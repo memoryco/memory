@@ -9,6 +9,7 @@
 
 pub mod config;
 pub mod date_resolve;
+pub mod instructions;
 pub mod memory;
 pub mod identity;
 pub mod lenses;
@@ -37,7 +38,6 @@ pub use identity::{
     IdentityAddAntipatternTool,
     IdentityAddDirectiveTool,
     IdentityAddExpertiseTool,
-    IdentityAddInstructionTool,
     IdentityAddPreferenceTool,
     IdentityAddRelationshipTool,
     IdentityAddToneTool,
@@ -64,6 +64,7 @@ pub use reference::{
 };
 
 pub use date_resolve::DateResolveTool;
+pub use instructions::InstructionsTool;
 pub use open_dashboard::OpenDashboardTool;
 
 // =============================================================================

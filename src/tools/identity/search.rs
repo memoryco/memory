@@ -110,13 +110,6 @@ impl Tool<Context> for IdentitySearchTool {
             output.push_str(&format!("Traits: {}\n", traits.join(", ")));
         }
 
-        if !results.instructions.is_empty() {
-            output.push_str("Instructions:\n");
-            for i in results.instructions {
-                output.push_str(&format!("  • {}\n", i));
-            }
-        }
-
         Ok(text_response(output))
     }
 }

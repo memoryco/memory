@@ -29,7 +29,7 @@ impl Tool<Context> for IdentityListTool {
                     "enum": [
                         "persona_name", "persona_description", "trait",
                         "value", "preference", "relationship", "antipattern",
-                        "expertise", "instruction", "tone", "directive"
+                        "expertise", "tone", "directive"
                     ]
                 }
             },
@@ -95,7 +95,6 @@ fn parse_item_type(s: &str) -> Option<IdentityItemType> {
         "relationship" => Some(IdentityItemType::Relationship),
         "antipattern" => Some(IdentityItemType::Antipattern),
         "expertise" => Some(IdentityItemType::Expertise),
-        "instruction" => Some(IdentityItemType::Instruction),
         "tone" => Some(IdentityItemType::Tone),
         "directive" => Some(IdentityItemType::Directive),
         _ => None,

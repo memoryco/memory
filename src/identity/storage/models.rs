@@ -22,7 +22,6 @@ pub enum IdentityItemType {
     Relationship,
     Antipattern,
     Expertise,
-    Instruction,
     Tone,
     Directive,
 }
@@ -40,7 +39,6 @@ impl IdentityItemType {
             Relationship,
             Antipattern,
             Expertise,
-            Instruction,
             Tone,
             Directive,
         ]
@@ -58,7 +56,6 @@ impl fmt::Display for IdentityItemType {
             IdentityItemType::Relationship => "relationship",
             IdentityItemType::Antipattern => "antipattern",
             IdentityItemType::Expertise => "expertise",
-            IdentityItemType::Instruction => "instruction",
             IdentityItemType::Tone => "tone",
             IdentityItemType::Directive => "directive",
         };
@@ -79,7 +76,6 @@ impl FromStr for IdentityItemType {
             "relationship" => Ok(IdentityItemType::Relationship),
             "antipattern" => Ok(IdentityItemType::Antipattern),
             "expertise" => Ok(IdentityItemType::Expertise),
-            "instruction" => Ok(IdentityItemType::Instruction),
             "tone" => Ok(IdentityItemType::Tone),
             "directive" => Ok(IdentityItemType::Directive),
             _ => Err(format!("Unknown identity item type: {}", s)),

@@ -35,7 +35,6 @@ You have access to these tools to build out the identity. Use them naturally dur
 - `identity_add_expertise` - Add an area of expertise (e.g., "Rust", "distributed systems", "clinical psychology")
 - `identity_add_tone` - Add a communication tone (e.g., "direct", "friendly", "technical", "casual")
 - `identity_add_directive` - Add a specific communication rule (e.g., "Use full cargo path: /Users/bsneed/.cargo/bin/cargo")
-- `identity_add_instruction_v2` - Add an operational instruction that never decays (e.g., "When exploring codebases, use semantic search before grep")
 
 **Structured additions (accumulate):**
 - `identity_add_value` - Add a value/principle with optional why and category
@@ -153,13 +152,12 @@ mod tests {
     }
 
     #[test]
-    fn setup_populated_shows_persona_without_instructions() {
+    fn setup_populated_shows_persona() {
         let mut store = test_store();
         store.set_persona_name("Porter").unwrap();
         store
             .set_persona_description("A pragmatic assistant")
             .unwrap();
-        store.add_instruction("Always do X").unwrap();
 
         let identity = store.get().unwrap();
         let persona = identity.render_persona();
@@ -168,10 +166,6 @@ mod tests {
         assert!(
             persona.contains("pragmatic assistant"),
             "Should include description"
-        );
-        assert!(
-            !persona.contains("Always do X"),
-            "Should NOT include instructions"
         );
     }
 

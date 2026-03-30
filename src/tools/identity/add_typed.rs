@@ -215,56 +215,6 @@ impl Tool<Context> for IdentityAddExpertiseTool {
     }
 }
 
-pub struct IdentityAddInstructionTool;
-
-impl Tool<Context> for IdentityAddInstructionTool {
-    fn name(&self) -> &str {
-        "identity_add_instruction_v2"
-    }
-
-    fn description(&self) -> &str {
-        "Add an operational instruction. Instructions are permanent directives that don't decay."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "properties": {
-                "instruction": {
-                    "type": "string",
-                    "description": "The instruction text"
-                }
-            },
-            "required": ["instruction"]
-        })
-    }
-
-    fn execute(
-        &self,
-        args: JsonValue,
-        context: &mut Context,
-        _env: &ToolEnv,
-    ) -> sml_mcps::Result<CallToolResult> {
-        let instruction = args
-            .get("instruction")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("instruction is required".into()))?;
-
-        let warning = classification_warning(instruction, IdentityField::Instruction);
-
-        let mut store = context.identity.lock().unwrap();
-        let id = store
-            .add_instruction(instruction)
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-        let mut msg = format!("Added instruction [{}]", id);
-        if let Some(w) = warning {
-            msg = format!("⚠️ {}\n\n{}", w, msg);
-        }
-        Ok(text_response(msg))
-    }
-}
-
 pub struct IdentityAddToneTool;
 
 impl Tool<Context> for IdentityAddToneTool {

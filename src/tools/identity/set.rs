@@ -21,7 +21,7 @@ impl Tool<Context> for IdentitySetTool {
     }
 
     fn description(&self) -> &str {
-        "Set the identity from a JSON object. This replaces the entire identity."
+        "Set the entire identity from JSON. Replaces existing."
     }
 
     fn schema(&self) -> JsonValue {

@@ -21,10 +21,8 @@ impl Tool<Context> for MemoryDeleteTool {
     }
 
     fn description(&self) -> &str {
-        "Delete memories permanently. Accepts an array of IDs to delete. \
-         Also removes all associations from/to deleted memories. Use for \
-         housekeeping: removing duplicates, correcting mistakes, cleaning up. \
-         IMPORTANT: Never delete memories unless the user explicitly asks you to."
+        "Permanently delete memories and their associations. Never delete \
+         unless the user explicitly asks."
     }
 
     fn schema(&self) -> JsonValue {

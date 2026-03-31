@@ -23,9 +23,8 @@ impl Tool<Context> for MemoryAssociationsTool {
     }
 
     fn description(&self) -> &str {
-        "Inspect associations for a specific memory. Shows detailed info including \
-         weights, co-activation counts (Hebbian learning indicator), and timestamps. \
-         Use direction to see outbound, inbound, or both."
+        "Inspect associations for a memory. Shows weights, co-activation counts, \
+         and timestamps."
     }
 
     fn schema(&self) -> JsonValue {

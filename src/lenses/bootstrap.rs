@@ -5,30 +5,12 @@ use std::path::Path;
 /// Lenses usage instructions — imported by the instructions tool.
 pub const INSTRUCTIONS: &str = r#"## Lenses
 
-Lenses are task-specific context guides loaded whole into working memory.
-Unlike memories (searched/recalled) or references (queried), lenses are
-meant to be held in context during an entire task.
+Task-specific context guides loaded whole into working memory.
+Use before writing, code review, documentation — any task needing consistent rule application.
 
-**When to use lenses:**
-- Before writing/editing tasks → check for style guides
-- Before code review → check for review checklists  
-- Before documentation work → check for doc standards
-- Any task where consistent application of rules matters
-
-**How to use (AI-initiated via tools):**
-1. `lenses_list` - see available lenses
-2. `lenses_get` with `name: "lens-name"` - load into context
-3. Apply the lens guidance throughout the task
-
-**How to use (user-initiated via UI):**
-1. Click "Add from memory" in Claude Desktop
-2. Select the desired lens
-3. Lens content is injected into conversation
-
-**Key distinction:**
-- Memories: "What do I know about X?" → search, recall
-- References: "What are the DSM criteria for Y?" → query, cite
-- Lenses: "Load the style guide" → hold entire guide while working
+1. `lenses_list` — see available lenses
+2. `lenses_get` with `name` — load into context
+3. Apply guidance throughout the task
 "#;
 
 const SAMPLE_LENS: &str = r#"# Sample Lens

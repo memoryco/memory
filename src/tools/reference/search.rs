@@ -14,9 +14,7 @@ impl Tool<Context> for ReferenceSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search reference sources using full-text search. Returns matching sections with \
-         snippets and citations. Can search all sources or a specific one. Supports FTS5 \
-         query syntax (AND, OR, NOT, phrases in quotes)."
+        "Full-text search across reference sources. Supports FTS5 syntax (AND, OR, NOT, \"phrases\")."
     }
 
     fn schema(&self) -> JsonValue {

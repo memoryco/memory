@@ -15,8 +15,7 @@ impl Tool<Context> for IdentityListTool {
     }
 
     fn description(&self) -> &str {
-        "List identity items of a specific type with their IDs. Use this before \
-         identity_remove to get the ID of an item you want to delete."
+        "List identity items of a specific type with their IDs."
     }
 
     fn schema(&self) -> JsonValue {

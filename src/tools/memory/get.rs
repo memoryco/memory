@@ -21,8 +21,7 @@ impl Tool<Context> for MemoryGetTool {
     }
 
     fn description(&self) -> &str {
-        "Get a memory by ID without stimulating it. Use memory_recall if you \
-         want to actively use the memory."
+        "Get a memory by ID without stimulating it."
     }
 
     fn schema(&self) -> JsonValue {

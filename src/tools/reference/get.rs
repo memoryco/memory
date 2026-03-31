@@ -14,8 +14,7 @@ impl Tool<Context> for ReferenceGetTool {
     }
 
     fn description(&self) -> &str {
-        "Get a specific section from a reference source by exact title. Returns the full \
-         section content with citation. Use reference_sections to see available sections."
+        "Get full section content by exact title. Use reference_sections to find titles."
     }
 
     fn schema(&self) -> JsonValue {

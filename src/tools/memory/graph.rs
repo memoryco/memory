@@ -25,10 +25,8 @@ impl Tool<Context> for MemoryGraphTool {
     }
 
     fn description(&self) -> &str {
-        "Get the full association graph for visualization. Use format='html' to \
-         generate an interactive D3.js visualization saved to a local file (returns \
-         file path). Use 'json' for raw data or 'summary' for a text overview. \
-         Use min_weight to filter weak associations."
+        "Get the association graph. Formats: html (interactive D3 viz), json (raw), \
+         summary (text)."
     }
 
     fn schema(&self) -> JsonValue {

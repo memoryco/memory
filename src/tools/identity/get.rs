@@ -23,16 +23,9 @@ impl Tool<Context> for IdentityGetTool {
     }
 
     fn description(&self) -> &str {
-        "IMPORTANT: Call this tool on your FIRST message in every conversation. \
-         This loads your persistent identity (persona, values, preferences, relationships) \
-         and is required before you can operate as your configured persona. Without calling \
-         this, you have no memory of who you are or how to behave.\n\
-         \n\
-         Pass search queries derived from the user's message to retrieve relevant memories \
-         alongside identity in a single call.\n\
-         \n\
-         After calling identity_get, call the `instructions` tool to load your \
-         operational guidelines (memory workflow, lenses, references, plugins)."
+        "Load persistent identity on FIRST message of every conversation. Pass search \
+         queries from the user's message to retrieve relevant memories in the same call. \
+         Call `instructions` after this."
     }
 
     fn schema(&self) -> JsonValue {

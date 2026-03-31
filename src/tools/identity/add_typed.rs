@@ -28,7 +28,7 @@ impl Tool<Context> for IdentitySetPersonaNameTool {
     }
 
     fn description(&self) -> &str {
-        "Set the persona name. Replaces any existing name."
+        "Set the persona name."
     }
 
     fn schema(&self) -> JsonValue {
@@ -75,7 +75,7 @@ impl Tool<Context> for IdentitySetPersonaDescriptionTool {
     }
 
     fn description(&self) -> &str {
-        "Set the persona description. Replaces any existing description."
+        "Set the persona description."
     }
 
     fn schema(&self) -> JsonValue {
@@ -444,7 +444,7 @@ impl Tool<Context> for IdentityAddRelationshipTool {
     }
 
     fn description(&self) -> &str {
-        "Add a relationship with an entity (person, project, organization)."
+        "Add a relationship with an entity."
     }
 
     fn schema(&self) -> JsonValue {
@@ -508,7 +508,7 @@ impl Tool<Context> for IdentityAddAntipatternTool {
     }
 
     fn description(&self) -> &str {
-        "Add an antipattern - something to avoid."
+        "Add an antipattern."
     }
 
     fn schema(&self) -> JsonValue {

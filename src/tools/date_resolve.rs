@@ -26,12 +26,8 @@ impl Tool<Context> for DateResolveTool {
     }
 
     fn description(&self) -> &str {
-        "Resolve a relative time expression to an absolute date. ALWAYS call this tool for \
-         ANY date computation — never calculate dates yourself. LLMs are notoriously bad at \
-         weekday arithmetic and off-by-one errors. Supports: 'last Sunday', \
-         'the sunday before 2023-05-25', 'two weeks ago', 'next month', etc. Pass the \
-         expression and the memory's created_at as reference_date. For 'the X before/after Y' \
-         patterns, pass the full expression."
+        "Resolve relative time expressions to absolute dates. ALWAYS use this — \
+         never compute dates yourself."
     }
 
     fn schema(&self) -> JsonValue {

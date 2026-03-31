@@ -26,8 +26,7 @@ impl Tool<Context> for MemoryAssociateTool {
     }
 
     fn description(&self) -> &str {
-        "Create an explicit association between two memories. Associations also \
-         form automatically through Hebbian learning when memories are recalled together."
+        "Create an explicit association between two memories."
     }
 
     fn schema(&self) -> JsonValue {

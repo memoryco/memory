@@ -34,25 +34,8 @@ impl Tool<Context> for MemoryCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create new memories. MANDATORY: call at least once per turn if you learned \
-         anything new. Skipping creation means permanent information loss.\n\
-         \n\
-         ATOMICITY: Each memory generates an embedding vector. Multiple unrelated concepts \
-         in one memory dilute the embedding, making retrieval unreliable. One fact per memory.\n\
-         \n\
-         Splitting rules:\n\
-         - Numbered lists (1), (2), (3) \u{2014} each item = separate memory\n\
-         - More than 2 sentences \u{2014} likely multiple facts, split them\n\
-         - If removing half would leave a complete useful memory, split it\n\
-         - Repeat shared context as prefix: 'Project X: decision one', 'Project X: decision two'\n\
-         - Remove date prefixes \u{2014} created_at captures timestamps automatically\n\
-         \n\
-         What to store: project facts, architectural decisions, gotchas/workarounds, corrections, \
-         personal context, workflow discoveries, user preferences, repeatable processes.\n\
-         Skip: exact duplicates, ephemeral task state, info already in Identity, meta-observations.\n\
-         \n\
-         On long turns, create incrementally in batches of ~3\u{2013}5 facts as you discover them. \
-         Use the memories array parameter to batch multiple atomic memories per call."
+        "Store new memories. One fact per memory \u{2014} compound memories dilute \
+         embeddings. Mandatory at least once per turn if you learned anything."
     }
 
     fn schema(&self) -> JsonValue {

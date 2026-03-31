@@ -14,8 +14,7 @@ impl Tool<Context> for ReferenceSectionsTool {
     }
 
     fn description(&self) -> &str {
-        "List all top-level sections in a reference source. Useful for browsing \
-         available content before searching or getting specific sections."
+        "List top-level sections in a reference source."
     }
 
     fn schema(&self) -> JsonValue {

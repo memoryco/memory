@@ -14,8 +14,7 @@ impl Tool<Context> for IdentityRemoveTool {
     }
 
     fn description(&self) -> &str {
-        "Remove an identity item by its ID. Use identity_list first to see items \
-         and their IDs. This is permanent."
+        "Remove an identity item by ID. Permanent."
     }
 
     fn schema(&self) -> JsonValue {

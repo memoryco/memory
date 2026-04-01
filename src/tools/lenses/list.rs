@@ -15,8 +15,7 @@ impl Tool<Context> for LensesListTool {
     }
 
     fn description(&self) -> &str {
-        "List available lenses. Lenses are task-specific context guides (style guides, \
-         checklists, etc.) that can be loaded whole into working memory for a task."
+        "List available lenses."
     }
 
     fn schema(&self) -> JsonValue {

@@ -421,22 +421,8 @@ impl Tool<Context> for MemorySearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search memories by semantic similarity. Call BEFORE responding to every user \
-         message \u{2014} this is what makes you a persistent collaborator instead of a \
-         stateless chatbot.\n\
-         \n\
-         Accepts an array of queries to batch multiple searches in one call. Finds \
-         memories with similar meaning even without exact keyword matches.\n\
-         \n\
-         Query tips:\n\
-         - Decompose abstract queries into concrete terms: instead of 'relationship \
-         status', try 'breakup', 'dating', 'partner'\n\
-         - Search for actions and events rather than abstract states\n\
-         - Use created_after/created_before (ISO 8601 or unix epoch) for time-based \
-         queries like 'what did I work on last week?'\n\
-         \n\
-         If results include a \u{1f517} procedure chain hint, call memory_associations \
-         on the anchor with direction: outbound to get the full ordered steps."
+        "Search memories by semantic similarity. Accepts an array of queries \
+         to batch multiple searches in one call."
     }
 
     fn schema(&self) -> JsonValue {

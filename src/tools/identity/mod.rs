@@ -21,7 +21,6 @@ pub use add_typed::{
     IdentityAddAntipatternTool,
     IdentityAddDirectiveTool,
     IdentityAddExpertiseTool,
-    IdentityAddInstructionTool, // v2 - uses new storage
     IdentityAddPreferenceTool,
     IdentityAddRelationshipTool,
     IdentityAddToneTool,

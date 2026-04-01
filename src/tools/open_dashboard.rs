@@ -20,7 +20,7 @@ impl Tool<Context> for OpenDashboardTool {
     }
 
     fn description(&self) -> &str {
-        "Open the memoryco dashboard in your browser. View and manage your identity, references, memories, and association graph."
+        "Open the memoryco dashboard in your browser."
     }
 
     fn schema(&self) -> JsonValue {

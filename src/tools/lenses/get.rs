@@ -15,8 +15,7 @@ impl Tool<Context> for LensesGetTool {
     }
 
     fn description(&self) -> &str {
-        "Load a lens by name. Returns the full lens content to hold in working memory \
-         during a task. Use lenses_list first to see available lenses."
+        "Load a lens into working memory for the duration of a task."
     }
 
     fn schema(&self) -> JsonValue {

@@ -20,7 +20,7 @@ pub struct ListedItem {
 
 impl From<IdentityItemRow> for ListedItem {
     fn from(row: IdentityItemRow) -> Self {
-        let item_type = row.parsed_type().unwrap_or(IdentityItemType::Instruction);
+        let item_type = row.parsed_type().unwrap_or(IdentityItemType::Trait);
         Self {
             id: row.id,
             item_type,
@@ -179,12 +179,6 @@ impl IdentityStore {
             .add_item(IdentityItemType::Expertise, area, None, None, None)
     }
 
-    /// Add an instruction
-    pub fn add_instruction(&mut self, instruction: &str) -> StorageResult<String> {
-        self.storage
-            .add_item(IdentityItemType::Instruction, instruction, None, None, None)
-    }
-
     /// Add a communication tone
     pub fn add_tone(&mut self, tone: &str) -> StorageResult<String> {
         self.storage
@@ -195,67 +189,6 @@ impl IdentityStore {
     pub fn add_directive(&mut self, directive: &str) -> StorageResult<String> {
         self.storage
             .add_item(IdentityItemType::Directive, directive, None, None, None)
-    }
-
-    // ==================
-    // UPSERT
-    // ==================
-
-    /// Upsert an instruction by marker string.
-    ///
-    /// Looks for an existing instruction containing `marker`. If found,
-    /// compares content and updates if changed. If not found, adds it.
-    /// Returns what happened so callers can log appropriately.
-    /// Remove an instruction by marker string. Returns true if one was found and removed.
-    pub fn remove_instruction_by_marker(&mut self, marker: &str) -> StorageResult<bool> {
-        let instructions = self
-            .storage
-            .list_items(Some(IdentityItemType::Instruction))?;
-        let existing = instructions
-            .into_iter()
-            .find(|row| row.content.contains(marker));
-        match existing {
-            Some(row) => {
-                self.storage.remove_item(&row.id)?;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
-    }
-
-    pub fn upsert_instruction(
-        &mut self,
-        content: &str,
-        marker: &str,
-    ) -> StorageResult<UpsertResult> {
-        let instructions = self
-            .storage
-            .list_items(Some(IdentityItemType::Instruction))?;
-
-        // Find existing instruction containing this marker
-        let existing = instructions
-            .into_iter()
-            .find(|row| row.content.contains(marker));
-
-        match existing {
-            Some(row) if row.content == content => {
-                // Content identical — nothing to do
-                Ok(UpsertResult::Unchanged)
-            }
-            Some(row) => {
-                // Content changed — remove old, add new
-                self.storage.remove_item(&row.id)?;
-                self.storage
-                    .add_item(IdentityItemType::Instruction, content, None, None, None)?;
-                Ok(UpsertResult::Updated)
-            }
-            None => {
-                // Not found — add new
-                self.storage
-                    .add_item(IdentityItemType::Instruction, content, None, None, None)?;
-                Ok(UpsertResult::Added)
-            }
-        }
     }
 
     // ==================
@@ -311,9 +244,6 @@ impl IdentityStore {
                 }
                 IdentityItemType::Expertise => {
                     identity.expertise.push(row.content);
-                }
-                IdentityItemType::Instruction => {
-                    identity.instructions.push(row.content);
                 }
                 IdentityItemType::Tone => {
                     identity.communication.tone.push(row.content);
@@ -388,12 +318,6 @@ impl IdentityStore {
             count += 1;
         }
 
-        // Instructions
-        for i in &old.instructions {
-            self.add_instruction(i)?;
-            count += 1;
-        }
-
         // Communication
         for t in &old.communication.tone {
             self.add_tone(t)?;
@@ -405,6 +329,13 @@ impl IdentityStore {
         }
 
         Ok(MigrationResult::Migrated { items: count })
+    }
+
+    /// Delete all items of a given raw type string.
+    /// Used for cleaning up removed types (e.g., "instruction") that are
+    /// no longer in the IdentityItemType enum.
+    pub fn delete_items_by_type_str(&mut self, type_str: &str) -> StorageResult<usize> {
+        self.storage.delete_items_by_type_str(type_str)
     }
 
     /// Check if the store has any data
@@ -426,17 +357,6 @@ impl IdentityStore {
     pub fn close(&mut self) -> StorageResult<()> {
         self.storage.close()
     }
-}
-
-/// Result of an upsert operation
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UpsertResult {
-    /// Item was added (marker not found)
-    Added,
-    /// Item was updated (marker found, content differed)
-    Updated,
-    /// No change needed (marker found, content identical)
-    Unchanged,
 }
 
 /// Result of a migration attempt
@@ -589,13 +509,11 @@ mod tests {
         let mut store = test_store();
 
         store.add_expertise("Rust").unwrap();
-        store.add_instruction("Always write tests").unwrap();
         store.add_tone("direct").unwrap();
         store.add_directive("Ask clarifying questions").unwrap();
 
         let identity = store.get().unwrap();
         assert_eq!(identity.expertise, vec!["Rust"]);
-        assert_eq!(identity.instructions, vec!["Always write tests"]);
         assert_eq!(identity.communication.tone, vec!["direct"]);
         assert_eq!(
             identity.communication.directives,
@@ -655,9 +573,6 @@ mod tests {
             .unwrap();
         store.add_expertise("Rust").unwrap();
         store.add_expertise("Swift").unwrap();
-        store
-            .add_instruction("Load identity at conversation start")
-            .unwrap();
         store.add_tone("warm").unwrap();
         store.add_directive("Be concise").unwrap();
 
@@ -672,7 +587,6 @@ mod tests {
         assert_eq!(identity.relationships.len(), 1);
         assert_eq!(identity.antipatterns.len(), 1);
         assert_eq!(identity.expertise.len(), 2);
-        assert_eq!(identity.instructions.len(), 1);
         assert_eq!(identity.communication.tone.len(), 1);
         assert_eq!(identity.communication.directives.len(), 1);
 
@@ -715,7 +629,6 @@ mod tests {
                 why: Some("Blocks runtime".to_string()),
             }],
             expertise: vec!["Rust".to_string(), "Swift".to_string()],
-            instructions: vec!["Load identity first".to_string()],
             communication: crate::identity::CommunicationStyle {
                 tone: vec!["warm".to_string()],
                 directives: vec!["Be concise".to_string()],
@@ -729,10 +642,10 @@ mod tests {
         // persona (name, description) = 2
         // traits = 2
         // value = 1, preference = 1, relationship = 1, antipattern = 1
-        // expertise = 2, instruction = 1, tone = 1, directive = 1
-        // Total = 13 items
+        // expertise = 2, tone = 1, directive = 1
+        // Total = 12 items
         match result {
-            MigrationResult::Migrated { items } => assert_eq!(items, 13),
+            MigrationResult::Migrated { items } => assert_eq!(items, 12),
             MigrationResult::AlreadyMigrated => panic!("Should have migrated"),
         }
 
@@ -748,99 +661,4 @@ mod tests {
         assert_eq!(result2, MigrationResult::AlreadyMigrated);
     }
 
-    // ==================
-    // UPSERT INSTRUCTION TESTS
-    // ==================
-
-    #[test]
-    fn upsert_instruction_add() {
-        let mut store = test_store();
-
-        let content = "## My Instructions\nDo the thing.";
-        let marker = "## My Instructions";
-
-        let result = store.upsert_instruction(content, marker).unwrap();
-        assert_eq!(result, UpsertResult::Added);
-
-        // Verify it's actually in the store
-        let identity = store.get().unwrap();
-        assert_eq!(identity.instructions.len(), 1);
-        assert_eq!(identity.instructions[0], content);
-    }
-
-    #[test]
-    fn upsert_instruction_unchanged() {
-        let mut store = test_store();
-
-        let content = "## My Instructions\nDo the thing.";
-        let marker = "## My Instructions";
-
-        // First add
-        store.upsert_instruction(content, marker).unwrap();
-
-        // Same content again
-        let result = store.upsert_instruction(content, marker).unwrap();
-        assert_eq!(result, UpsertResult::Unchanged);
-
-        // Still only one instruction
-        let identity = store.get().unwrap();
-        assert_eq!(identity.instructions.len(), 1);
-    }
-
-    #[test]
-    fn upsert_instruction_update() {
-        let mut store = test_store();
-
-        let marker = "## My Instructions";
-        let v1 = "## My Instructions\nDo the thing.";
-        let v2 = "## My Instructions\nDo the thing differently.";
-
-        // Add v1
-        store.upsert_instruction(v1, marker).unwrap();
-
-        // Update to v2
-        let result = store.upsert_instruction(v2, marker).unwrap();
-        assert_eq!(result, UpsertResult::Updated);
-
-        // Should have v2, not v1, and only one instruction
-        let identity = store.get().unwrap();
-        assert_eq!(identity.instructions.len(), 1);
-        assert_eq!(identity.instructions[0], v2);
-    }
-
-    #[test]
-    fn upsert_multiple_instructions_by_marker() {
-        let mut store = test_store();
-
-        let mem = "## Memory Workflow\nSearch, recall, store.";
-        let plans = "## Plans\nTrack multi-step tasks.";
-        let lenses = "## Lenses\nLoad context guides.";
-
-        store
-            .upsert_instruction(mem, "## Memory Workflow")
-            .unwrap();
-        store.upsert_instruction(plans, "## Plans").unwrap();
-        store.upsert_instruction(lenses, "## Lenses").unwrap();
-
-        let identity = store.get().unwrap();
-        assert_eq!(identity.instructions.len(), 3);
-
-        // Update just one — others should be untouched
-        let plans_v2 = "## Plans\nTrack tasks with atomic steps.";
-        let result = store.upsert_instruction(plans_v2, "## Plans").unwrap();
-        assert_eq!(result, UpsertResult::Updated);
-
-        let identity = store.get().unwrap();
-        assert_eq!(identity.instructions.len(), 3);
-        assert!(identity.instructions.contains(&mem.to_string()));
-        assert!(identity.instructions.contains(&plans_v2.to_string()));
-        assert!(identity.instructions.contains(&lenses.to_string()));
-        // v1 plans text should be gone
-        assert!(
-            !identity
-                .instructions
-                .iter()
-                .any(|i| i.contains("Track multi-step tasks"))
-        );
-    }
 }

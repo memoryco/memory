@@ -25,16 +25,8 @@ impl Tool<Context> for MemoryRecallTool {
     }
 
     fn description(&self) -> &str {
-        "Recall memories you are referencing in your response. Call IMMEDIATELY after \
-         memory_search, BEFORE writing your response \u{2014} while tool budget is available. \
-         Do not defer to end-of-turn; that's when tool budget runs out.\n\
-         \n\
-         Two purposes: (1) stimulates the memory, increasing energy and preventing decay, \
-         (2) triggers Hebbian learning \u{2014} memories recalled together form associations \
-         automatically, building the knowledge graph over time.\n\
-         \n\
-         Pass ALL relevant IDs in a single call using the ids array parameter. \
-         Can resurrect archived memories back to active state."
+        "Stimulate memories and trigger Hebbian association learning. Call IMMEDIATELY \
+         after memory_search, BEFORE responding. Pass all relevant IDs in one call."
     }
 
     fn schema(&self) -> JsonValue {

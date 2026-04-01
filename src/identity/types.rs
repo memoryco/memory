@@ -35,11 +35,6 @@ pub struct Identity {
     /// Areas of expertise / competence
     #[serde(default)]
     pub expertise: Vec<String>,
-
-    /// Operational instructions - how to behave, system rules
-    /// These are permanent directives that should never decay
-    #[serde(default)]
-    pub instructions: Vec<String>,
 }
 
 /// The fundamental "I am" - name, nature, essence
@@ -218,7 +213,6 @@ pub struct IdentitySearchResults<'a> {
     pub antipatterns: Vec<&'a Antipattern>,
     pub expertise: Vec<&'a String>,
     pub traits: Vec<&'a String>,
-    pub instructions: Vec<&'a String>,
 }
 
 impl<'a> IdentitySearchResults<'a> {
@@ -230,7 +224,6 @@ impl<'a> IdentitySearchResults<'a> {
             && self.antipatterns.is_empty()
             && self.expertise.is_empty()
             && self.traits.is_empty()
-            && self.instructions.is_empty()
     }
 
     /// Total count of all matches
@@ -241,7 +234,6 @@ impl<'a> IdentitySearchResults<'a> {
             + self.antipatterns.len()
             + self.expertise.len()
             + self.traits.len()
-            + self.instructions.len()
     }
 }
 
@@ -303,12 +295,6 @@ impl Identity {
     /// Add communication directive
     pub fn with_directive(mut self, directive: impl Into<String>) -> Self {
         self.communication.directives.push(directive.into());
-        self
-    }
-
-    /// Add operational instruction
-    pub fn with_instruction(mut self, instruction: impl Into<String>) -> Self {
-        self.instructions.push(instruction.into());
         self
     }
 
@@ -486,12 +472,6 @@ impl Identity {
             .filter(|t| t.to_lowercase().contains(&q))
             .collect();
 
-        let instructions: Vec<&String> = self
-            .instructions
-            .iter()
-            .filter(|i| i.to_lowercase().contains(&q))
-            .collect();
-
         IdentitySearchResults {
             values,
             preferences,
@@ -499,17 +479,13 @@ impl Identity {
             antipatterns,
             expertise,
             traits,
-            instructions,
         }
     }
 
-    /// Render identity persona only (excludes operational instructions).
-    /// Used by identity_setup to show current state without cluttering
-    /// the onboarding guide with bootstrap instructions.
+    /// Render identity persona only.
+    /// Used by identity_setup to show current state.
     pub fn render_persona(&self) -> String {
-        let mut copy = self.clone();
-        copy.instructions.clear();
-        let rendered = copy.render();
+        let rendered = self.render();
         let trimmed = rendered.trim();
         if trimmed.is_empty() {
             "No identity currently configured".to_string()
@@ -605,14 +581,6 @@ impl Identity {
         if !self.expertise.is_empty() {
             out.push_str(&format!("Expertise: {}\n", self.expertise.join(", ")));
             out.push('\n');
-        }
-
-        // Instructions
-        if !self.instructions.is_empty() {
-            out.push_str("Instructions:\n");
-            for i in &self.instructions {
-                out.push_str(&format!("  • {}\n", i));
-            }
         }
 
         out
@@ -859,11 +827,10 @@ mod tests {
     }
 
     #[test]
-    fn render_persona_excludes_instructions() {
+    fn render_persona_includes_content() {
         let identity = Identity::new()
             .with_persona("Porter", "A pragmatic assistant")
-            .with_trait("direct")
-            .with_instruction("Always search before responding".to_string());
+            .with_trait("direct");
 
         let rendered = identity.render_persona();
 
@@ -875,10 +842,6 @@ mod tests {
             rendered.contains("direct"),
             "render_persona should include traits"
         );
-        assert!(
-            !rendered.contains("Always search"),
-            "render_persona must NOT include instructions"
-        );
     }
 
     #[test]
@@ -889,19 +852,6 @@ mod tests {
         assert_eq!(
             rendered, "No identity currently configured",
             "Empty identity should render as not configured"
-        );
-    }
-
-    #[test]
-    fn render_persona_instructions_only() {
-        // Identity with only instructions (like a fresh bootstrap)
-        let identity = Identity::new().with_instruction("## Memory Workflow\nDo stuff".to_string());
-
-        let rendered = identity.render_persona();
-
-        assert_eq!(
-            rendered, "No identity currently configured",
-            "Instructions-only identity should render as not configured for persona"
         );
     }
 }

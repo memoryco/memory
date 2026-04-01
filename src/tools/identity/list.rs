@@ -15,8 +15,7 @@ impl Tool<Context> for IdentityListTool {
     }
 
     fn description(&self) -> &str {
-        "List identity items of a specific type with their IDs. Use this before \
-         identity_remove to get the ID of an item you want to delete."
+        "List identity items of a specific type with their IDs."
     }
 
     fn schema(&self) -> JsonValue {
@@ -29,7 +28,7 @@ impl Tool<Context> for IdentityListTool {
                     "enum": [
                         "persona_name", "persona_description", "trait",
                         "value", "preference", "relationship", "antipattern",
-                        "expertise", "instruction", "tone", "directive"
+                        "expertise", "tone", "directive"
                     ]
                 }
             },
@@ -95,7 +94,6 @@ fn parse_item_type(s: &str) -> Option<IdentityItemType> {
         "relationship" => Some(IdentityItemType::Relationship),
         "antipattern" => Some(IdentityItemType::Antipattern),
         "expertise" => Some(IdentityItemType::Expertise),
-        "instruction" => Some(IdentityItemType::Instruction),
         "tone" => Some(IdentityItemType::Tone),
         "directive" => Some(IdentityItemType::Directive),
         _ => None,

@@ -153,12 +153,14 @@ pub fn run() {
     }
 
     // --- Bootstrap ---
-    // Instructions go into identity.db so identity_get always returns them,
-    // even on a fresh install before the user has configured anything.
-    if let Err(e) = bootstrap::bootstrap_all(&mut identity, &lenses_dir, &references, &memory_home)
-    {
+    // Creates directories and sample files. Instructions are now served
+    // by the `instructions` tool on demand, not written to identity.
+    if let Err(e) = bootstrap::bootstrap_all(&lenses_dir, &memory_home) {
         eprintln!("Warning: Bootstrap failed: {}", e);
     }
+
+    // Clean up orphaned instruction rows from identity.db (one-time migration)
+    cleanup_orphaned_instructions(&mut identity);
 
     // --- Build shared state ---
     let brain = Arc::new(RwLock::new(brain));
@@ -255,6 +257,17 @@ fn apply_maintenance(brain: &mut Brain) {
 }
 
 
+/// Clean up orphaned instruction rows from identity.db.
+/// After the instruction refactor, these rows are no longer read but may exist
+/// in databases of existing users. This is a one-time cleanup.
+fn cleanup_orphaned_instructions(identity: &mut IdentityStore) {
+    match identity.delete_items_by_type_str("instruction") {
+        Ok(0) => {}
+        Ok(count) => eprintln!("Cleaned up {} orphaned instruction row(s) from identity.db", count),
+        Err(e) => eprintln!("Warning: Failed to clean up orphaned instructions: {}", e),
+    }
+}
+
 /// Migrate identity from old JSON blob to flat storage (one-time).
 fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
     let old_identity = brain.identity();
@@ -341,9 +354,6 @@ fn build_server() -> Server<Context> {
         .add_tool(tools::IdentityAddExpertiseTool)
         .expect("identity_add_expertise");
     server
-        .add_tool(tools::IdentityAddInstructionTool)
-        .expect("identity_add_instruction_v2");
-    server
         .add_tool(tools::IdentityAddToneTool)
         .expect("identity_add_tone");
     server
@@ -389,6 +399,11 @@ fn build_server() -> Server<Context> {
     server
         .add_tool(tools::ReferenceCitationTool)
         .expect("reference_citation");
+
+    // Instructions tool
+    server
+        .add_tool(tools::InstructionsTool)
+        .expect("instructions");
 
     // Date tools
     server

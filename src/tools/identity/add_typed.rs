@@ -28,7 +28,7 @@ impl Tool<Context> for IdentitySetPersonaNameTool {
     }
 
     fn description(&self) -> &str {
-        "Set the persona name. Replaces any existing name."
+        "Set the persona name."
     }
 
     fn schema(&self) -> JsonValue {
@@ -75,7 +75,7 @@ impl Tool<Context> for IdentitySetPersonaDescriptionTool {
     }
 
     fn description(&self) -> &str {
-        "Set the persona description. Replaces any existing description."
+        "Set the persona description."
     }
 
     fn schema(&self) -> JsonValue {
@@ -208,56 +208,6 @@ impl Tool<Context> for IdentityAddExpertiseTool {
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
         let mut msg = format!("Added expertise: \"{}\" [{}]", area, id);
-        if let Some(w) = warning {
-            msg = format!("⚠️ {}\n\n{}", w, msg);
-        }
-        Ok(text_response(msg))
-    }
-}
-
-pub struct IdentityAddInstructionTool;
-
-impl Tool<Context> for IdentityAddInstructionTool {
-    fn name(&self) -> &str {
-        "identity_add_instruction_v2"
-    }
-
-    fn description(&self) -> &str {
-        "Add an operational instruction. Instructions are permanent directives that don't decay."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "properties": {
-                "instruction": {
-                    "type": "string",
-                    "description": "The instruction text"
-                }
-            },
-            "required": ["instruction"]
-        })
-    }
-
-    fn execute(
-        &self,
-        args: JsonValue,
-        context: &mut Context,
-        _env: &ToolEnv,
-    ) -> sml_mcps::Result<CallToolResult> {
-        let instruction = args
-            .get("instruction")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("instruction is required".into()))?;
-
-        let warning = classification_warning(instruction, IdentityField::Instruction);
-
-        let mut store = context.identity.lock().unwrap();
-        let id = store
-            .add_instruction(instruction)
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-        let mut msg = format!("Added instruction [{}]", id);
         if let Some(w) = warning {
             msg = format!("⚠️ {}\n\n{}", w, msg);
         }
@@ -494,7 +444,7 @@ impl Tool<Context> for IdentityAddRelationshipTool {
     }
 
     fn description(&self) -> &str {
-        "Add a relationship with an entity (person, project, organization)."
+        "Add a relationship with an entity."
     }
 
     fn schema(&self) -> JsonValue {
@@ -558,7 +508,7 @@ impl Tool<Context> for IdentityAddAntipatternTool {
     }
 
     fn description(&self) -> &str {
-        "Add an antipattern - something to avoid."
+        "Add an antipattern."
     }
 
     fn schema(&self) -> JsonValue {

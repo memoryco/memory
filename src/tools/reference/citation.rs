@@ -14,7 +14,7 @@ impl Tool<Context> for ReferenceCitationTool {
     }
 
     fn description(&self) -> &str {
-        "Get APA 7 citation for a reference source. Returns both in-text and full reference formats."
+        "Get APA 7 citation (in-text and full reference) for a source."
     }
 
     fn schema(&self) -> JsonValue {

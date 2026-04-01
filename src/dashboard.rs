@@ -135,7 +135,7 @@ fn route(method: &str, url: &str, mut request: tiny_http::Request, state: &Arc<D
         // Updates
         ("GET", "/api/updates") => handle_check_updates(),
 
-        // Memorys
+        // Memories
         ("GET", "/api/memories") => handle_list_memories(query, state),
 
         // Graph
@@ -427,7 +427,6 @@ fn handle_identity_add(
         "tone" => identity.add_tone(content),
         "directive" => identity.add_directive(content),
         "expertise" => identity.add_expertise(content),
-        "instruction" => identity.add_instruction(content),
         _ => {
             return json_response(
                 400,
@@ -542,13 +541,8 @@ fn handle_upload_reference(
 
     match upload_result {
         Ok(name) => {
-            // Bootstrap citation instructions into identity so new references
-            // are immediately usable without restarting the server.
-            let refs = state.references.lock().unwrap();
-            let mut identity = state.identity.lock().unwrap();
-            if let Err(e) = crate::reference::bootstrap::bootstrap(&mut identity, &refs) {
-                eprintln!("Dashboard: Warning: reference bootstrap failed: {}", e);
-            }
+            // Citation instructions are generated on-the-fly by the instructions
+            // tool, so no bootstrap needed after uploading a reference.
             json_ok(&json!({"uploaded": name}))
         }
         Err(e) => {
@@ -589,10 +583,8 @@ fn handle_delete_reference(
     *refs = ReferenceManager::new();
     let _ = refs.load_directory(&state.references_dir);
 
-    // TODO: Clean up orphaned citation instructions from identity when a reference
-    // is deleted. Would need to find and remove the instruction whose marker matches
-    // `reference:<decoded_name>`. For now, stale citation instructions persist until
-    // the next server restart when bootstrap reconciles them.
+    // Citation instructions are generated on-the-fly by the instructions tool,
+    // so no cleanup needed when a reference is deleted.
 
     json_ok(&json!({"deleted": decoded_name}))
 }

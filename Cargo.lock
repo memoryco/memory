@@ -1221,7 +1221,7 @@ dependencies = [
 [[package]]
 name = "memoryco_design"
 version = "0.1.0"
-source = "git+ssh://git@github.com/memoryco/design.git#4b258b68326390cdf87d1d47ce9ea986931c78a1"
+source = "git+ssh://git@github.com/memoryco/design.git#96e308d6df0af70536dcbc951f801c4dc14e27a2"
 
 [[package]]
 name = "memoryco_updater"

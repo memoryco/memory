@@ -31,8 +31,7 @@ impl Tool<Context> for IdentityAddTool {
     }
 
     fn description(&self) -> &str {
-        "Add to identity (values, preferences, relationships, expertise, traits, instructions, antipatterns). \
-         Uses semantic classification to verify the field type matches the content."
+        "Add to identity. Uses semantic classification to verify field type matches content."
     }
 
     fn schema(&self) -> JsonValue {

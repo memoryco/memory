@@ -14,8 +14,7 @@ impl Tool<Context> for ReferenceListTool {
     }
 
     fn description(&self) -> &str {
-        "List all loaded reference sources. Shows source names that can be used with \
-         other reference tools."
+        "List loaded reference sources."
     }
 
     fn schema(&self) -> JsonValue {

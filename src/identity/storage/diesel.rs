@@ -179,6 +179,13 @@ impl IdentityStorage for DieselIdentityStorage {
         Ok(rows)
     }
 
+    fn delete_items_by_type_str(&mut self, type_str: &str) -> StorageResult<usize> {
+        let deleted =
+            diesel::delete(identity_items::table.filter(identity_items::item_type.eq(type_str)))
+                .execute(&mut self.conn)?;
+        Ok(deleted)
+    }
+
     #[cfg(feature = "sqlite")]
     fn flush(&mut self) -> StorageResult<()> {
         self.conn.batch_execute("PRAGMA wal_checkpoint(PASSIVE);")?;

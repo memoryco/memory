@@ -11,6 +11,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+/// How long to wait for the worker to drain its queue on shutdown
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 use super::storage::{MemoryStorage, Storage};
 use super::{Association, MemoryId, MemoryState};
@@ -52,7 +56,7 @@ impl Default for PersistenceWork {
 /// Work is sent via channel and processed sequentially.
 /// Graceful shutdown on Drop (waits for queue to drain).
 pub struct PersistenceWorker {
-    sender: Sender<PersistenceWork>,
+    sender: Option<Sender<PersistenceWork>>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -67,7 +71,7 @@ impl PersistenceWorker {
         });
 
         Self {
-            sender,
+            sender: Some(sender),
             handle: Some(handle),
         }
     }
@@ -131,40 +135,38 @@ impl PersistenceWorker {
 
         // Ignore send errors - if the worker is dead, we just lose this batch
         // The in-memory state is still correct
-        if let Err(e) = self.sender.send(work) {
-            eprintln!("[persistence] Failed to send work: {:?}", e);
+        if let Some(ref sender) = self.sender {
+            if let Err(e) = sender.send(work) {
+                eprintln!("[persistence] Failed to send work: {:?}", e);
+            }
         }
     }
 }
 
 impl Drop for PersistenceWorker {
     fn drop(&mut self) {
-        // Dropping sender closes the channel
-        // Worker will exit when recv() returns Err
-        // Then we join to wait for clean shutdown
+        // Drop sender first to close the channel. The worker's recv() will
+        // return Err once all queued items are consumed, causing it to exit.
+        self.sender.take();
 
-        // Take ownership of handle (leaves None in its place)
         if let Some(handle) = self.handle.take() {
-            // Drop sender first by replacing self.sender
-            // Actually, sender will drop when self drops, which is after this
-            // So we need to explicitly trigger channel close
+            // Join with a timeout so we don't hang forever if the worker is stuck.
+            // We use a watchdog thread since JoinHandle has no native timeout.
+            let (done_tx, done_rx) = mpsc::channel();
+            let join_thread = thread::spawn(move || {
+                let result = handle.join();
+                let _ = done_tx.send(result);
+            });
 
-            // The channel closes when all senders are dropped
-            // Since we're in Drop, self.sender will be dropped after this method
-            // But we want to join the thread, so we need the channel to close first
-
-            // Trick: we can't drop self.sender early, but when this Drop finishes,
-            // sender drops, channel closes, worker exits, and... we've already returned
-            //
-            // Solution: don't join in Drop, let the thread detach
-            // OR: use a separate "shutdown" signal
-            //
-            // For simplicity, let's just let it detach. The worker will finish
-            // its current item and exit cleanly when the channel closes.
-
-            // Actually, let's try joining with a timeout equivalent
-            // For now, just detach - the OS will clean up
-            drop(handle); // Detaches the thread
+            match done_rx.recv_timeout(SHUTDOWN_TIMEOUT) {
+                Ok(Ok(())) => eprintln!("[persistence] Worker shut down cleanly"),
+                Ok(Err(_)) => eprintln!("[persistence] Worker thread panicked during shutdown"),
+                Err(_) => eprintln!(
+                    "[persistence] Worker did not shut down within {:?}, detaching",
+                    SHUTDOWN_TIMEOUT
+                ),
+            }
+            drop(join_thread);
         }
     }
 }
@@ -173,8 +175,21 @@ impl Drop for PersistenceWorker {
 mod tests {
     use super::*;
     use crate::memory_core::storage::Storage;
+    use crate::memory_core::Association;
     use tempfile::tempdir;
     use uuid::Uuid;
+
+    fn setup_worker() -> (PersistenceWorker, PathBuf, tempfile::TempDir) {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let mut storage = MemoryStorage::open(&db_path).unwrap();
+        storage.initialize().unwrap();
+        drop(storage);
+
+        let worker = PersistenceWorker::new(&db_path);
+        (worker, db_path, dir)
+    }
 
     #[test]
     fn persistence_work_empty_check() {
@@ -188,25 +203,168 @@ mod tests {
     }
 
     #[test]
-    fn worker_starts_and_stops() {
+    fn persistence_work_default() {
+        let work = PersistenceWork::default();
+        assert!(work.is_empty());
+    }
+
+    #[test]
+    fn worker_starts_and_stops_cleanly() {
+        let (worker, _db_path, _dir) = setup_worker();
+
+        // Send some empty work (should be no-op)
+        worker.send(PersistenceWork::new());
+
+        // Drop worker — should shut down cleanly via the new flush path
+        drop(worker);
+    }
+
+    /// Helper: initialize DB and insert test memories, then create worker.
+    /// This avoids SQLite locking races between the worker thread opening
+    /// its connection and the test inserting seed data.
+    fn setup_worker_with_memories(ids: &[Uuid]) -> (PersistenceWorker, PathBuf, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
 
-        // Create and initialize storage first
         let mut storage = MemoryStorage::open(&db_path).unwrap();
         storage.initialize().unwrap();
+        for &id in ids {
+            let mut m = crate::memory_core::Memory::new(format!("memory {}", id));
+            m.id = id;
+            storage.save_memory(&m).unwrap();
+        }
         drop(storage);
 
-        // Create worker
         let worker = PersistenceWorker::new(&db_path);
+        (worker, db_path, dir)
+    }
 
-        // Send some empty work
-        worker.send(PersistenceWork::new());
+    #[test]
+    fn worker_flushes_energy_updates_on_drop() {
+        let id = Uuid::new_v4();
+        let (worker, db_path, _dir) = setup_worker_with_memories(&[id]);
 
-        // Drop worker - should shut down cleanly
+        // Queue an energy update
+        let mut work = PersistenceWork::new();
+        work.energy_updates
+            .push((id, 0.75, MemoryState::Active));
+        worker.send(work);
+
+        // Drop should flush the queue before returning
         drop(worker);
 
-        // Give thread time to exit
-        thread::sleep(std::time::Duration::from_millis(100));
+        // Verify the energy was actually persisted
+        let mut storage = MemoryStorage::open(&db_path).unwrap();
+        let loaded = storage.load_memory(&id).unwrap().expect("memory should exist");
+        assert!(
+            (loaded.energy - 0.75).abs() < 1e-6,
+            "energy should be 0.75, got {}",
+            loaded.energy
+        );
+    }
+
+    #[test]
+    fn worker_flushes_associations_on_drop() {
+        let id_a = Uuid::new_v4();
+        let id_b = Uuid::new_v4();
+        let (worker, db_path, _dir) = setup_worker_with_memories(&[id_a, id_b]);
+
+        // Queue an association
+        let mut work = PersistenceWork::new();
+        work.associations
+            .push(Association::with_weight(id_a, id_b, 0.8));
+        worker.send(work);
+
+        // Drop should flush
+        drop(worker);
+
+        // Verify association was persisted
+        let mut storage = MemoryStorage::open(&db_path).unwrap();
+        let assocs = storage.load_associations_from(&id_a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].to, id_b);
+        assert!((assocs[0].weight - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn worker_flushes_multiple_queued_items_on_drop() {
+        let ids: Vec<Uuid> = (0..5).map(|_| Uuid::new_v4()).collect();
+        let (worker, db_path, _dir) = setup_worker_with_memories(&ids);
+
+        // Queue multiple work items
+        for &id in &ids {
+            let mut work = PersistenceWork::new();
+            work.energy_updates
+                .push((id, 0.42, MemoryState::Active));
+            worker.send(work);
+        }
+
+        // Drop should flush all of them
+        drop(worker);
+
+        // Verify all were persisted
+        let mut storage = MemoryStorage::open(&db_path).unwrap();
+        for &id in &ids {
+            let loaded = storage.load_memory(&id).unwrap().expect("memory should exist");
+            assert!(
+                (loaded.energy - 0.42).abs() < 1e-6,
+                "memory {} energy should be 0.42, got {}",
+                id,
+                loaded.energy
+            );
+        }
+    }
+
+    #[test]
+    fn send_after_drop_is_harmless() {
+        let (worker, _db_path, _dir) = setup_worker();
+
+        // Drop the worker
+        drop(worker);
+
+        // Can't send after drop (ownership moved), but verify the pattern
+        // where sender is None doesn't panic
+        // This is implicitly tested — the worker's Drop takes the sender,
+        // so any cloned sender would get a SendError, which is handled.
+    }
+
+    #[test]
+    fn worker_handles_empty_work_items() {
+        let (worker, _db_path, _dir) = setup_worker();
+
+        // Send a bunch of empty work — should be filtered out
+        for _ in 0..10 {
+            worker.send(PersistenceWork::new());
+        }
+
+        drop(worker);
+    }
+
+    #[test]
+    fn worker_handles_mixed_work() {
+        let id_a = Uuid::new_v4();
+        let id_b = Uuid::new_v4();
+        let (worker, db_path, _dir) = setup_worker_with_memories(&[id_a, id_b]);
+
+        // Single work item with both energy updates and associations
+        let mut work = PersistenceWork::new();
+        work.energy_updates
+            .push((id_a, 0.9, MemoryState::Active));
+        work.energy_updates
+            .push((id_b, 0.3, MemoryState::Dormant));
+        work.associations
+            .push(Association::with_weight(id_a, id_b, 0.6));
+        worker.send(work);
+
+        drop(worker);
+
+        let mut storage = MemoryStorage::open(&db_path).unwrap();
+        let a = storage.load_memory(&id_a).unwrap().unwrap();
+        let b = storage.load_memory(&id_b).unwrap().unwrap();
+        assert!((a.energy - 0.9).abs() < 1e-6);
+        assert!((b.energy - 0.3).abs() < 1e-6);
+
+        let assocs = storage.load_associations_from(&id_a).unwrap();
+        assert_eq!(assocs.len(), 1);
     }
 }

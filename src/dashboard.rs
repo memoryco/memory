@@ -87,10 +87,11 @@ pub fn start_dashboard(
                 let url = request.url().to_string();
                 let method = request.method().to_string();
 
-                // Handle CORS preflight
+                // Respond to OPTIONS but without CORS allow-origin headers.
+                // Same-origin requests don't send preflight; cross-origin
+                // preflight will see no Access-Control-Allow-Origin and fail.
                 if method == "OPTIONS" {
                     let response = tiny_http::Response::from_string("")
-                        .with_header(cors_header())
                         .with_header(cors_methods_header())
                         .with_header(cors_headers_header());
                     let _ = request.respond(response);
@@ -215,7 +216,6 @@ fn json_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
                 .parse::<tiny_http::Header>()
                 .unwrap(),
         )
-        .with_header(cors_header())
 }
 
 fn html_response(body: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
@@ -225,7 +225,6 @@ fn html_response(body: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
                 .parse::<tiny_http::Header>()
                 .unwrap(),
         )
-        .with_header(cors_header())
 }
 
 fn json_ok(value: &JsonValue) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
@@ -233,12 +232,6 @@ fn json_ok(value: &JsonValue) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
         200,
         &serde_json::to_string(value).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e)),
     )
-}
-
-fn cors_header() -> tiny_http::Header {
-    "Access-Control-Allow-Origin: *"
-        .parse::<tiny_http::Header>()
-        .unwrap()
 }
 
 fn cors_methods_header() -> tiny_http::Header {

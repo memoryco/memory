@@ -126,9 +126,9 @@ impl EmbeddingGenerator {
             EMBED_MODEL_NAME, actual_dims
         );
 
-        debug_assert_eq!(
+        assert_eq!(
             actual_dims, EMBED_DIMENSIONS,
-            "Model reports {}-dim but expected {}-dim",
+            "Model reports {}-dim but expected {}-dim — wrong model loaded",
             actual_dims, EMBED_DIMENSIONS
         );
 

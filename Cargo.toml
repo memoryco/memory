@@ -36,6 +36,8 @@ tiny_http = "0.12"
 chrono = "0.4"
 whatlang = "0.16"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+sqlite-vec = "0.1"
+libsqlite3-sys = { version = "0.28", features = ["bundled"] }
 
 
 [patch.crates-io]

@@ -13,7 +13,7 @@ pub mod schema;
 mod vector;
 
 pub use diesel::MemoryStorage;
-pub use vector::{SimilarityResult, VectorSearch};
+pub use vector::{SimilarityResult, VEC0_DIMENSIONS, VectorSearch};
 
 // Re-export unified storage types from the foundation
 pub use crate::storage::{StorageError, StorageResult};

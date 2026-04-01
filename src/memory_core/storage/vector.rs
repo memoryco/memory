@@ -13,6 +13,10 @@ use diesel::sql_query;
 use diesel::sql_types::{Binary, Nullable, Text};
 use diesel::sqlite::SqliteConnection;
 
+/// Dimension of the vec0 virtual tables. Must match the CREATE VIRTUAL TABLE
+/// definition in diesel.rs and the embedding model's output dimension.
+pub const VEC0_DIMENSIONS: usize = 2048;
+
 /// Result of a vector similarity search
 #[derive(Debug, Clone)]
 pub struct SimilarityResult {
@@ -53,7 +57,29 @@ struct CountRow {
     cnt: i64,
 }
 
-/// Row returned from enrichment embedding queries
+/// Row returned from vec0 memory search (memory_vec JOIN memories)
+#[derive(QueryableByName, Debug)]
+struct Vec0Row {
+    #[diesel(sql_type = Text)]
+    memory_id: String,
+    #[diesel(sql_type = diesel::sql_types::Float)]
+    distance: f32,
+    #[diesel(sql_type = Text)]
+    content: String,
+}
+
+/// Row returned from vec0 enrichment search (enrichment_vec JOIN memories)
+#[derive(QueryableByName, Debug)]
+struct Vec0EnrichRow {
+    #[diesel(sql_type = Text)]
+    memory_id: String,
+    #[diesel(sql_type = diesel::sql_types::Float)]
+    distance: f32,
+    #[diesel(sql_type = Text)]
+    content: String,
+}
+
+/// Row returned from enrichment embedding queries (brute-force fallback)
 #[derive(QueryableByName, Debug)]
 struct EnrichmentRow {
     #[diesel(sql_type = Text)]
@@ -81,17 +107,124 @@ impl<'a> VectorSearch<'a> {
     /// Only returns results with similarity >= min_score.
     /// Searches BOTH the primary memory embeddings AND enrichment vectors,
     /// deduplicating by memory_id (keeping highest score per memory).
+    ///
+    /// Uses sqlite-vec (vec0) for SIMD-accelerated cosine search when available.
+    /// Falls back to brute-force scan if vec0 fails (e.g. dimension mismatch
+    /// in tests or during model migration).
     pub fn find_similar(
         &mut self,
         query_embedding: &[f32],
         limit: usize,
         min_score: f32,
     ) -> StorageResult<Vec<SimilarityResult>> {
-        // best_scores: memory_id -> (score, content)
+        match self.find_similar_vec0(query_embedding, limit, min_score) {
+            Ok(results) => Ok(results),
+            Err(_) => self.find_similar_bruteforce(query_embedding, limit, min_score),
+        }
+    }
+
+    /// Vec0-accelerated search: queries memory_vec and enrichment_vec virtual tables.
+    /// sqlite-vec computes cosine distance inside SQLite with SIMD — no blob
+    /// deserialization or Rust-side cosine math needed.
+    fn find_similar_vec0(
+        &mut self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        let query_bytes = embedding_to_bytes(query_embedding);
+        // sqlite-vec does brute-force scan regardless of k — the scan cost is
+        // identical no matter what k is. k only limits how many results are
+        // returned to Rust. Use the actual row count so dedup across primary +
+        // enrichment results never drops valid matches.
+        let mem_k: i64 = sql_query("SELECT COUNT(*) as cnt FROM memory_vec")
+            .get_result::<CountRow>(self.conn)
+            .map(|r| r.cnt)
+            .unwrap_or(10000);
+        let enrich_k: i64 = sql_query("SELECT COUNT(*) as cnt FROM enrichment_vec")
+            .get_result::<CountRow>(self.conn)
+            .map(|r| r.cnt)
+            .unwrap_or(10000);
+
         let mut best_scores: std::collections::HashMap<uuid::Uuid, (f32, String)> =
             std::collections::HashMap::new();
 
-        // Search primary memory embeddings
+        // Search primary memory embeddings via vec0
+        // vec0 with distance_metric=cosine returns cosine distance (1 - similarity)
+        let mem_rows: Vec<Vec0Row> = sql_query(
+            "SELECT v.memory_id, v.distance, m.content \
+             FROM memory_vec v \
+             JOIN memories m ON m.id = v.memory_id \
+             WHERE v.embedding MATCH ?1 AND k = ?2",
+        )
+        .bind::<Binary, _>(&query_bytes[..])
+        .bind::<diesel::sql_types::BigInt, _>(mem_k)
+        .load(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        for row in mem_rows {
+            let similarity = 1.0 - row.distance;
+            if similarity >= min_score {
+                let id = uuid::Uuid::parse_str(&row.memory_id)
+                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let entry = best_scores.entry(id).or_insert((similarity, row.content.clone()));
+                if similarity > entry.0 {
+                    *entry = (similarity, row.content.clone());
+                }
+            }
+        }
+
+        // Search enrichment embeddings via vec0
+        let enrich_rows: Vec<Vec0EnrichRow> = sql_query(
+            "SELECT v.memory_id, v.distance, m.content \
+             FROM enrichment_vec v \
+             JOIN memories m ON m.id = v.memory_id \
+             WHERE v.embedding MATCH ?1 AND k = ?2",
+        )
+        .bind::<Binary, _>(&query_bytes[..])
+        .bind::<diesel::sql_types::BigInt, _>(enrich_k)
+        .load(self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        for row in enrich_rows {
+            let similarity = 1.0 - row.distance;
+            if similarity >= min_score {
+                let id = uuid::Uuid::parse_str(&row.memory_id)
+                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let entry = best_scores.entry(id).or_insert((similarity, row.content.clone()));
+                if similarity > entry.0 {
+                    *entry = (similarity, row.content.clone());
+                }
+            }
+        }
+
+        let mut results: Vec<SimilarityResult> = best_scores
+            .into_iter()
+            .map(|(id, (score, content))| SimilarityResult { id, score, content })
+            .collect();
+
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    /// Brute-force fallback: loads all embeddings from SQLite and computes
+    /// cosine similarity in Rust. Used when vec0 is unavailable (dimension
+    /// mismatch in tests, model migration in progress).
+    fn find_similar_bruteforce(
+        &mut self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> StorageResult<Vec<SimilarityResult>> {
+        let mut best_scores: std::collections::HashMap<uuid::Uuid, (f32, String)> =
+            std::collections::HashMap::new();
+
         let rows: Vec<EmbeddingRow> =
             sql_query("SELECT id, content, embedding FROM memories WHERE embedding IS NOT NULL")
                 .load(self.conn)
@@ -114,7 +247,6 @@ impl<'a> VectorSearch<'a> {
             }
         }
 
-        // Search enrichment embeddings (JOIN to get parent content)
         let enrichment_rows: Vec<EnrichmentRow> = sql_query(
             "SELECT e.memory_id, eng.content, e.embedding \
              FROM memory_enrichments e \
@@ -147,16 +279,13 @@ impl<'a> VectorSearch<'a> {
             .map(|(id, (score, content))| SimilarityResult { id, score, content })
             .collect();
 
-        // Sort by score descending
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Limit results
         results.truncate(limit);
-
         Ok(results)
     }
 
@@ -257,6 +386,21 @@ impl<'a> VectorSearch<'a> {
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
+        // Always remove any existing vec0 row to prevent stale entries
+        // (e.g. when a 2048-dim embedding is replaced with a different dimension).
+        sql_query("DELETE FROM memory_vec WHERE memory_id = ?")
+            .bind::<Text, _>(&id_str)
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        // Only insert when dimensions match the vec0 table.
+        if embedding.len() == VEC0_DIMENSIONS {
+            sql_query("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)")
+                .bind::<Text, _>(&id_str)
+                .bind::<Binary, _>(&bytes[..])
+                .execute(self.conn)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+
         Ok(())
     }
 
@@ -266,6 +410,12 @@ impl<'a> VectorSearch<'a> {
         let result = sql_query("UPDATE memories SET embedding = NULL WHERE embedding IS NOT NULL")
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        // Sync vec0: clear the whole memory_vec table
+        sql_query("DELETE FROM memory_vec")
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
         Ok(result)
     }
 
@@ -306,6 +456,15 @@ impl<'a> VectorSearch<'a> {
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
+        // Always remove old enrichment_vec rows to prevent stale entries
+        // (e.g. when 2048-dim enrichments are replaced with different dimensions).
+        sql_query("DELETE FROM enrichment_vec WHERE memory_id = ?")
+            .bind::<Text, _>(&id_str)
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        let dims_match = embeddings.first().is_some_and(|e| e.len() == VEC0_DIMENSIONS);
+
         // Insert new enrichments with seq 0, 1, 2...
         for (seq, embedding) in embeddings.iter().enumerate() {
             let bytes = embedding_to_bytes(embedding);
@@ -320,6 +479,15 @@ impl<'a> VectorSearch<'a> {
             .bind::<diesel::sql_types::BigInt, _>(now)
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
+
+            // Sync vec0
+            if dims_match {
+                sql_query("INSERT INTO enrichment_vec(memory_id, embedding) VALUES (?, ?)")
+                    .bind::<Text, _>(&id_str)
+                    .bind::<Binary, _>(&bytes[..])
+                    .execute(self.conn)
+                    .map_err(|e| StorageError::Database(e.to_string()))?;
+            }
         }
 
         Ok(())
@@ -332,6 +500,13 @@ impl<'a> VectorSearch<'a> {
             .bind::<Text, _>(&id_str)
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        // Sync vec0
+        sql_query("DELETE FROM enrichment_vec WHERE memory_id = ?")
+            .bind::<Text, _>(&id_str)
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
         Ok(())
     }
 
@@ -349,6 +524,12 @@ impl<'a> VectorSearch<'a> {
         let result = sql_query("DELETE FROM memory_enrichments")
             .execute(self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        // Sync vec0: clear the whole enrichment_vec table
+        sql_query("DELETE FROM enrichment_vec")
+            .execute(self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
         Ok(result)
     }
 }
@@ -359,6 +540,13 @@ mod tests {
     use crate::memory_core::Memory;
     use crate::memory_core::storage::MemoryStorage;
     use crate::memory_core::storage::Storage;
+
+    fn angular_embedding(theta: f32) -> Vec<f32> {
+        let mut embedding = vec![0.0; VEC0_DIMENSIONS];
+        embedding[0] = theta.cos();
+        embedding[1] = theta.sin();
+        embedding
+    }
 
     #[test]
     fn vector_search_basics() {
@@ -754,5 +942,55 @@ mod tests {
 
         let ids = vs.get_ids_without_enrichments().unwrap();
         assert_eq!(ids.len(), 0);
+    }
+
+    #[test]
+    fn vec0_matches_bruteforce_on_large_corpus_with_enrichment_fan_out() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let memory_count = 120;
+        let query = angular_embedding(0.0);
+
+        for i in 0..memory_count {
+            let base_theta = (i as f32) * 0.008;
+
+            let mut memory = Memory::new(format!("Memory {i}"));
+            memory.embedding = Some(angular_embedding(base_theta + 0.003));
+            let memory_id = memory.id;
+            storage.save_memory(&memory).unwrap();
+
+            let enrichments = vec![
+                angular_embedding(base_theta + 0.001),
+                angular_embedding(base_theta + 0.005),
+                angular_embedding(base_theta + 0.007),
+                angular_embedding(base_theta + 0.009),
+                angular_embedding(base_theta + 0.011),
+            ];
+
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&memory_id, &enrichments, "llm")
+                .unwrap();
+        }
+
+        let mut vs = VectorSearch::new(storage.connection());
+        let vec0_results = vs.find_similar_vec0(&query, memory_count, 0.0).unwrap();
+        let bruteforce_results = vs
+            .find_similar_bruteforce(&query, memory_count, 0.0)
+            .unwrap();
+
+        assert_eq!(vec0_results.len(), bruteforce_results.len());
+
+        for (vec0, brute) in vec0_results.iter().zip(bruteforce_results.iter()) {
+            assert_eq!(vec0.id, brute.id, "vec0 and brute-force should rank memories identically");
+            assert_eq!(vec0.content, brute.content);
+            assert!(
+                (vec0.score - brute.score).abs() < 1e-4,
+                "score mismatch for {}: vec0={} brute-force={}",
+                vec0.id,
+                vec0.score,
+                brute.score
+            );
+        }
     }
 }

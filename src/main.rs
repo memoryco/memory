@@ -51,6 +51,14 @@ pub struct Context {
 }
 
 fn main() {
+    // Register sqlite-vec as an auto-extension so every SQLite connection
+    // (Diesel and rusqlite) gets vec0 virtual-table support automatically.
+    unsafe {
+        libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    }
+
     let cli = cli::Cli::parse();
 
     match cli.command {

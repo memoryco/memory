@@ -24,6 +24,24 @@ use super::VectorSearch;
 #[cfg(feature = "postgres")]
 use diesel::pg::PgConnection as DbConnection;
 
+/// Register sqlite-vec as an auto-extension (idempotent, process-global).
+///
+/// Called from both `open()` and `in_memory()` so the extension is available
+/// whether the caller is the real binary (which also registers in `main()`)
+/// or a test harness.
+#[cfg(feature = "sqlite")]
+fn ensure_sqlite_vec_registered() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        unsafe {
+            libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+    });
+}
+
 /// Database-backed storage implementation for Memories
 ///
 /// The underlying database is selected at compile time via feature flags:
@@ -41,6 +59,7 @@ impl MemoryStorage {
     /// For Postgres: Pass a connection URL (e.g., "postgres://user:pass@host/db")
     #[cfg(feature = "sqlite")]
     pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Self> {
+        ensure_sqlite_vec_registered();
         let path_str = path.as_ref().to_string_lossy();
         let mut conn = DbConnection::establish(&path_str)
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -73,6 +92,7 @@ impl MemoryStorage {
     /// Create an in-memory database (for testing) - SQLite only
     #[cfg(test)]
     pub fn in_memory() -> StorageResult<Self> {
+        ensure_sqlite_vec_registered();
         let mut conn = DbConnection::establish(":memory:")
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
@@ -178,6 +198,22 @@ impl MemoryStorage {
                 content,
                 memory_id UNINDEXED,
                 tokenize='porter unicode61'
+            );
+        "#,
+            )
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        // vec0 virtual tables for SIMD-accelerated cosine similarity (sqlite-vec)
+        self.conn
+            .batch_execute(
+                r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
+                memory_id TEXT,
+                embedding float[2048] distance_metric=cosine
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS enrichment_vec USING vec0(
+                memory_id TEXT,
+                embedding float[2048] distance_metric=cosine
             );
         "#,
             )
@@ -609,6 +645,80 @@ impl MemoryStorage {
 
         Ok(())
     }
+
+    /// Backfill vec0 virtual tables from existing embeddings.
+    ///
+    /// Runs once: if memory_vec is empty but memories has embeddings, we
+    /// bulk-copy everything into the vec0 tables so that sqlite-vec can
+    /// serve similarity queries immediately.
+    #[cfg(feature = "sqlite")]
+    fn migrate_vec0_backfill(&mut self) -> StorageResult<()> {
+        use diesel::connection::SimpleConnection;
+
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        // Compare counts: if vec0 has fewer rows than the source tables,
+        // rebuild from scratch. This repairs partial failures and missed syncs.
+        let vec_count: CountResult =
+            diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_vec")
+                .get_result(&mut self.conn)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        let embed_count: CountResult = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM memories WHERE embedding IS NOT NULL",
+        )
+        .get_result(&mut self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        if embed_count.cnt > 0 && vec_count.cnt < embed_count.cnt {
+            // Clear and rebuild to avoid duplicates
+            let _ = self.conn.batch_execute("DELETE FROM memory_vec");
+            match self.conn.batch_execute(
+                "INSERT INTO memory_vec(memory_id, embedding) \
+                 SELECT id, embedding FROM memories WHERE embedding IS NOT NULL",
+            ) {
+                Ok(()) => eprintln!(
+                    "[migration] Backfilled {} memory embeddings into memory_vec",
+                    embed_count.cnt
+                ),
+                Err(e) => eprintln!(
+                    "[migration] Could not backfill memory_vec (dimension mismatch?): {}",
+                    e
+                ),
+            }
+        }
+
+        let evec_count: CountResult =
+            diesel::sql_query("SELECT COUNT(*) as cnt FROM enrichment_vec")
+                .get_result(&mut self.conn)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        let enrich_count: CountResult =
+            diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_enrichments")
+                .get_result(&mut self.conn)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        if enrich_count.cnt > 0 && evec_count.cnt < enrich_count.cnt {
+            let _ = self.conn.batch_execute("DELETE FROM enrichment_vec");
+            match self.conn.batch_execute(
+                "INSERT INTO enrichment_vec(memory_id, embedding) \
+                 SELECT memory_id, embedding FROM memory_enrichments",
+            ) {
+                Ok(()) => eprintln!(
+                    "[migration] Backfilled {} enrichment embeddings into enrichment_vec",
+                    enrich_count.cnt
+                ),
+                Err(e) => eprintln!(
+                    "[migration] Could not backfill enrichment_vec (dimension mismatch?): {}",
+                    e
+                ),
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Storage for MemoryStorage {
@@ -620,6 +730,7 @@ impl Storage for MemoryStorage {
         self.migrate_association_ordinal()?;
         self.migrate_enrichments_table()?;
         self.migrate_sessions_table()?;
+        self.migrate_vec0_backfill()?;
         Ok(())
     }
 
@@ -695,6 +806,25 @@ impl Storage for MemoryStorage {
             .execute(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
+        // Always remove any existing vec0 row to prevent stale entries.
+        diesel::sql_query("DELETE FROM memory_vec WHERE memory_id = ?")
+            .bind::<diesel::sql_types::Text, _>(&id_str)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        // Only insert when dimensions match the vec0 table.
+        if let Some(ref embedding) = mem.embedding {
+            if embedding.len() == super::VEC0_DIMENSIONS {
+                let bytes = embedding_to_bytes(embedding);
+                diesel::sql_query(
+                    "INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)",
+                )
+                .bind::<diesel::sql_types::Text, _>(&id_str)
+                .bind::<diesel::sql_types::Binary, _>(&bytes[..])
+                .execute(&mut self.conn)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            }
+        }
+
         Ok(())
     }
 
@@ -730,6 +860,22 @@ impl Storage for MemoryStorage {
                         .bind::<diesel::sql_types::Text, _>(&mem.content)
                         .bind::<diesel::sql_types::Text, _>(&id_str)
                         .execute(conn)?;
+
+                    // Always remove stale vec0 row, conditionally insert.
+                    diesel::sql_query("DELETE FROM memory_vec WHERE memory_id = ?")
+                        .bind::<diesel::sql_types::Text, _>(&id_str)
+                        .execute(conn)?;
+                    if let Some(ref embedding) = mem.embedding {
+                        if embedding.len() == super::VEC0_DIMENSIONS {
+                            let bytes = embedding_to_bytes(embedding);
+                            diesel::sql_query(
+                                "INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)",
+                            )
+                            .bind::<diesel::sql_types::Text, _>(&id_str)
+                            .bind::<diesel::sql_types::Binary, _>(&bytes[..])
+                            .execute(conn)?;
+                        }
+                    }
                 }
                 Ok(())
             })?;
@@ -794,6 +940,16 @@ impl Storage for MemoryStorage {
 
         // Delete from FTS5 index
         diesel::sql_query("DELETE FROM memory_fts WHERE memory_id = ?1")
+            .bind::<diesel::sql_types::Text, _>(&id_str)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        // Delete from vec0 tables
+        diesel::sql_query("DELETE FROM memory_vec WHERE memory_id = ?")
+            .bind::<diesel::sql_types::Text, _>(&id_str)
+            .execute(&mut self.conn)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        diesel::sql_query("DELETE FROM enrichment_vec WHERE memory_id = ?")
             .bind::<diesel::sql_types::Text, _>(&id_str)
             .execute(&mut self.conn)
             .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -2453,5 +2609,591 @@ mod tests {
         // New indexes should exist (created by create_schema)
         assert!(index_exists(&mut storage, "idx_memories_state"));
         assert!(index_exists(&mut storage, "idx_memories_energy"));
+    }
+
+    // ==================
+    // VEC0 SYNC TESTS
+    // ==================
+
+    /// Helper: create a 2048-dim embedding (matches vec0 table schema).
+    fn make_embedding(seed: f32) -> Vec<f32> {
+        (0..2048).map(|i| ((i as f32) * seed).sin()).collect()
+    }
+
+    /// Helper: count rows in memory_vec for a given memory_id.
+    fn memory_vec_count(storage: &mut MemoryStorage, memory_id: &str) -> i32 {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_vec WHERE memory_id = ?")
+            .bind::<diesel::sql_types::Text, _>(memory_id)
+            .get_result::<CountResult>(&mut storage.conn)
+            .map(|r| r.cnt)
+            .unwrap_or(0)
+    }
+
+    /// Helper: count rows in enrichment_vec for a given memory_id.
+    fn enrichment_vec_count(storage: &mut MemoryStorage, memory_id: &str) -> i32 {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        diesel::sql_query("SELECT COUNT(*) as cnt FROM enrichment_vec WHERE memory_id = ?")
+            .bind::<diesel::sql_types::Text, _>(memory_id)
+            .get_result::<CountResult>(&mut storage.conn)
+            .map(|r| r.cnt)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn vec0_save_memory_with_embedding_populates_memory_vec() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut mem = Memory::new("Rust is great");
+        mem.embedding = Some(make_embedding(1.0));
+        let id_str = mem.id.to_string();
+
+        storage.save_memory(&mem).unwrap();
+
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1);
+    }
+
+    #[test]
+    fn vec0_save_memory_without_embedding_has_no_vec_row() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("No embedding here");
+        let id_str = mem.id.to_string();
+
+        storage.save_memory(&mem).unwrap();
+
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 0);
+    }
+
+    #[test]
+    fn vec0_save_memory_replaces_existing_vec_row() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut mem = Memory::new("First embedding");
+        mem.embedding = Some(make_embedding(1.0));
+        let id_str = mem.id.to_string();
+
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1);
+
+        // Update embedding and re-save
+        mem.embedding = Some(make_embedding(2.0));
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(
+            memory_vec_count(&mut storage, &id_str),
+            1,
+            "Should still be 1 row after update"
+        );
+    }
+
+    #[test]
+    fn vec0_save_memory_removes_vec_row_when_embedding_cleared() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut mem = Memory::new("Had embedding");
+        mem.embedding = Some(make_embedding(1.0));
+        let id_str = mem.id.to_string();
+
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1);
+
+        // Clear embedding and re-save
+        mem.embedding = None;
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(
+            memory_vec_count(&mut storage, &id_str),
+            0,
+            "Vec row should be removed when embedding is cleared"
+        );
+    }
+
+    #[test]
+    fn vec0_delete_memory_removes_from_both_vec_tables() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut mem = Memory::new("Will be deleted");
+        mem.embedding = Some(make_embedding(1.0));
+        let id_str = mem.id.to_string();
+
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1);
+
+        // Add enrichment vectors
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&mem.id, &[make_embedding(3.0)], "llm")
+                .unwrap();
+        }
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 1);
+
+        // Delete the memory
+        storage.delete_memory(&mem.id).unwrap();
+
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 0);
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 0);
+    }
+
+    #[test]
+    fn vec0_set_embedding_populates_memory_vec() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Create memory without embedding
+        let mem = Memory::new("Get embedding later");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 0);
+
+        // Set embedding via VectorSearch
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_embedding(&mem.id, &make_embedding(1.0)).unwrap();
+        }
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1);
+    }
+
+    #[test]
+    fn vec0_clear_all_embeddings_empties_memory_vec() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut e1 = Memory::new("First");
+        e1.embedding = Some(make_embedding(1.0));
+        let mut e2 = Memory::new("Second");
+        e2.embedding = Some(make_embedding(2.0));
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
+        assert_eq!(row_count(&mut storage, "memory_vec"), 2);
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.clear_all_embeddings().unwrap();
+        }
+        assert_eq!(row_count(&mut storage, "memory_vec"), 0);
+    }
+
+    #[test]
+    fn vec0_set_enrichment_embeddings_populates_enrichment_vec() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("Enrichable");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(
+                &mem.id,
+                &[make_embedding(1.0), make_embedding(2.0)],
+                "llm",
+            )
+            .unwrap();
+        }
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 2);
+    }
+
+    #[test]
+    fn vec0_re_enrichment_replaces_enrichment_vec_rows() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("Re-enrich me");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+
+        // First enrichment: 3 vectors
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(
+                &mem.id,
+                &[make_embedding(1.0), make_embedding(2.0), make_embedding(3.0)],
+                "llm",
+            )
+            .unwrap();
+        }
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 3);
+
+        // Re-enrich: 1 vector — old ones should be gone
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&mem.id, &[make_embedding(4.0)], "llm")
+                .unwrap();
+        }
+        assert_eq!(
+            enrichment_vec_count(&mut storage, &id_str),
+            1,
+            "Old enrichment_vec rows should be replaced"
+        );
+    }
+
+    #[test]
+    fn vec0_delete_enrichments_clears_enrichment_vec() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("Delete enrichments");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&mem.id, &[make_embedding(1.0)], "llm")
+                .unwrap();
+        }
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 1);
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.delete_enrichments(&mem.id).unwrap();
+        }
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 0);
+    }
+
+    #[test]
+    fn vec0_clear_all_enrichments_empties_enrichment_vec() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let e1 = Memory::new("First");
+        let e2 = Memory::new("Second");
+        storage.save_memory(&e1).unwrap();
+        storage.save_memory(&e2).unwrap();
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&e1.id, &[make_embedding(1.0)], "llm")
+                .unwrap();
+            vs.set_enrichment_embeddings(&e2.id, &[make_embedding(2.0)], "llm")
+                .unwrap();
+        }
+        assert_eq!(row_count(&mut storage, "enrichment_vec"), 2);
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.clear_all_enrichments().unwrap();
+        }
+        assert_eq!(row_count(&mut storage, "enrichment_vec"), 0);
+    }
+
+    #[test]
+    fn vec0_migration_backfills_from_existing_embeddings() {
+        // Simulate a database that has embeddings but empty vec0 tables
+        // (like upgrading from a pre-sqlite-vec version).
+        let mut storage = MemoryStorage::in_memory().unwrap();
+
+        // Manually create the old schema without vec0 tables
+        storage.conn.batch_execute(r#"
+            CREATE TABLE IF NOT EXISTS identity (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                data TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                data TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                energy REAL NOT NULL,
+                state TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_accessed INTEGER NOT NULL,
+                access_count INTEGER NOT NULL,
+                tags TEXT NOT NULL,
+                embedding BLOB
+            );
+            CREATE TABLE IF NOT EXISTS associations (
+                from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL,
+                weight REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_activated INTEGER NOT NULL,
+                co_activation_count INTEGER NOT NULL,
+                PRIMARY KEY (from_id, to_id)
+            );
+            CREATE TABLE IF NOT EXISTS memory_enrichments (
+                memory_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                source TEXT NOT NULL DEFAULT 'llm',
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (memory_id, seq),
+                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                content,
+                memory_id UNINDEXED,
+                tokenize='porter unicode61'
+            );
+        "#).unwrap();
+
+        // Insert a memory with a 2048-dim embedding directly
+        let id1 = uuid::Uuid::new_v4().to_string();
+        let emb1 = make_embedding(1.0);
+        let bytes1 = embedding_to_bytes(&emb1);
+        diesel::sql_query(
+            "INSERT INTO memories (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding) \
+             VALUES (?, 'test memory', 1.0, 'active', 0.8, 1000000, 1000000, 1, '[]', ?)"
+        )
+        .bind::<diesel::sql_types::Text, _>(&id1)
+        .bind::<diesel::sql_types::Binary, _>(&bytes1[..])
+        .execute(&mut storage.conn)
+        .unwrap();
+
+        // Insert an enrichment embedding
+        let enr_bytes = embedding_to_bytes(&make_embedding(2.0));
+        diesel::sql_query(
+            "INSERT INTO memory_enrichments (memory_id, seq, embedding, source, created_at) \
+             VALUES (?, 0, ?, 'llm', 1000000)"
+        )
+        .bind::<diesel::sql_types::Text, _>(&id1)
+        .bind::<diesel::sql_types::Binary, _>(&enr_bytes[..])
+        .execute(&mut storage.conn)
+        .unwrap();
+
+        // Now call initialize() — it should create vec0 tables and backfill
+        storage.initialize().unwrap();
+
+        assert!(table_exists(&mut storage, "memory_vec"));
+        assert!(table_exists(&mut storage, "enrichment_vec"));
+        assert_eq!(memory_vec_count(&mut storage, &id1), 1);
+        assert_eq!(enrichment_vec_count(&mut storage, &id1), 1);
+    }
+
+    #[test]
+    fn vec0_tables_created_on_fresh_init() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        assert!(table_exists(&mut storage, "memory_vec"));
+        assert!(table_exists(&mut storage, "enrichment_vec"));
+    }
+
+    #[test]
+    fn vec0_small_dimension_embeddings_are_best_effort() {
+        // Verify that saving a memory with a non-2048-dim embedding
+        // succeeds (the primary save works, vec0 insert is silently skipped).
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut mem = Memory::new("Small embedding");
+        mem.embedding = Some(vec![1.0, 0.0, 0.0]); // 3-dim, won't fit vec0
+        let id_str = mem.id.to_string();
+
+        // Should not error — vec0 insert is best-effort
+        storage.save_memory(&mem).unwrap();
+
+        // Primary storage should still have the embedding (load via VectorSearch)
+        let mut vs = VectorSearch::new(storage.connection());
+        let emb = vs.get_embedding(&mem.id).unwrap();
+        assert!(emb.is_some(), "Primary embedding column should be populated");
+        assert_eq!(emb.unwrap().len(), 3);
+
+        // But vec0 should NOT have it (dimension mismatch)
+        drop(vs);
+        assert_eq!(
+            memory_vec_count(&mut storage, &id_str),
+            0,
+            "vec0 should reject mismatched dimensions silently"
+        );
+    }
+
+    #[test]
+    fn vec0_non_2048_replacement_clears_vec_row() {
+        // A memory starts with a 2048-dim embedding (synced to vec0), then
+        // gets replaced with a 3-dim embedding (model migration or test).
+        // The old vec0 row must be removed — otherwise searches return stale
+        // results that don't match the primary embedding blob.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mut mem = Memory::new("Will change dimension");
+        mem.embedding = Some(make_embedding(1.0)); // 2048-dim
+        let id_str = mem.id.to_string();
+
+        storage.save_memory(&mem).unwrap();
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1, "2048-dim should populate vec0");
+
+        // Replace with a 3-dim embedding (simulates model migration or test fixture)
+        let small_embedding = vec![0.5, 0.3, 0.1];
+        mem.embedding = Some(small_embedding.clone());
+        storage.save_memory(&mem).unwrap();
+
+        // vec0 must NOT have the old row
+        assert_eq!(
+            memory_vec_count(&mut storage, &id_str),
+            0,
+            "vec0 row must be removed when embedding dimension changes away from 2048"
+        );
+
+        // Primary blob must hold the new 3-dim embedding
+        let mut vs = VectorSearch::new(storage.connection());
+        let loaded = vs.get_embedding(&mem.id).unwrap().expect("Primary embedding should exist");
+        assert_eq!(loaded.len(), 3);
+        assert!((loaded[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn vec0_non_2048_replacement_via_set_embedding_clears_vec_row() {
+        // Same test but using the VectorSearch::set_embedding path directly.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("Via set_embedding");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+
+        // Set a 2048-dim embedding
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_embedding(&mem.id, &make_embedding(2.0)).unwrap();
+        }
+        assert_eq!(memory_vec_count(&mut storage, &id_str), 1);
+
+        // Replace with a 3-dim embedding
+        let small = vec![1.0, 0.0, 0.0];
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_embedding(&mem.id, &small).unwrap();
+        }
+        assert_eq!(
+            memory_vec_count(&mut storage, &id_str),
+            0,
+            "set_embedding with non-2048 dims must remove old vec0 row"
+        );
+
+        // Primary blob must hold the new value
+        let mut vs = VectorSearch::new(storage.connection());
+        let loaded = vs.get_embedding(&mem.id).unwrap().expect("should exist");
+        assert_eq!(loaded.len(), 3);
+    }
+
+    #[test]
+    fn vec0_high_enrichment_fan_out_equivalence() {
+        // A single memory with many enrichment vectors should have exact
+        // row-count parity between memory_enrichments and enrichment_vec,
+        // and search must find the memory via enrichment similarity.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("Memory with many enrichment vectors");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+
+        // Create 20 distinct enrichment vectors (high fan-out)
+        let enrichments: Vec<Vec<f32>> = (0..20)
+            .map(|i| make_embedding(0.1 * (i as f32) + 0.5))
+            .collect();
+
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&mem.id, &enrichments, "llm")
+                .unwrap();
+        }
+
+        // Row-count parity: enrichment_vec should have exactly 20 rows
+        assert_eq!(
+            enrichment_vec_count(&mut storage, &id_str),
+            20,
+            "enrichment_vec must match enrichment count for high fan-out"
+        );
+
+        // Verify the primary enrichments table also has 20
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        let primary_count: i32 =
+            diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_enrichments WHERE memory_id = ?")
+                .bind::<diesel::sql_types::Text, _>(&id_str)
+                .get_result::<CountResult>(&mut storage.conn)
+                .map(|r| r.cnt)
+                .unwrap_or(0);
+        assert_eq!(primary_count, 20, "memory_enrichments must also have 20 rows");
+
+        // Search using one of the enrichment vectors — should find the memory
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            let results = vs.find_similar(&enrichments[0], 5, 0.0).unwrap();
+            assert!(
+                results.iter().any(|r| r.id == mem.id),
+                "Search via enrichment vector must find the parent memory"
+            );
+        }
+    }
+
+    #[test]
+    fn vec0_enrichment_non_2048_replacement_after_2048() {
+        // Enrichments start as 2048-dim (synced to enrichment_vec), then
+        // get replaced with 3-dim vectors. The old enrichment_vec rows must
+        // be cleaned up — no stale entries.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let mem = Memory::new("Enrichment dimension change");
+        let id_str = mem.id.to_string();
+        storage.save_memory(&mem).unwrap();
+
+        // Write 5 enrichment vectors at 2048 dimensions
+        let big_enrichments: Vec<Vec<f32>> = (0..5)
+            .map(|i| make_embedding(1.0 + i as f32))
+            .collect();
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&mem.id, &big_enrichments, "llm")
+                .unwrap();
+        }
+        assert_eq!(enrichment_vec_count(&mut storage, &id_str), 5);
+
+        // Replace with 3-dim enrichment vectors (model migration)
+        let small_enrichments: Vec<Vec<f32>> = (0..3)
+            .map(|i| vec![i as f32, 0.0, 1.0])
+            .collect();
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(&mem.id, &small_enrichments, "llm")
+                .unwrap();
+        }
+
+        // All old vec0 rows must be gone, and no new ones inserted (wrong dims)
+        assert_eq!(
+            enrichment_vec_count(&mut storage, &id_str),
+            0,
+            "enrichment_vec must be empty after replacing 2048-dim with 3-dim"
+        );
+
+        // Primary table should have the 3 new enrichments
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        let primary_count: i32 =
+            diesel::sql_query("SELECT COUNT(*) as cnt FROM memory_enrichments WHERE memory_id = ?")
+                .bind::<diesel::sql_types::Text, _>(&id_str)
+                .get_result::<CountResult>(&mut storage.conn)
+                .map(|r| r.cnt)
+                .unwrap_or(0);
+        assert_eq!(primary_count, 3, "primary enrichments should have the 3 new rows");
     }
 }

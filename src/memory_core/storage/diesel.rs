@@ -204,7 +204,7 @@ impl MemoryStorage {
         };
 
         if has_old_table {
-            // Check if 'memories' table already exists (partial previous migration)
+            // Check if 'memories' table already exists
             let has_new_table: Result<CountResult, _> = diesel::sql_query(
                 "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='memories'",
             )
@@ -212,13 +212,62 @@ impl MemoryStorage {
             let memories_exists = matches!(has_new_table, Ok(r) if r.cnt > 0);
 
             if memories_exists {
-                // Both tables exist — previous migration partially completed.
-                // Data lives in engrams (the original). Drop the empty memories
-                // table so the rename can proceed.
-                self.conn
-                    .batch_execute("DROP TABLE memories")
-                    .map_err(|e| StorageError::Database(e.to_string()))?;
-                eprintln!("[migration] Dropped empty 'memories' table from partial previous migration");
+                // Both tables exist. Count rows in each to decide which has real data.
+                let engram_count: i32 = diesel::sql_query(
+                    "SELECT COUNT(*) as cnt FROM engrams",
+                )
+                .get_result::<CountResult>(&mut self.conn)
+                .map(|r| r.cnt)
+                .unwrap_or(0);
+
+                let memory_count: i32 = diesel::sql_query(
+                    "SELECT COUNT(*) as cnt FROM memories",
+                )
+                .get_result::<CountResult>(&mut self.conn)
+                .map(|r| r.cnt)
+                .unwrap_or(0);
+
+                if memory_count > 0 && engram_count == 0 {
+                    // Migration already completed — memories has the data,
+                    // engrams is a ghost (e.g. from Syncthing sync). Drop the ghost.
+                    self.conn
+                        .batch_execute("DROP TABLE engrams")
+                        .map_err(|e| StorageError::Database(e.to_string()))?;
+                    eprintln!(
+                        "[migration] Dropped stale 'engrams' table ({} rows in 'memories' already)",
+                        memory_count
+                    );
+                    // Clean up any old enrichments/FTS/indexes that came along for the ride
+                    self.conn
+                        .batch_execute(
+                            r#"
+                            DROP TABLE IF EXISTS engram_enrichments;
+                            DROP TABLE IF EXISTS engram_fts;
+                            DROP INDEX IF EXISTS idx_engrams_state;
+                            DROP INDEX IF EXISTS idx_engrams_energy;
+                            DROP INDEX IF EXISTS idx_enrichments_engram;
+                        "#,
+                        )
+                        .map_err(|e| StorageError::Database(e.to_string()))?;
+                    return Ok(());
+                } else if memory_count > 0 && engram_count > 0 {
+                    // Both have data — this shouldn't happen. Refuse to migrate
+                    // rather than risk data loss.
+                    return Err(StorageError::Database(format!(
+                        "MIGRATION CONFLICT: both 'engrams' ({} rows) and 'memories' ({} rows) contain data. \
+                         Manual intervention required — inspect the database and drop the stale table.",
+                        engram_count, memory_count
+                    )));
+                } else {
+                    // engrams has data (or both empty) — drop memories and rename.
+                    self.conn
+                        .batch_execute("DROP TABLE memories")
+                        .map_err(|e| StorageError::Database(e.to_string()))?;
+                    eprintln!(
+                        "[migration] Dropped empty 'memories' table (engrams has {} rows)",
+                        engram_count
+                    );
+                }
             }
 
             self.conn
@@ -257,14 +306,54 @@ impl MemoryStorage {
             .get_result(&mut self.conn);
 
             if matches!(has_old_enrichments, Ok(r) if r.cnt > 0) {
-                // Drop empty memory_enrichments if create_schema() already made it
-                self.conn
-                    .batch_execute("DROP TABLE IF EXISTS memory_enrichments")
-                    .map_err(|e| StorageError::Database(e.to_string()))?;
-                self.conn
-                    .batch_execute("ALTER TABLE engram_enrichments RENAME TO memory_enrichments")
-                    .map_err(|e| StorageError::Database(e.to_string()))?;
-                eprintln!("[migration] Renamed table engram_enrichments → memory_enrichments");
+                // Check if memory_enrichments also exists
+                let has_new_enrichments: Result<CountResult, _> = diesel::sql_query(
+                    "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='memory_enrichments'",
+                )
+                .get_result(&mut self.conn);
+
+                if matches!(has_new_enrichments, Ok(r) if r.cnt > 0) {
+                    let old_count: i32 = diesel::sql_query(
+                        "SELECT COUNT(*) as cnt FROM engram_enrichments",
+                    )
+                    .get_result::<CountResult>(&mut self.conn)
+                    .map(|r| r.cnt)
+                    .unwrap_or(0);
+
+                    let new_count: i32 = diesel::sql_query(
+                        "SELECT COUNT(*) as cnt FROM memory_enrichments",
+                    )
+                    .get_result::<CountResult>(&mut self.conn)
+                    .map(|r| r.cnt)
+                    .unwrap_or(0);
+
+                    if new_count > 0 && old_count == 0 {
+                        // Already migrated, ghost table. Drop the ghost.
+                        self.conn
+                            .batch_execute("DROP TABLE engram_enrichments")
+                            .map_err(|e| StorageError::Database(e.to_string()))?;
+                        eprintln!("[migration] Dropped stale 'engram_enrichments' table");
+                    } else if new_count > 0 && old_count > 0 {
+                        return Err(StorageError::Database(format!(
+                            "MIGRATION CONFLICT: both 'engram_enrichments' ({} rows) and 'memory_enrichments' ({} rows) contain data.",
+                            old_count, new_count
+                        )));
+                    } else {
+                        self.conn
+                            .batch_execute("DROP TABLE memory_enrichments")
+                            .map_err(|e| StorageError::Database(e.to_string()))?;
+                        self.conn
+                            .batch_execute("ALTER TABLE engram_enrichments RENAME TO memory_enrichments")
+                            .map_err(|e| StorageError::Database(e.to_string()))?;
+                        eprintln!("[migration] Renamed table engram_enrichments → memory_enrichments");
+                    }
+                } else {
+                    // Only old table exists — straightforward rename
+                    self.conn
+                        .batch_execute("ALTER TABLE engram_enrichments RENAME TO memory_enrichments")
+                        .map_err(|e| StorageError::Database(e.to_string()))?;
+                    eprintln!("[migration] Renamed table engram_enrichments → memory_enrichments");
+                }
             }
 
             // Rename engram_id column in memory_enrichments if it still has the old name
@@ -1932,5 +2021,189 @@ mod tests {
             .unwrap();
 
         assert_eq!(count.cnt, 2);
+    }
+
+    // ── Migration safety tests ─────────────────────────────────────────────
+
+    /// Helper: create the old `engrams` table schema in a fresh in-memory db.
+    fn create_old_engrams_table(storage: &mut MemoryStorage) {
+        storage
+            .conn
+            .batch_execute(
+                r#"
+                CREATE TABLE engrams (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    energy REAL NOT NULL,
+                    state TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    last_accessed INTEGER NOT NULL,
+                    access_count INTEGER NOT NULL,
+                    tags TEXT NOT NULL,
+                    embedding BLOB
+                );
+            "#,
+            )
+            .unwrap();
+    }
+
+    /// Helper: create the new `memories` table with some data.
+    fn create_memories_table_with_data(storage: &mut MemoryStorage, count: usize) {
+        storage
+            .conn
+            .batch_execute(
+                r#"
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    energy REAL NOT NULL,
+                    state TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    last_accessed INTEGER NOT NULL,
+                    access_count INTEGER NOT NULL,
+                    tags TEXT NOT NULL,
+                    embedding BLOB
+                );
+            "#,
+            )
+            .unwrap();
+        for i in 0..count {
+            let id = uuid::Uuid::new_v4().to_string();
+            diesel::sql_query(format!(
+                "INSERT INTO memories (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags) \
+                 VALUES ('{}', 'memory {}', 1.0, 'Active', 0.8, 1000000, 1000000, 1, '[]')",
+                id, i
+            ))
+            .execute(&mut storage.conn)
+            .unwrap();
+        }
+    }
+
+    /// Helper: insert rows into the engrams table.
+    fn insert_engram_rows(storage: &mut MemoryStorage, count: usize) {
+        for i in 0..count {
+            let id = uuid::Uuid::new_v4().to_string();
+            diesel::sql_query(format!(
+                "INSERT INTO engrams (id, content, energy, state, confidence, created_at, last_accessed, access_count, tags) \
+                 VALUES ('{}', 'engram {}', 1.0, 'Active', 0.8, 1000000, 1000000, 1, '[]')",
+                id, i
+            ))
+            .execute(&mut storage.conn)
+            .unwrap();
+        }
+    }
+
+    /// Helper: check if a table exists.
+    fn table_exists(storage: &mut MemoryStorage, name: &str) -> bool {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        let result: CountResult = diesel::sql_query(format!(
+            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='{}'",
+            name
+        ))
+        .get_result(&mut storage.conn)
+        .unwrap();
+        result.cnt > 0
+    }
+
+    /// Helper: count rows in a table.
+    fn row_count(storage: &mut MemoryStorage, table: &str) -> i32 {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        diesel::sql_query(format!("SELECT COUNT(*) as cnt FROM {}", table))
+            .get_result::<CountResult>(&mut storage.conn)
+            .map(|r| r.cnt)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn migration_ghost_engrams_preserves_memories() {
+        // Scenario: migration already ran (data in memories), then a ghost
+        // engrams table reappeared (e.g. Syncthing sync). Must NOT drop memories.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_memories_table_with_data(&mut storage, 50);
+        create_old_engrams_table(&mut storage);  // empty ghost
+
+        assert_eq!(row_count(&mut storage, "memories"), 50);
+        assert_eq!(row_count(&mut storage, "engrams"), 0);
+
+        storage.initialize().unwrap();
+
+        // memories must still have all 50 rows
+        assert!(table_exists(&mut storage, "memories"));
+        assert_eq!(row_count(&mut storage, "memories"), 50);
+        // engrams ghost must be gone
+        assert!(!table_exists(&mut storage, "engrams"));
+    }
+
+    #[test]
+    fn migration_normal_rename_works() {
+        // Scenario: first run after rename. engrams has data, memories doesn't exist.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 25);
+
+        assert_eq!(row_count(&mut storage, "engrams"), 25);
+
+        storage.initialize().unwrap();
+
+        assert!(table_exists(&mut storage, "memories"));
+        assert!(!table_exists(&mut storage, "engrams"));
+        assert_eq!(row_count(&mut storage, "memories"), 25);
+    }
+
+    #[test]
+    fn migration_partial_drops_empty_memories_and_renames() {
+        // Scenario: partial previous migration left an empty memories table,
+        // and engrams still has the data.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 30);
+        create_memories_table_with_data(&mut storage, 0); // empty memories
+
+        assert_eq!(row_count(&mut storage, "engrams"), 30);
+        assert_eq!(row_count(&mut storage, "memories"), 0);
+
+        storage.initialize().unwrap();
+
+        assert!(table_exists(&mut storage, "memories"));
+        assert!(!table_exists(&mut storage, "engrams"));
+        assert_eq!(row_count(&mut storage, "memories"), 30);
+    }
+
+    #[test]
+    fn migration_both_have_data_returns_error() {
+        // Scenario: somehow both tables have data. Must refuse to migrate.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 10);
+        create_memories_table_with_data(&mut storage, 20);
+
+        let result = storage.initialize();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("MIGRATION CONFLICT"),
+            "Expected MIGRATION CONFLICT error, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn migration_no_engrams_table_is_noop() {
+        // Scenario: clean install, no engrams table ever existed.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        assert!(table_exists(&mut storage, "memories"));
+        assert!(!table_exists(&mut storage, "engrams"));
     }
 }

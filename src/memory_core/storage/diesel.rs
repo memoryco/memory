@@ -31,6 +31,7 @@ use diesel::pg::PgConnection as DbConnection;
 /// - `postgres` - Uses PostgreSQL, suitable for server/SaaS deployments
 pub struct MemoryStorage {
     conn: DbConnection,
+    db_path: Option<std::path::PathBuf>,
 }
 
 impl MemoryStorage {
@@ -44,6 +45,8 @@ impl MemoryStorage {
         let mut conn = DbConnection::establish(&path_str)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
+        let db_path = Some(std::path::PathBuf::from(path.as_ref()));
+
         // Apply SQLite pragmas for performance
         conn.batch_execute(
             r#"
@@ -55,7 +58,7 @@ impl MemoryStorage {
         )
         .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        Ok(Self { conn })
+        Ok(Self { conn, db_path })
     }
 
     /// Open storage at the given connection URL
@@ -64,7 +67,7 @@ impl MemoryStorage {
         let conn = DbConnection::establish(connection_url)
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        Ok(Self { conn })
+        Ok(Self { conn, db_path: None })
     }
 
     /// Create an in-memory database (for testing) - SQLite only
@@ -76,7 +79,7 @@ impl MemoryStorage {
         conn.batch_execute("PRAGMA foreign_keys = ON;")
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        Ok(Self { conn })
+        Ok(Self { conn, db_path: None })
     }
 
     /// Get mutable reference to the underlying connection
@@ -204,8 +207,56 @@ impl MemoryStorage {
         };
 
         if has_old_table {
-            // Check if 'memories' table already exists
-            let has_new_table: Result<CountResult, _> = diesel::sql_query(
+            // Back up the database before any destructive migration operations.
+            if let Some(ref path) = self.db_path {
+                let backup_path = path.with_extension("db.pre-migration");
+                match std::fs::copy(path, &backup_path) {
+                    Ok(_) => eprintln!("[migration] Backup created at {}", backup_path.display()),
+                    Err(e) => eprintln!("[migration] WARNING: Could not back up database: {}. Proceeding anyway.", e),
+                }
+            } else {
+                eprintln!("[migration] WARNING: About to migrate engrams → memories. Back up your database NOW if you haven't.");
+            }
+
+            // Wrap all destructive operations in a transaction so a crash
+            // mid-migration can't leave the database in a half-migrated state.
+            self.conn
+                .batch_execute("BEGIN IMMEDIATE")
+                .map_err(|e| StorageError::Database(
+                    format!("Failed to start migration transaction: {}", e)
+                ))?;
+
+            // Run the migration body; on error, roll back.
+            let migration_result = self.run_engram_migration_body();
+            match migration_result {
+                Ok(()) => {
+                    self.conn
+                        .batch_execute("COMMIT")
+                        .map_err(|e| StorageError::Database(
+                            format!("Failed to commit migration: {}", e)
+                        ))?;
+                }
+                Err(e) => {
+                    let _ = self.conn.batch_execute("ROLLBACK");
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Inner migration body, called within a transaction by `migrate_engrams_to_memories`.
+    #[cfg(feature = "sqlite")]
+    fn run_engram_migration_body(&mut self) -> StorageResult<()> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        // Check if 'memories' table already exists
+        let has_new_table: Result<CountResult, _> = diesel::sql_query(
                 "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='memories'",
             )
             .get_result(&mut self.conn);
@@ -218,14 +269,18 @@ impl MemoryStorage {
                 )
                 .get_result::<CountResult>(&mut self.conn)
                 .map(|r| r.cnt)
-                .unwrap_or(0);
+                .map_err(|e| StorageError::Database(
+                    format!("Migration aborted: cannot count engrams rows: {}", e)
+                ))?;
 
                 let memory_count: i32 = diesel::sql_query(
                     "SELECT COUNT(*) as cnt FROM memories",
                 )
                 .get_result::<CountResult>(&mut self.conn)
                 .map(|r| r.cnt)
-                .unwrap_or(0);
+                .map_err(|e| StorageError::Database(
+                    format!("Migration aborted: cannot count memories rows: {}", e)
+                ))?;
 
                 if memory_count > 0 && engram_count == 0 {
                     // Migration already completed — memories has the data,
@@ -318,14 +373,18 @@ impl MemoryStorage {
                     )
                     .get_result::<CountResult>(&mut self.conn)
                     .map(|r| r.cnt)
-                    .unwrap_or(0);
+                    .map_err(|e| StorageError::Database(
+                        format!("Migration aborted: cannot count engram_enrichments rows: {}", e)
+                    ))?;
 
                     let new_count: i32 = diesel::sql_query(
                         "SELECT COUNT(*) as cnt FROM memory_enrichments",
                     )
                     .get_result::<CountResult>(&mut self.conn)
                     .map(|r| r.cnt)
-                    .unwrap_or(0);
+                    .map_err(|e| StorageError::Database(
+                        format!("Migration aborted: cannot count memory_enrichments rows: {}", e)
+                    ))?;
 
                     if new_count > 0 && old_count == 0 {
                         // Already migrated, ghost table. Drop the ghost.
@@ -383,7 +442,6 @@ impl MemoryStorage {
                 )
                 .map_err(|e| StorageError::Database(e.to_string()))?;
             eprintln!("[migration] Rebuilding indexes with new names (no data affected)");
-        }
 
         Ok(())
     }
@@ -714,16 +772,15 @@ impl Storage for MemoryStorage {
     }
 
     fn load_memories_by_tag(&mut self, tag: &str) -> StorageResult<Vec<Memory>> {
-        // Tags are stored as JSON array, search with LIKE
+        // Tags are stored as JSON array, search with LIKE using parameterized query
         let pattern = format!("%\"{}%", tag.to_lowercase());
 
-        let rows: Vec<MemoryRow> = memories::table
-            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(&format!(
-                "LOWER(tags) LIKE '{}'",
-                pattern.replace("'", "''")
-            )))
-            .select(MemoryRow::as_select())
-            .load(&mut self.conn)?;
+        let rows: Vec<MemoryRow> = diesel::sql_query(
+            "SELECT id, content, energy, state, confidence, created_at, last_accessed, access_count, tags, embedding FROM memories WHERE LOWER(tags) LIKE ?1"
+        )
+        .bind::<diesel::sql_types::Text, _>(&pattern)
+        .load(&mut self.conn)
+        .map_err(|e| StorageError::Database(e.to_string()))?;
 
         rows.into_iter().map(|row| row.into_memory()).collect()
     }
@@ -2205,5 +2262,196 @@ mod tests {
 
         assert!(table_exists(&mut storage, "memories"));
         assert!(!table_exists(&mut storage, "engrams"));
+    }
+
+    #[test]
+    fn migration_fts_table_rebuilt() {
+        // Scenario: old engram_fts exists with data, migration should rebuild as memory_fts.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 5);
+
+        // Create old FTS table with data
+        storage.conn.batch_execute(r#"
+            CREATE VIRTUAL TABLE engram_fts USING fts5(
+                content,
+                engram_id UNINDEXED,
+                tokenize='porter unicode61'
+            );
+            INSERT INTO engram_fts(content, engram_id) SELECT content, id FROM engrams;
+        "#).unwrap();
+
+        assert!(table_exists(&mut storage, "engram_fts"));
+        assert_eq!(row_count(&mut storage, "engram_fts"), 5);
+
+        storage.initialize().unwrap();
+
+        // engram_fts should be gone, memory_fts should exist with data
+        assert!(!table_exists(&mut storage, "engram_fts"));
+        assert!(table_exists(&mut storage, "memory_fts"));
+        assert_eq!(row_count(&mut storage, "memory_fts"), 5);
+    }
+
+    #[test]
+    fn migration_enrichments_table_renamed() {
+        // Scenario: old engram_enrichments exists with data, should become memory_enrichments.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 3);
+
+        // Create old enrichments table with data
+        storage.conn.batch_execute(r#"
+            CREATE TABLE engram_enrichments (
+                engram_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                source TEXT NOT NULL DEFAULT 'llm',
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (engram_id, seq)
+            );
+        "#).unwrap();
+
+        // Get an engram id to use as FK
+        #[derive(QueryableByName)]
+        struct IdRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            id: String,
+        }
+        let ids: Vec<IdRow> = diesel::sql_query("SELECT id FROM engrams LIMIT 1")
+            .load(&mut storage.conn).unwrap();
+        let eid = &ids[0].id;
+
+        diesel::sql_query(
+            "INSERT INTO engram_enrichments (engram_id, seq, embedding, source, created_at) VALUES (?1, 1, X'00', 'llm', 1000000)"
+        )
+        .bind::<diesel::sql_types::Text, _>(eid)
+        .execute(&mut storage.conn).unwrap();
+
+        assert!(table_exists(&mut storage, "engram_enrichments"));
+        assert_eq!(row_count(&mut storage, "engram_enrichments"), 1);
+
+        storage.initialize().unwrap();
+
+        assert!(!table_exists(&mut storage, "engram_enrichments"));
+        assert!(table_exists(&mut storage, "memory_enrichments"));
+        assert_eq!(row_count(&mut storage, "memory_enrichments"), 1);
+    }
+
+    #[test]
+    fn migration_column_rename_engram_id_to_memory_id() {
+        // Scenario: memory_enrichments exists with old engram_id column name.
+        // Need an engrams table so the main migration triggers, which also
+        // checks for the column rename.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 2);
+
+        // Create memory_enrichments with old column name
+        storage.conn.batch_execute(r#"
+            CREATE TABLE memory_enrichments (
+                engram_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                source TEXT NOT NULL DEFAULT 'llm',
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (engram_id, seq)
+            );
+            INSERT INTO memory_enrichments (engram_id, seq, embedding, source, created_at)
+                VALUES ('test-id', 1, X'00', 'llm', 1000000);
+        "#).unwrap();
+
+        // Verify old column name exists
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        let old_col: CountResult = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('memory_enrichments') WHERE name = 'engram_id'"
+        ).get_result(&mut storage.conn).unwrap();
+        assert_eq!(old_col.cnt, 1, "engram_id column should exist before migration");
+
+        storage.initialize().unwrap();
+
+        // Verify column was renamed
+        let new_col: CountResult = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('memory_enrichments') WHERE name = 'memory_id'"
+        ).get_result(&mut storage.conn).unwrap();
+        assert_eq!(new_col.cnt, 1, "memory_id column should exist after migration");
+
+        let old_col: CountResult = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('memory_enrichments') WHERE name = 'engram_id'"
+        ).get_result(&mut storage.conn).unwrap();
+        assert_eq!(old_col.cnt, 0, "engram_id column should be gone after migration");
+
+        // Data should be preserved
+        assert_eq!(row_count(&mut storage, "memory_enrichments"), 1);
+    }
+
+    #[test]
+    fn migration_idempotent_double_initialize() {
+        // Scenario: initialize() called twice. Second run should succeed
+        // without errors and data should remain intact.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+
+        // First initialize — creates schema from scratch
+        storage.initialize().unwrap();
+
+        // Insert some data between runs
+        let m = Memory::new("Idempotency test memory");
+        storage.save_memory(&m).unwrap();
+        assert_eq!(row_count(&mut storage, "memories"), 1);
+
+        // Second initialize — should be a no-op, not error
+        storage.initialize().unwrap();
+
+        // Data should still be intact
+        assert_eq!(row_count(&mut storage, "memories"), 1);
+        let loaded = storage.load_memory(&m.id).unwrap();
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap().content, "Idempotency test memory");
+    }
+
+    /// Helper: check if an index exists.
+    fn index_exists(storage: &mut MemoryStorage, name: &str) -> bool {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+        let result: CountResult = diesel::sql_query(format!(
+            "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='index' AND name='{}'",
+            name
+        ))
+        .get_result(&mut storage.conn)
+        .unwrap();
+        result.cnt > 0
+    }
+
+    #[test]
+    fn migration_index_cleanup() {
+        // Scenario: old engram-named indexes exist, migration should drop them
+        // and create_schema should recreate them with new names.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        create_old_engrams_table(&mut storage);
+        insert_engram_rows(&mut storage, 3);
+
+        // Create old indexes
+        storage.conn.batch_execute(r#"
+            CREATE INDEX idx_engrams_state ON engrams(state);
+            CREATE INDEX idx_engrams_energy ON engrams(energy);
+        "#).unwrap();
+
+        assert!(index_exists(&mut storage, "idx_engrams_state"));
+        assert!(index_exists(&mut storage, "idx_engrams_energy"));
+
+        storage.initialize().unwrap();
+
+        // Old indexes should be gone
+        assert!(!index_exists(&mut storage, "idx_engrams_state"));
+        assert!(!index_exists(&mut storage, "idx_engrams_energy"));
+        // New indexes should exist (created by create_schema)
+        assert!(index_exists(&mut storage, "idx_memories_state"));
+        assert!(index_exists(&mut storage, "idx_memories_energy"));
     }
 }

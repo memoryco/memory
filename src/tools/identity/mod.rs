@@ -6,8 +6,6 @@ mod list;
 mod remove;
 mod search;
 mod setup;
-// TODO: set.rs needs rework to clear + re-add items
-// mod set;
 
 // Core tools
 pub use get::IdentityGetTool;

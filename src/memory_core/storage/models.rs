@@ -13,7 +13,7 @@ use diesel::prelude::*;
 /// Queryable memory row (SELECT)
 /// Field order MUST match schema.rs column order
 #[allow(dead_code)] // Fields mapped from DB schema
-#[derive(Debug, Clone, Queryable, Selectable)]
+#[derive(Debug, Clone, Queryable, QueryableByName, Selectable)]
 #[diesel(table_name = memories)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct MemoryRow {

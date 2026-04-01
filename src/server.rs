@@ -60,6 +60,8 @@ pub fn run() {
     }
 
     // ── Normal server startup continues below ─────────────────────────────────────
+    eprintln!("MemoryCo v{}", env!("CARGO_PKG_VERSION"));
+
     let memory_home = config::get_memory_home();
     let db_path = memory_home.join("brain.db");
     let identity_db_path = memory_home.join("identity.db");
@@ -68,7 +70,8 @@ pub fn run() {
     let references_dir = memory_home.join("references");
 
     // Ensure directories exist
-    std::fs::create_dir_all(&memory_home).ok();
+    std::fs::create_dir_all(&memory_home)
+        .unwrap_or_else(|e| panic!("Failed to create memory home directory {}: {}", memory_home.display(), e));
     std::fs::create_dir_all(&lenses_dir).ok();
     std::fs::create_dir_all(&references_dir).ok();
     std::fs::create_dir_all(config::get_model_cache_dir()).ok();
@@ -126,15 +129,18 @@ pub fn run() {
     );
 
     // --- Brain ---
-    let mut brain = Brain::open_path(&db_path, brain_config).expect("Failed to open brain");
+    let mut brain = Brain::open_path(&db_path, brain_config)
+        .unwrap_or_else(|e| panic!("Failed to open brain: {}", e));
 
     apply_maintenance(&mut brain);
     expire_sessions(&mut brain);
 
     // --- Identity ---
     let identity_storage =
-        DieselIdentityStorage::open(&identity_db_path).expect("Failed to open identity database");
-    let mut identity = IdentityStore::new(identity_storage).expect("Failed to open identity store");
+        DieselIdentityStorage::open(&identity_db_path)
+            .unwrap_or_else(|e| panic!("Failed to open identity database: {}", e));
+    let mut identity = IdentityStore::new(identity_storage)
+        .unwrap_or_else(|e| panic!("Failed to open identity store: {}", e));
 
     migrate_identity(&brain, &mut identity);
 
@@ -304,116 +310,116 @@ fn build_server() -> Server<Context> {
     // Memory tools
     server
         .add_tool(tools::MemoryCreateTool)
-        .expect("memory_create");
+        .expect("Failed to register tool: memory_create");
     server
         .add_tool(tools::MemoryRecallTool)
-        .expect("memory_recall");
+        .expect("Failed to register tool: memory_recall");
     server
         .add_tool(tools::MemorySearchTool)
-        .expect("memory_search");
-    server.add_tool(tools::MemoryGetTool).expect("memory_get");
+        .expect("Failed to register tool: memory_search");
+    server.add_tool(tools::MemoryGetTool).expect("Failed to register tool: memory_get");
     server
         .add_tool(tools::MemoryDeleteTool)
-        .expect("memory_delete");
+        .expect("Failed to register tool: memory_delete");
     server
         .add_tool(tools::MemoryAssociateTool)
-        .expect("memory_associate");
+        .expect("Failed to register tool: memory_associate");
     server
         .add_tool(tools::MemoryStatsTool)
-        .expect("memory_stats");
+        .expect("Failed to register tool: memory_stats");
     server
         .add_tool(tools::MemoryAssociationsTool)
-        .expect("memory_associations");
+        .expect("Failed to register tool: memory_associations");
     server
         .add_tool(tools::MemoryGraphTool)
-        .expect("memory_graph");
+        .expect("Failed to register tool: memory_graph");
 
     // Identity tools
     server
         .add_tool(tools::IdentityGetTool)
-        .expect("identity_get");
+        .expect("Failed to register tool: identity_get");
     server
         .add_tool(tools::IdentitySearchTool)
-        .expect("identity_search");
+        .expect("Failed to register tool: identity_search");
     server
         .add_tool(tools::IdentityListTool)
-        .expect("identity_list");
+        .expect("Failed to register tool: identity_list");
     server
         .add_tool(tools::IdentityRemoveTool)
-        .expect("identity_remove");
+        .expect("Failed to register tool: identity_remove");
     server
         .add_tool(tools::IdentitySetPersonaNameTool)
-        .expect("identity_set_persona_name");
+        .expect("Failed to register tool: identity_set_persona_name");
     server
         .add_tool(tools::IdentitySetPersonaDescriptionTool)
-        .expect("identity_set_persona_description");
+        .expect("Failed to register tool: identity_set_persona_description");
     server
         .add_tool(tools::IdentityAddTraitTool)
-        .expect("identity_add_trait");
+        .expect("Failed to register tool: identity_add_trait");
     server
         .add_tool(tools::IdentityAddExpertiseTool)
-        .expect("identity_add_expertise");
+        .expect("Failed to register tool: identity_add_expertise");
     server
         .add_tool(tools::IdentityAddToneTool)
-        .expect("identity_add_tone");
+        .expect("Failed to register tool: identity_add_tone");
     server
         .add_tool(tools::IdentityAddDirectiveTool)
-        .expect("identity_add_directive");
+        .expect("Failed to register tool: identity_add_directive");
     server
         .add_tool(tools::IdentityAddValueTool)
-        .expect("identity_add_value");
+        .expect("Failed to register tool: identity_add_value");
     server
         .add_tool(tools::IdentityAddPreferenceTool)
-        .expect("identity_add_preference");
+        .expect("Failed to register tool: identity_add_preference");
     server
         .add_tool(tools::IdentityAddRelationshipTool)
-        .expect("identity_add_relationship");
+        .expect("Failed to register tool: identity_add_relationship");
     server
         .add_tool(tools::IdentityAddAntipatternTool)
-        .expect("identity_add_antipattern");
+        .expect("Failed to register tool: identity_add_antipattern");
     server
         .add_tool(tools::IdentitySetupTool)
-        .expect("identity_setup");
+        .expect("Failed to register tool: identity_setup");
 
     // Config tools
-    server.add_tool(tools::ConfigGetTool).expect("config_get");
-    server.add_tool(tools::ConfigSetTool).expect("config_set");
+    server.add_tool(tools::ConfigGetTool).expect("Failed to register tool: config_get");
+    server.add_tool(tools::ConfigSetTool).expect("Failed to register tool: config_set");
 
     // Lens tools
-    server.add_tool(tools::LensesListTool).expect("lenses_list");
-    server.add_tool(tools::LensesGetTool).expect("lenses_get");
+    server.add_tool(tools::LensesListTool).expect("Failed to register tool: lenses_list");
+    server.add_tool(tools::LensesGetTool).expect("Failed to register tool: lenses_get");
 
     // Reference tools
     server
         .add_tool(tools::ReferenceListTool)
-        .expect("reference_list");
+        .expect("Failed to register tool: reference_list");
     server
         .add_tool(tools::ReferenceSearchTool)
-        .expect("reference_search");
+        .expect("Failed to register tool: reference_search");
     server
         .add_tool(tools::ReferenceGetTool)
-        .expect("reference_get");
+        .expect("Failed to register tool: reference_get");
     server
         .add_tool(tools::ReferenceSectionsTool)
-        .expect("reference_sections");
+        .expect("Failed to register tool: reference_sections");
     server
         .add_tool(tools::ReferenceCitationTool)
-        .expect("reference_citation");
+        .expect("Failed to register tool: reference_citation");
 
     // Instructions tool
     server
         .add_tool(tools::InstructionsTool)
-        .expect("instructions");
+        .expect("Failed to register tool: instructions");
 
     // Date tools
     server
         .add_tool(tools::DateResolveTool)
-        .expect("date_resolve");
+        .expect("Failed to register tool: date_resolve");
 
     // UI tools
     server
         .add_tool(tools::OpenDashboardTool)
-        .expect("open_dashboard");
+        .expect("Failed to register tool: open_dashboard");
 
     server
 }

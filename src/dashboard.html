@@ -855,11 +855,11 @@
   // Build a fingerprint of what the user can actually see.
   // Ignores sub-percent energy drift that doesn't change the displayed value.
   function visualFingerprint(data) {
-    var memorys = data.memorys || [];
+    var memories = data.memories || [];
     var stats = data.stats;
     var parts = [];
-    for (var i = 0; i < memorys.length; i++) {
-      var e = memorys[i];
+    for (var i = 0; i < memories.length; i++) {
+      var e = memories[i];
       parts.push(e.id + ':' + Math.round((e.energy || 0) * 100) + ':' + (e.access_count || 0) + ':' + (e.state || ''));
     }
     if (stats) {
@@ -910,7 +910,7 @@
     var html = '';
     if (stats) {
       var total = stats.total || ((stats.active || 0) + (stats.dormant || 0) + (stats.deep || 0) + (stats.archived || 0));
-      html += row('memorys', total, 'var(--text-muted)');
+      html += row('memories', total, 'var(--text-muted)');
       html += row('active', stats.active || 0, 'var(--accent-emerald)');
       html += row('dormant', stats.dormant || 0, 'var(--accent-amber)');
       html += row('deep', stats.deep || 0, 'var(--accent-violet)');
@@ -1685,7 +1685,7 @@
 
   function loadAssociations(memoryId, container) {
     container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">Loading...</div>';
-    apiFetch('/api/memorys/' + memoryId + '/associations').then(function(data) {
+    apiFetch('/api/memories/' + memoryId + '/associations').then(function(data) {
       var assocs = data.associations || [];
       if (assocs.length === 0) {
         container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">No associations</div>';
@@ -1776,7 +1776,7 @@
       return;
     }
 
-    var memorys = memoryData.memorys || [];
+    var memories = memoryData.memories || [];
     var stats = memoryData.stats || lastMemoryStats;
     if (memoryData.stats) {
       lastMemoryStats = memoryData.stats;
@@ -1803,7 +1803,7 @@
 
     // Filter by state if a filter is active
     if (memoryFilter) {
-      memorys = memorys.filter(function(e) {
+      memories = memories.filter(function(e) {
         return stateName(e.state) === memoryFilter;
       });
     }
@@ -1812,7 +1812,7 @@
     var searchInput = document.getElementById('memory-search');
     var isSearchActive = searchInput && searchInput.value.trim().length > 0;
     if (!isSearchActive) {
-      memorys.sort(function(a, b) {
+      memories.sort(function(a, b) {
         if (memoryFilter === 'Dormant' || memoryFilter === 'Deep') {
           // Sort by energy descending first, then access_count descending
           if (b.energy !== a.energy) return b.energy - a.energy;
@@ -1825,7 +1825,7 @@
       });
     }
 
-    if (memorys.length === 0) {
+    if (memories.length === 0) {
       var emptyHtml = '<div class="empty-state" style="min-height:30vh"><div class="icon">\u{1F9E0}</div><div class="message">No memories found</div><div class="hint">memories are created through AI conversations</div></div>';
       var temp = document.createElement('div');
       temp.innerHTML = emptyHtml;
@@ -1835,13 +1835,13 @@
     }
 
     var html = '';
-    var totalFiltered = memoryData.total_filtered || memorys.length;
+    var totalFiltered = memoryData.total_filtered || memories.length;
     if (totalFiltered > 0) {
-      html += '<div style="font-family:\'JetBrains Mono\',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:0.75rem;">Showing ' + memorys.length + ' of ' + totalFiltered + '</div>';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:0.75rem;">Showing ' + memories.length + ' of ' + totalFiltered + '</div>';
     }
 
     html += '<div class="memory-grid">';
-    memorys.forEach(function(memory) {
+    memories.forEach(function(memory) {
       html += renderMemory(memory);
     });
     html += '</div>';
@@ -1902,13 +1902,13 @@
   };
 
   window.loadMore = function() {
-    var current = memoryData ? (memoryData.memorys || []).length : 0;
+    var current = memoryData ? (memoryData.memories || []).length : 0;
     memoryOffset = current;
     fetchMemories(true);
   };
 
   window.deleteMemory = function(id) {
-    apiFetch('/api/memorys/' + id, { method: 'DELETE' }).then(function() {
+    apiFetch('/api/memories/' + id, { method: 'DELETE' }).then(function() {
       showToast('Memory deleted');
       lastVisualFingerprint = null;
       fetchMemories();
@@ -1920,16 +1920,16 @@
   function fetchMemories(append) {
     var q = document.getElementById('memory-search');
     var query = q ? q.value.trim() : '';
-    var url = '/api/memorys?limit=50&include_archived=true&include_deep=true';
+    var url = '/api/memories?limit=50&include_archived=true&include_deep=true';
     if (query) url += '&q=' + encodeURIComponent(query);
     if (memoryFilter) url += '&state=' + encodeURIComponent(memoryFilter);
     if (memoryOffset > 0) url += '&offset=' + memoryOffset;
 
     apiFetch(url).then(function(data) {
       if (append && memoryData) {
-        var existing = memoryData.memorys || [];
-        var newMemorys = data.memorys || [];
-        data.memorys = existing.concat(newMemorys);
+        var existing = memoryData.memories || [];
+        var newMemories = data.memories || [];
+        data.memories = existing.concat(newMemories);
       }
       // Visual fingerprint: only re-render if what the user sees actually changed.
       // Raw energy floats drift with decay but often round to the same display value.

@@ -135,7 +135,7 @@ fn route(method: &str, url: &str, mut request: tiny_http::Request, state: &Arc<D
         // Updates
         ("GET", "/api/updates") => handle_check_updates(),
 
-        // Memorys
+        // Memories
         ("GET", "/api/memories") => handle_list_memories(query, state),
 
         // Graph

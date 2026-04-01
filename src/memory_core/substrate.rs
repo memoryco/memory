@@ -320,13 +320,18 @@ impl Substrate {
         }
     }
 
-    /// Manually create an association between two memories
+    /// Manually create or update an association between two memories.
+    /// If an edge from→to already exists, updates its weight and ordinal
+    /// instead of creating a duplicate parallel edge.
     pub fn associate(&mut self, from: MemoryId, to: MemoryId, weight: f64, ordinal: Option<u32>) {
-        let assoc = Association::with_ordinal(from, to, weight, ordinal);
-
-        self.associations.entry(from).or_default().push(assoc);
-
-        self.reverse_associations.entry(to).or_default().push(from);
+        let assocs = self.associations.entry(from).or_default();
+        if let Some(existing) = assocs.iter_mut().find(|a| a.to == to) {
+            existing.weight = weight.clamp(0.0, 1.0);
+            existing.ordinal = ordinal;
+        } else {
+            assocs.push(Association::with_ordinal(from, to, weight, ordinal));
+            self.reverse_associations.entry(to).or_default().push(from);
+        }
     }
 
     /// Create an association only if one does not already exist between from→to.
@@ -1359,5 +1364,56 @@ mod tests {
         assert_eq!(ba.len(), 1);
         assert_eq!(ab[0].to, b);
         assert_eq!(ba[0].to, a);
+    }
+
+    #[test]
+    fn associate_deduplicates_parallel_edges() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        // Call associate() twice with the same (from, to)
+        substrate.associate(a, b, 0.5, None);
+        substrate.associate(a, b, 0.8, None);
+
+        // Should have exactly 1 edge, not 2
+        let assocs = substrate.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1, "duplicate edge should not be created");
+        assert_eq!(assocs[0].weight, 0.8, "weight should be updated to latest");
+    }
+
+    #[test]
+    fn associate_updates_ordinal_on_existing_edge() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        substrate.associate(a, b, 0.5, None);
+        assert!(substrate.associations_from(&a).unwrap()[0].ordinal.is_none());
+
+        // Re-associate with an ordinal
+        substrate.associate(a, b, 0.5, Some(3));
+        let assocs = substrate.associations_from(&a).unwrap();
+        assert_eq!(assocs.len(), 1);
+        assert_eq!(assocs[0].ordinal, Some(3));
+    }
+
+    #[test]
+    fn associate_no_duplicate_in_find_associated() {
+        let mut substrate = Substrate::new();
+        let a = substrate.create("memory A");
+        let b = substrate.create("memory B");
+
+        substrate.associate(a, b, 0.5, None);
+        substrate.associate(a, b, 0.8, None);
+
+        // find_associated should return b exactly once, not twice
+        let associated = substrate.find_associated(&a);
+        assert_eq!(
+            associated.len(),
+            1,
+            "find_associated should not return duplicates"
+        );
+        assert_eq!(associated[0].0.id, b);
     }
 }

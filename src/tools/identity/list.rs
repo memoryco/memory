@@ -26,9 +26,8 @@ impl Tool<Context> for IdentityListTool {
                     "type": "string",
                     "description": "The type of identity item to list",
                     "enum": [
-                        "persona_name", "persona_description", "trait",
-                        "value", "preference", "relationship", "antipattern",
-                        "expertise", "tone", "directive"
+                        "persona_name", "persona_description",
+                        "value", "preference", "relationship", "rule"
                     ]
                 }
             },
@@ -88,14 +87,10 @@ fn parse_item_type(s: &str) -> Option<IdentityItemType> {
     match s {
         "persona_name" => Some(IdentityItemType::PersonaName),
         "persona_description" => Some(IdentityItemType::PersonaDescription),
-        "trait" => Some(IdentityItemType::Trait),
         "value" => Some(IdentityItemType::Value),
         "preference" => Some(IdentityItemType::Preference),
         "relationship" => Some(IdentityItemType::Relationship),
-        "antipattern" => Some(IdentityItemType::Antipattern),
-        "expertise" => Some(IdentityItemType::Expertise),
-        "tone" => Some(IdentityItemType::Tone),
-        "directive" => Some(IdentityItemType::Directive),
+        "rule" => Some(IdentityItemType::Rule),
         _ => None,
     }
 }

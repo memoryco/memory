@@ -112,201 +112,6 @@ impl Tool<Context> for IdentitySetPersonaDescriptionTool {
 }
 
 // ================================
-// SIMPLE STRING TYPES
-// ================================
-
-pub struct IdentityAddTraitTool;
-
-impl Tool<Context> for IdentityAddTraitTool {
-    fn name(&self) -> &str {
-        "identity_add_trait"
-    }
-
-    fn description(&self) -> &str {
-        "Add a personality trait."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "properties": {
-                "trait": {
-                    "type": "string",
-                    "description": "The trait to add (e.g., 'direct', 'curious', 'pragmatic')"
-                }
-            },
-            "required": ["trait"]
-        })
-    }
-
-    fn execute(
-        &self,
-        args: JsonValue,
-        context: &mut Context,
-        _env: &ToolEnv,
-    ) -> sml_mcps::Result<CallToolResult> {
-        let trait_name = args
-            .get("trait")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("trait is required".into()))?;
-
-        let warning = classification_warning(trait_name, IdentityField::Trait);
-
-        let mut store = context.identity.lock().unwrap();
-        let id = store
-            .add_trait(trait_name)
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-        let mut msg = format!("Added trait: \"{}\" [{}]", trait_name, id);
-        if let Some(w) = warning {
-            msg = format!("⚠️ {}\n\n{}", w, msg);
-        }
-        Ok(text_response(msg))
-    }
-}
-
-pub struct IdentityAddExpertiseTool;
-
-impl Tool<Context> for IdentityAddExpertiseTool {
-    fn name(&self) -> &str {
-        "identity_add_expertise"
-    }
-
-    fn description(&self) -> &str {
-        "Add an area of expertise."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "properties": {
-                "area": {
-                    "type": "string",
-                    "description": "The area of expertise (e.g., 'Rust', 'distributed systems')"
-                }
-            },
-            "required": ["area"]
-        })
-    }
-
-    fn execute(
-        &self,
-        args: JsonValue,
-        context: &mut Context,
-        _env: &ToolEnv,
-    ) -> sml_mcps::Result<CallToolResult> {
-        let area = args
-            .get("area")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("area is required".into()))?;
-
-        let warning = classification_warning(area, IdentityField::Expertise);
-
-        let mut store = context.identity.lock().unwrap();
-        let id = store
-            .add_expertise(area)
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-        let mut msg = format!("Added expertise: \"{}\" [{}]", area, id);
-        if let Some(w) = warning {
-            msg = format!("⚠️ {}\n\n{}", w, msg);
-        }
-        Ok(text_response(msg))
-    }
-}
-
-pub struct IdentityAddToneTool;
-
-impl Tool<Context> for IdentityAddToneTool {
-    fn name(&self) -> &str {
-        "identity_add_tone"
-    }
-
-    fn description(&self) -> &str {
-        "Add a communication tone."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "properties": {
-                "tone": {
-                    "type": "string",
-                    "description": "The tone to add (e.g., 'direct', 'friendly', 'technical')"
-                }
-            },
-            "required": ["tone"]
-        })
-    }
-
-    fn execute(
-        &self,
-        args: JsonValue,
-        context: &mut Context,
-        _env: &ToolEnv,
-    ) -> sml_mcps::Result<CallToolResult> {
-        let tone = args
-            .get("tone")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("tone is required".into()))?;
-
-        let mut store = context.identity.lock().unwrap();
-        let id = store
-            .add_tone(tone)
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-        Ok(text_response(format!("Added tone: \"{}\" [{}]", tone, id)))
-    }
-}
-
-pub struct IdentityAddDirectiveTool;
-
-impl Tool<Context> for IdentityAddDirectiveTool {
-    fn name(&self) -> &str {
-        "identity_add_directive"
-    }
-
-    fn description(&self) -> &str {
-        "Add a communication directive."
-    }
-
-    fn schema(&self) -> JsonValue {
-        json!({
-            "type": "object",
-            "properties": {
-                "directive": {
-                    "type": "string",
-                    "description": "The directive to add"
-                }
-            },
-            "required": ["directive"]
-        })
-    }
-
-    fn execute(
-        &self,
-        args: JsonValue,
-        context: &mut Context,
-        _env: &ToolEnv,
-    ) -> sml_mcps::Result<CallToolResult> {
-        let directive = args
-            .get("directive")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("directive is required".into()))?;
-
-        let mut store = context.identity.lock().unwrap();
-        let id = store
-            .add_directive(directive)
-            .map_err(|e| McpError::ToolError(e.to_string()))?;
-
-        Ok(text_response(format!(
-            "Added directive: \"{}\" [{}]",
-            directive, id
-        )))
-    }
-}
-
-// ================================
 // STRUCTURED TYPES
 // ================================
 
@@ -500,35 +305,40 @@ impl Tool<Context> for IdentityAddRelationshipTool {
     }
 }
 
-pub struct IdentityAddAntipatternTool;
+pub struct IdentityAddRuleTool;
 
-impl Tool<Context> for IdentityAddAntipatternTool {
+impl Tool<Context> for IdentityAddRuleTool {
     fn name(&self) -> &str {
-        "identity_add_antipattern"
+        "identity_add_rule"
     }
 
     fn description(&self) -> &str {
-        "Add an antipattern."
+        "Add a behavioral rule. Set `negative: true` for 'don't' rules (rendered under Don't:), \
+         or omit / set `negative: false` for 'do' rules (rendered under Do:)."
     }
 
     fn schema(&self) -> JsonValue {
         json!({
             "type": "object",
             "properties": {
-                "avoid": {
+                "content": {
                     "type": "string",
-                    "description": "What to avoid"
+                    "description": "The rule — either 'do X' or 'don't do X'"
                 },
                 "instead": {
                     "type": "string",
-                    "description": "What to do instead (optional)"
+                    "description": "What to do instead (for negative rules) or additional context (optional)"
                 },
                 "why": {
                     "type": "string",
-                    "description": "Why this should be avoided (optional)"
+                    "description": "Why this rule matters — enables judgment in edge cases (optional)"
+                },
+                "negative": {
+                    "type": "boolean",
+                    "description": "True for 'don't' rules, false for 'do' rules (default: false)"
                 }
             },
-            "required": ["avoid"]
+            "required": ["content"]
         })
     }
 
@@ -538,21 +348,25 @@ impl Tool<Context> for IdentityAddAntipatternTool {
         context: &mut Context,
         _env: &ToolEnv,
     ) -> sml_mcps::Result<CallToolResult> {
-        let avoid = args
-            .get("avoid")
+        let content = args
+            .get("content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| McpError::InvalidParams("avoid is required".into()))?;
+            .ok_or_else(|| McpError::InvalidParams("content is required".into()))?;
         let instead = args.get("instead").and_then(|v| v.as_str());
         let why = args.get("why").and_then(|v| v.as_str());
+        let negative = args
+            .get("negative")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        let warning = classification_warning(avoid, IdentityField::Antipattern);
+        let warning = classification_warning(content, IdentityField::Rule);
 
         let mut store = context.identity.lock().unwrap();
         let id = store
-            .add_antipattern(avoid, instead, why)
+            .add_rule(content, instead, why, negative)
             .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-        let mut msg = format!("Added antipattern: \"{}\" [{}]", avoid, id);
+        let mut msg = format!("Added rule: \"{}\" [{}]", content, id);
         if let Some(w) = warning {
             msg = format!("⚠️ {}\n\n{}", w, msg);
         }

@@ -282,6 +282,7 @@ fn migrate_identity(brain: &Brain, identity: &mut IdentityStore) {
             eprintln!("Migrated {} identity items to new storage", items);
         }
         Ok(crate::identity::MigrationResult::AlreadyMigrated) => {}
+        Ok(crate::identity::MigrationResult::NotNeeded) => {}
         Err(e) => eprintln!("Warning: Failed to migrate identity: {}", e),
     }
 }
@@ -354,18 +355,6 @@ fn build_server() -> Server<Context> {
         .add_tool(tools::IdentitySetPersonaDescriptionTool)
         .expect("Failed to register tool: identity_set_persona_description");
     server
-        .add_tool(tools::IdentityAddTraitTool)
-        .expect("Failed to register tool: identity_add_trait");
-    server
-        .add_tool(tools::IdentityAddExpertiseTool)
-        .expect("Failed to register tool: identity_add_expertise");
-    server
-        .add_tool(tools::IdentityAddToneTool)
-        .expect("Failed to register tool: identity_add_tone");
-    server
-        .add_tool(tools::IdentityAddDirectiveTool)
-        .expect("Failed to register tool: identity_add_directive");
-    server
         .add_tool(tools::IdentityAddValueTool)
         .expect("Failed to register tool: identity_add_value");
     server
@@ -375,8 +364,8 @@ fn build_server() -> Server<Context> {
         .add_tool(tools::IdentityAddRelationshipTool)
         .expect("Failed to register tool: identity_add_relationship");
     server
-        .add_tool(tools::IdentityAddAntipatternTool)
-        .expect("Failed to register tool: identity_add_antipattern");
+        .add_tool(tools::IdentityAddRuleTool)
+        .expect("Failed to register tool: identity_add_rule");
     server
         .add_tool(tools::IdentitySetupTool)
         .expect("Failed to register tool: identity_setup");

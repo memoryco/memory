@@ -16,14 +16,10 @@ pub enum IdentityItemType {
     PersonaDescription,
 
     // List types
-    Trait,
     Value,
     Preference,
     Relationship,
-    Antipattern,
-    Expertise,
-    Tone,
-    Directive,
+    Rule,
 }
 
 impl IdentityItemType {
@@ -33,14 +29,10 @@ impl IdentityItemType {
         &[
             PersonaName,
             PersonaDescription,
-            Trait,
             Value,
             Preference,
             Relationship,
-            Antipattern,
-            Expertise,
-            Tone,
-            Directive,
+            Rule,
         ]
     }
 }
@@ -50,14 +42,10 @@ impl fmt::Display for IdentityItemType {
         let s = match self {
             IdentityItemType::PersonaName => "persona_name",
             IdentityItemType::PersonaDescription => "persona_description",
-            IdentityItemType::Trait => "trait",
             IdentityItemType::Value => "value",
             IdentityItemType::Preference => "preference",
             IdentityItemType::Relationship => "relationship",
-            IdentityItemType::Antipattern => "antipattern",
-            IdentityItemType::Expertise => "expertise",
-            IdentityItemType::Tone => "tone",
-            IdentityItemType::Directive => "directive",
+            IdentityItemType::Rule => "rule",
         };
         write!(f, "{}", s)
     }
@@ -70,14 +58,14 @@ impl FromStr for IdentityItemType {
         match s {
             "persona_name" => Ok(IdentityItemType::PersonaName),
             "persona_description" => Ok(IdentityItemType::PersonaDescription),
-            "trait" => Ok(IdentityItemType::Trait),
             "value" => Ok(IdentityItemType::Value),
             "preference" => Ok(IdentityItemType::Preference),
             "relationship" => Ok(IdentityItemType::Relationship),
-            "antipattern" => Ok(IdentityItemType::Antipattern),
-            "expertise" => Ok(IdentityItemType::Expertise),
-            "tone" => Ok(IdentityItemType::Tone),
-            "directive" => Ok(IdentityItemType::Directive),
+            "rule" => Ok(IdentityItemType::Rule),
+            // Legacy type strings — accepted for reading old database rows during migration
+            "trait" | "tone" | "expertise" | "directive" | "antipattern" => {
+                Err(format!("Legacy identity item type '{}' requires migration", s))
+            }
             _ => Err(format!("Unknown identity item type: {}", s)),
         }
     }

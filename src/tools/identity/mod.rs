@@ -16,14 +16,6 @@ pub use setup::IdentitySetupTool;
 
 // Typed add tools
 pub use add_typed::{
-    IdentityAddAntipatternTool,
-    IdentityAddDirectiveTool,
-    IdentityAddExpertiseTool,
-    IdentityAddPreferenceTool,
-    IdentityAddRelationshipTool,
-    IdentityAddToneTool,
-    IdentityAddTraitTool,
-    IdentityAddValueTool,
-    IdentitySetPersonaDescriptionTool,
-    IdentitySetPersonaNameTool,
+    IdentityAddPreferenceTool, IdentityAddRelationshipTool, IdentityAddRuleTool,
+    IdentityAddValueTool, IdentitySetPersonaDescriptionTool, IdentitySetPersonaNameTool,
 };

@@ -409,17 +409,19 @@ fn handle_identity_add(
     let mut identity = state.identity.lock().unwrap();
 
     let result = match item_type {
-        "trait" => identity.add_trait(content),
         "value" => identity.add_value(content, secondary, category),
         "preference" => identity.add_preference(content, secondary, category),
         "relationship" => {
             let relation = secondary.unwrap_or("");
             identity.add_relationship(content, relation, category)
         }
-        "antipattern" => identity.add_antipattern(content, secondary, tertiary),
-        "tone" => identity.add_tone(content),
-        "directive" => identity.add_directive(content),
-        "expertise" => identity.add_expertise(content),
+        "rule" => {
+            let negative = parsed
+                .get("negative")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            identity.add_rule(content, secondary, tertiary, negative)
+        }
         _ => {
             return json_response(
                 400,

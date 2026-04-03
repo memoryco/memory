@@ -958,14 +958,10 @@
   }
 
   var IDENTITY_SECTIONS = [
-    { key: 'traits', label: 'Traits', type: 'trait', path: 'persona.traits', fields: [{name:'content',placeholder:'e.g. pragmatic, curious'}] },
     { key: 'values', label: 'Values', type: 'value', path: 'values', fields: [{name:'content',placeholder:'Principle'},{name:'secondary',placeholder:'Why (optional)'},{name:'category',placeholder:'Category (optional)'}] },
     { key: 'preferences', label: 'Preferences', type: 'preference', path: 'preferences', fields: [{name:'content',placeholder:'Prefer'},{name:'secondary',placeholder:'Over (optional)'},{name:'category',placeholder:'Category (optional)'}] },
     { key: 'relationships', label: 'Relationships', type: 'relationship', path: 'relationships', fields: [{name:'content',placeholder:'Entity'},{name:'secondary',placeholder:'Relation'},{name:'category',placeholder:'Context (optional)'}] },
-    { key: 'antipatterns', label: 'Antipatterns', type: 'antipattern', path: 'antipatterns', fields: [{name:'content',placeholder:'Avoid'},{name:'secondary',placeholder:'Instead (optional)'},{name:'tertiary',placeholder:'Why (optional)'}] },
-    { key: 'tones', label: 'Tones', type: 'tone', path: 'communication.tone', fields: [{name:'content',placeholder:'e.g. direct, warm'}] },
-    { key: 'directives', label: 'Directives', type: 'directive', path: 'communication.directives', fields: [{name:'content',placeholder:'Communication directive'}] },
-    { key: 'expertise', label: 'Expertise', type: 'expertise', path: 'expertise', fields: [{name:'content',placeholder:'e.g. Rust, distributed systems'}] },
+    { key: 'rules', label: 'Rules', type: 'rule', path: 'rules', fields: [{name:'content',placeholder:'Rule (do X / don\'t do X)'},{name:'secondary',placeholder:'Instead (optional)'},{name:'tertiary',placeholder:'Why (optional)'},{name:'negative',type:'checkbox',label:'Negative (don\'t)'}] },
   ];
 
   function getNestedValue(obj, path) {
@@ -999,10 +995,12 @@
       displayText = '<strong>' + escapeHtml(item.entity) + '</strong>: ' + escapeHtml(item.relation);
       if (item.context) displayText += ' <span class="item-detail">(' + escapeHtml(truncate(item.context, 60)) + ')</span>';
       itemId = findItemIdBySecondary('relationship', item.entity, item.relation || null);
-    } else if (section.type === 'antipattern') {
-      displayText = escapeHtml(item.avoid);
+    } else if (section.type === 'rule') {
+      var prefix = item.negative ? '✗ ' : '• ';
+      displayText = prefix + escapeHtml(item.content);
       if (item.instead) displayText += ' <span class="item-detail">&rarr; ' + escapeHtml(item.instead) + '</span>';
-      itemId = findItemIdBySecondary('antipattern', item.avoid, item.instead || null);
+      if (item.why) displayText += ' <span class="item-detail">(' + escapeHtml(item.why) + ')</span>';
+      itemId = findItemIdBySecondary('rule', item.content, item.instead || null);
     }
 
     var delAttr = itemId ? ' onclick="deleteIdentityItem(\'' + escapeHtml(itemId) + '\')"' : '';
@@ -1043,7 +1041,11 @@
       // Inline add form
       html += '<div class="inline-form" id="add-form-' + sectionIdx + '">';
       section.fields.forEach(function(field) {
-        html += '<input placeholder="' + escapeHtml(field.placeholder) + '" data-field="' + field.name + '">';
+        if (field.type === 'checkbox') {
+          html += '<label style="display:flex;align-items:center;gap:6px;font-size:0.85em;color:var(--muted)"><input type="checkbox" data-field="' + field.name + '" data-type="bool"> ' + escapeHtml(field.label) + '</label>';
+        } else {
+          html += '<input placeholder="' + escapeHtml(field.placeholder) + '" data-field="' + field.name + '">';
+        }
       });
       html += '<button class="btn btn-primary" onclick="addIdentityItem(' + sectionIdx + ')">Add</button>';
       html += '<button class="btn btn-ghost" onclick="toggleAddForm(' + sectionIdx + ')">Cancel</button>';
@@ -1113,8 +1115,12 @@
 
     inputs.forEach(function(inp) {
       var field = inp.getAttribute('data-field');
-      var val = inp.value.trim();
-      if (val) body[field] = val;
+      if (inp.getAttribute('data-type') === 'bool') {
+        body[field] = inp.checked;
+      } else {
+        var val = inp.value.trim();
+        if (val) body[field] = val;
+      }
     });
 
     if (!body.content) {

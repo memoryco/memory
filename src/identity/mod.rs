@@ -15,7 +15,4 @@ pub use classifier::{IdentityField, classify};
 pub use storage::{DieselIdentityStorage, IdentityItemType};
 pub use store::{IdentityStore, ListedItem, MigrationResult};
 #[allow(unused_imports)] // Public API surface — used by consumers of the crate
-pub use types::{
-    Antipattern, CommunicationStyle, Identity, IdentitySearchResults, Persona, Preference,
-    Relationship, Value,
-};
+pub use types::{Identity, IdentitySearchResults, Persona, Preference, Relationship, Rule, Value};

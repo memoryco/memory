@@ -35,23 +35,19 @@ pub use memory::{
 };
 
 pub use identity::{
-    IdentityAddAntipatternTool,
-    IdentityAddDirectiveTool,
-    IdentityAddExpertiseTool,
-    IdentityAddPreferenceTool,
-    IdentityAddRelationshipTool,
-    IdentityAddToneTool,
-    IdentityAddTraitTool,
-    IdentityAddValueTool,
     // Core identity tools
     IdentityGetTool,
     IdentityListTool,
     IdentityRemoveTool,
     IdentitySearchTool,
-    IdentitySetPersonaDescriptionTool,
-    // Typed add tools
-    IdentitySetPersonaNameTool,
     IdentitySetupTool,
+    // Typed add tools
+    IdentityAddPreferenceTool,
+    IdentityAddRelationshipTool,
+    IdentityAddRuleTool,
+    IdentityAddValueTool,
+    IdentitySetPersonaDescriptionTool,
+    IdentitySetPersonaNameTool,
 };
 
 pub use config::{ConfigGetTool, ConfigSetTool};

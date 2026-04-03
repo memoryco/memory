@@ -92,22 +92,12 @@ impl Tool<Context> for IdentitySearchTool {
             output.push('\n');
         }
 
-        if !results.antipatterns.is_empty() {
-            output.push_str("Antipatterns:\n");
-            for a in results.antipatterns {
-                output.push_str(&format!("  ✗ {}\n", a.avoid));
+        if !results.rules.is_empty() {
+            output.push_str("Rules:\n");
+            for r in results.rules {
+                output.push_str(&format!("  • {}\n", r.content));
             }
             output.push('\n');
-        }
-
-        if !results.expertise.is_empty() {
-            let exp: Vec<&str> = results.expertise.iter().map(|s| s.as_str()).collect();
-            output.push_str(&format!("Expertise: {}\n", exp.join(", ")));
-        }
-
-        if !results.traits.is_empty() {
-            let traits: Vec<&str> = results.traits.iter().map(|s| s.as_str()).collect();
-            output.push_str(&format!("Traits: {}\n", traits.join(", ")));
         }
 
         Ok(text_response(output))

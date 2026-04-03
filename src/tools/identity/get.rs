@@ -65,7 +65,7 @@ impl Tool<Context> for IdentityGetTool {
 
             let mut text = identity.render();
 
-            if identity.persona.name.is_empty() {
+            if identity.persona.name.is_empty() && identity.persona.description.is_empty() {
                 text.insert_str(
                     0,
                     "No persona is currently configured. \
@@ -117,7 +117,7 @@ mod tests {
         let identity = store.get().unwrap();
         let mut output = identity.render();
 
-        if identity.persona.name.is_empty() {
+        if identity.persona.name.is_empty() && identity.persona.description.is_empty() {
             output.insert_str(
                 0,
                 "No persona is currently configured. \
@@ -147,7 +147,7 @@ mod tests {
         let identity = store.get().unwrap();
         let mut output = identity.render();
 
-        if identity.persona.name.is_empty() {
+        if identity.persona.name.is_empty() && identity.persona.description.is_empty() {
             output.push_str("identity_setup hint");
         }
 
@@ -156,6 +156,30 @@ mod tests {
             "Populated identity should NOT hint about setup"
         );
         assert!(output.contains("Porter"), "Should render the persona name");
+    }
+
+    #[test]
+    fn get_description_only_identity_no_hint() {
+        let mut store = test_store();
+        store
+            .set_persona_description("A pragmatic assistant with deep Rust expertise")
+            .unwrap();
+
+        let identity = store.get().unwrap();
+        let mut output = identity.render();
+
+        if identity.persona.name.is_empty() && identity.persona.description.is_empty() {
+            output.push_str("identity_setup hint");
+        }
+
+        assert!(
+            !output.contains("identity_setup"),
+            "Description-only identity should NOT hint about setup"
+        );
+        assert!(
+            output.contains("pragmatic assistant"),
+            "Should render the description"
+        );
     }
 
     // --- Args deserialization ---

@@ -65,6 +65,12 @@ impl DieselIdentityStorage {
         Ok(Self { conn })
     }
 
+    /// Get mutable reference to the underlying connection (for testing)
+    #[cfg(test)]
+    pub fn conn_mut(&mut self) -> &mut DbConnection {
+        &mut self.conn
+    }
+
     /// Create the database schema (SQLite)
     #[cfg(feature = "sqlite")]
     fn create_schema(&mut self) -> StorageResult<()> {
@@ -186,6 +192,62 @@ impl IdentityStorage for DieselIdentityStorage {
         Ok(deleted)
     }
 
+    fn list_items_by_type_str(&mut self, type_str: &str) -> StorageResult<Vec<IdentityItemRow>> {
+        let rows = identity_items::table
+            .filter(identity_items::item_type.eq(type_str))
+            .order(identity_items::created_at.asc())
+            .select(IdentityItemRow::as_select())
+            .load(&mut self.conn)?;
+        Ok(rows)
+    }
+
+    fn update_item_type(&mut self, old_type: &str, new_type: &str) -> StorageResult<usize> {
+        let updated = diesel::update(
+            identity_items::table.filter(identity_items::item_type.eq(old_type)),
+        )
+        .set(identity_items::item_type.eq(new_type))
+        .execute(&mut self.conn)?;
+        Ok(updated)
+    }
+
+    fn update_item_type_with_category(
+        &mut self,
+        old_type: &str,
+        new_type: &str,
+        category: Option<&str>,
+    ) -> StorageResult<usize> {
+        let updated = diesel::update(
+            identity_items::table.filter(identity_items::item_type.eq(old_type)),
+        )
+        .set((
+            identity_items::item_type.eq(new_type),
+            identity_items::category.eq(category),
+        ))
+        .execute(&mut self.conn)?;
+        Ok(updated)
+    }
+
+    fn begin_transaction(&mut self) -> StorageResult<()> {
+        self.conn
+            .batch_execute("BEGIN IMMEDIATE")
+            .map_err(|e| StorageError::Database(format!("Failed to begin transaction: {}", e)))?;
+        Ok(())
+    }
+
+    fn commit_transaction(&mut self) -> StorageResult<()> {
+        self.conn
+            .batch_execute("COMMIT")
+            .map_err(|e| StorageError::Database(format!("Failed to commit transaction: {}", e)))?;
+        Ok(())
+    }
+
+    fn rollback_transaction(&mut self) -> StorageResult<()> {
+        self.conn
+            .batch_execute("ROLLBACK")
+            .map_err(|e| StorageError::Database(format!("Failed to rollback transaction: {}", e)))?;
+        Ok(())
+    }
+
     #[cfg(feature = "sqlite")]
     fn flush(&mut self) -> StorageResult<()> {
         self.conn.batch_execute("PRAGMA wal_checkpoint(PASSIVE);")?;
@@ -209,8 +271,8 @@ mod tests {
 
         let id = storage
             .add_item(
-                IdentityItemType::Antipattern,
-                "using tokio block_on in async context",
+                IdentityItemType::Rule,
+                "Don't use tokio block_on in async context",
                 Some("use .await instead"),
                 Some("blocks the runtime"),
                 None,
@@ -220,7 +282,7 @@ mod tests {
         let item = storage.get_item(&id).unwrap();
         assert!(item.is_some());
         let item = item.unwrap();
-        assert_eq!(item.content, "using tokio block_on in async context");
+        assert_eq!(item.content, "Don't use tokio block_on in async context");
         assert_eq!(item.secondary.as_deref(), Some("use .await instead"));
         assert_eq!(item.tertiary.as_deref(), Some("blocks the runtime"));
     }
@@ -231,22 +293,22 @@ mod tests {
         storage.initialize().unwrap();
 
         storage
-            .add_item(IdentityItemType::Expertise, "Rust", None, None, None)
+            .add_item(IdentityItemType::Rule, "Always run tests", None, None, None)
             .unwrap();
         storage
-            .add_item(IdentityItemType::Expertise, "Python", None, None, None)
+            .add_item(IdentityItemType::Rule, "Don't skip linting", None, None, None)
             .unwrap();
         storage
-            .add_item(IdentityItemType::Trait, "curious", None, None, None)
+            .add_item(IdentityItemType::Value, "Quality matters", None, None, None)
             .unwrap();
 
-        let expertise = storage
-            .list_items(Some(IdentityItemType::Expertise))
+        let rules = storage
+            .list_items(Some(IdentityItemType::Rule))
             .unwrap();
-        assert_eq!(expertise.len(), 2);
+        assert_eq!(rules.len(), 2);
 
-        let traits = storage.list_items(Some(IdentityItemType::Trait)).unwrap();
-        assert_eq!(traits.len(), 1);
+        let values = storage.list_items(Some(IdentityItemType::Value)).unwrap();
+        assert_eq!(values.len(), 1);
 
         let all = storage.list_items(None).unwrap();
         assert_eq!(all.len(), 3);
@@ -258,7 +320,7 @@ mod tests {
         storage.initialize().unwrap();
 
         let id = storage
-            .add_item(IdentityItemType::Expertise, "Rust", None, None, None)
+            .add_item(IdentityItemType::Rule, "Always run tests", None, None, None)
             .unwrap();
 
         let removed = storage.remove_item(&id).unwrap();
@@ -300,5 +362,63 @@ mod tests {
             .list_items(Some(IdentityItemType::PersonaDescription))
             .unwrap();
         assert_eq!(desc.len(), 1);
+    }
+
+    #[test]
+    fn list_and_update_by_raw_type_str() {
+        let mut storage = DieselIdentityStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Insert some rules
+        storage
+            .add_item(IdentityItemType::Rule, "Always test", None, None, None)
+            .unwrap();
+
+        // Verify list_items_by_type_str works
+        let rules = storage.list_items_by_type_str("rule").unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].content, "Always test");
+
+        // Empty for non-existent type
+        let empty = storage.list_items_by_type_str("nonexistent").unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn update_item_type_raw() {
+        let mut storage = DieselIdentityStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Manually insert with a raw type string (simulating legacy data)
+        let id = "test1234".to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        diesel::insert_into(identity_items::table)
+            .values(NewIdentityItem {
+                id: &id,
+                item_type: "directive",
+                content: "Use full cargo path",
+                secondary: None,
+                tertiary: None,
+                category: None,
+                created_at: now,
+            })
+            .execute(storage.conn_mut())
+            .unwrap();
+
+        // Update directive -> rule
+        let updated = storage.update_item_type("directive", "rule").unwrap();
+        assert_eq!(updated, 1);
+
+        // Verify it's now a rule
+        let rules = storage.list_items_by_type_str("rule").unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].content, "Use full cargo path");
+
+        // Old type should be empty
+        let directives = storage.list_items_by_type_str("directive").unwrap();
+        assert!(directives.is_empty());
     }
 }

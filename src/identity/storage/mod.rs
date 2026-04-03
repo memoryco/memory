@@ -50,6 +50,39 @@ pub trait IdentityStorage: Send {
     /// no longer in the IdentityItemType enum.
     fn delete_items_by_type_str(&mut self, type_str: &str) -> StorageResult<usize>;
 
+    /// List items by raw type string (bypasses enum parsing).
+    /// Used during migration to read rows with legacy type values.
+    fn list_items_by_type_str(&mut self, type_str: &str) -> StorageResult<Vec<IdentityItemRow>>;
+
+    /// Update all items matching old_type to new_type (raw strings).
+    /// Returns the number of rows updated. Used during migration.
+    fn update_item_type(&mut self, old_type: &str, new_type: &str) -> StorageResult<usize>;
+
+    /// Update all items matching old_type to new_type AND set their category (raw strings).
+    /// Returns the number of rows updated. Used during migration when type conversion
+    /// also requires setting metadata (e.g., antipattern → rule with category="negative").
+    fn update_item_type_with_category(
+        &mut self,
+        old_type: &str,
+        new_type: &str,
+        category: Option<&str>,
+    ) -> StorageResult<usize>;
+
+    /// Begin a database transaction
+    fn begin_transaction(&mut self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    /// Commit the current transaction
+    fn commit_transaction(&mut self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    /// Rollback the current transaction
+    fn rollback_transaction(&mut self) -> StorageResult<()> {
+        Ok(())
+    }
+
     /// Flush any pending writes
     fn flush(&mut self) -> StorageResult<()> {
         Ok(())

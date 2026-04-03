@@ -12,10 +12,7 @@ pub enum IdentityField {
     Value,
     Preference,
     Relationship,
-    Expertise,
-    Trait,
-    Instruction,
-    Antipattern,
+    Rule,
 }
 
 impl IdentityField {
@@ -24,10 +21,7 @@ impl IdentityField {
             Self::Value => "value",
             Self::Preference => "preference",
             Self::Relationship => "relationship",
-            Self::Expertise => "expertise",
-            Self::Trait => "trait",
-            Self::Instruction => "instruction",
-            Self::Antipattern => "antipattern",
+            Self::Rule => "rule",
         }
     }
 
@@ -37,10 +31,7 @@ impl IdentityField {
             "value" => Some(Self::Value),
             "preference" => Some(Self::Preference),
             "relationship" => Some(Self::Relationship),
-            "expertise" => Some(Self::Expertise),
-            "trait" => Some(Self::Trait),
-            "instruction" => Some(Self::Instruction),
-            "antipattern" => Some(Self::Antipattern),
+            "rule" => Some(Self::Rule),
             _ => None,
         }
     }
@@ -52,10 +43,7 @@ impl IdentityField {
             Self::Value,
             Self::Preference,
             Self::Relationship,
-            Self::Expertise,
-            Self::Trait,
-            Self::Instruction,
-            Self::Antipattern,
+            Self::Rule,
         ]
     }
 }
@@ -79,12 +67,12 @@ const FIELD_EXAMPLES: &[FieldExamples] = &[
         examples: &[
             "Ship working code over perfect code",
             "Be honest even when it's hard",
-            "Test everything thoroughly",
             "Quality matters more than speed",
             "Transparency builds trust",
-            "Always leave code better than you found it",
             "Simplicity over complexity",
             "User experience comes first",
+            "Store aggressively - decay is the filter",
+            "Consistency is trust",
         ],
     },
     FieldExamples {
@@ -114,53 +102,24 @@ const FIELD_EXAMPLES: &[FieldExamples] = &[
         ],
     },
     FieldExamples {
-        field: IdentityField::Expertise,
+        field: IdentityField::Rule,
         examples: &[
-            "I know Rust",
-            "I specialize in SDK architecture",
-            "Expert in distributed systems",
-            "Proficient in Swift and Kotlin",
-            "I have experience with machine learning",
-            "Strong background in databases",
-            "Skilled at API design",
-            "I understand compiler internals",
-        ],
-    },
-    FieldExamples {
-        field: IdentityField::Trait,
-        examples: &[
-            "I am pragmatic",
-            "I am direct",
-            "I am thorough",
-            "I'm sarcastic but friendly",
-            "I am patient",
-            "I'm detail-oriented",
-            "I am curious",
-            "I'm a perfectionist",
-        ],
-    },
-    FieldExamples {
-        field: IdentityField::Instruction,
-        examples: &[
+            // Positive rules (do this)
             "Always run tests before committing",
-            "Check for null values before using them",
-            "Use semantic versioning for releases",
+            "Use full cargo path for builds",
+            "Write exhaustive tests when writing code",
+            "Build production-quality code unless prototyping",
             "Document all public APIs",
-            "Always ask before deleting files",
             "Format code before submitting PRs",
-            "Include error handling in all functions",
-            "Run linters before pushing code",
-        ],
-    },
-    FieldExamples {
-        field: IdentityField::Antipattern,
-        examples: &[
+            "Spawn agents with thorough prompts then move on",
+            "Use MCP filesystem tools for local files",
+            // Negative rules (don't do this)
             "Don't ask 'why do you want that'",
             "Avoid premature optimization",
             "Never commit directly to main",
             "Don't use magic numbers",
             "Avoid global state",
-            "Don't repeat yourself",
+            "Don't write code unless asked",
             "Never store passwords in plain text",
             "Avoid deeply nested callbacks",
         ],
@@ -316,6 +275,10 @@ mod tests {
             IdentityField::from_str("preference"),
             Some(IdentityField::Preference)
         );
+        assert_eq!(
+            IdentityField::from_str("rule"),
+            Some(IdentityField::Rule)
+        );
         assert_eq!(IdentityField::from_str("unknown"), None);
     }
 
@@ -338,28 +301,14 @@ mod tests {
     }
 
     #[test]
-    fn classify_expertise() {
-        // "I'm proficient" reads as a self-description (trait) to nemotron-embed.
-        // Use a more distinctly skill-oriented phrasing.
-        let result = classify("expert in Python, Go, and Kubernetes").unwrap();
-        assert_eq!(result.predicted, IdentityField::Expertise);
-    }
-
-    #[test]
-    fn classify_trait() {
-        let result = classify("I am meticulous and careful").unwrap();
-        assert_eq!(result.predicted, IdentityField::Trait);
-    }
-
-    #[test]
-    fn classify_instruction() {
+    fn classify_positive_rule() {
         let result = classify("Run the test suite before merging pull requests").unwrap();
-        assert_eq!(result.predicted, IdentityField::Instruction);
+        assert_eq!(result.predicted, IdentityField::Rule);
     }
 
     #[test]
-    fn classify_antipattern() {
+    fn classify_negative_rule() {
         let result = classify("Avoid using global mutable state").unwrap();
-        assert_eq!(result.predicted, IdentityField::Antipattern);
+        assert_eq!(result.predicted, IdentityField::Rule);
     }
 }

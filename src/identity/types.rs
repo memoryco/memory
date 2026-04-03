@@ -24,17 +24,9 @@ pub struct Identity {
     #[serde(default)]
     pub relationships: Vec<Relationship>,
 
-    /// Anti-patterns - what NOT to do, learned boundaries
+    /// Rules - behavioral constraints, both positive ("do X") and negative ("don't do X")
     #[serde(default)]
-    pub antipatterns: Vec<Antipattern>,
-
-    /// Communication style directives
-    #[serde(default)]
-    pub communication: CommunicationStyle,
-
-    /// Areas of expertise / competence
-    #[serde(default)]
-    pub expertise: Vec<String>,
+    pub rules: Vec<Rule>,
 }
 
 /// The fundamental "I am" - name, nature, essence
@@ -44,13 +36,9 @@ pub struct Persona {
     #[serde(default)]
     pub name: String,
 
-    /// Short description of nature
+    /// Description of nature, traits, tone, expertise — all in natural language
     #[serde(default)]
     pub description: String,
-
-    /// Core traits (adjectives that define you)
-    #[serde(default)]
-    pub traits: Vec<String>,
 }
 
 /// A value - something that matters, a principle
@@ -156,52 +144,50 @@ impl Relationship {
     }
 }
 
-/// An anti-pattern - something to NOT do
+/// A rule - a behavioral constraint, either positive ("do X") or negative ("don't do X")
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Antipattern {
-    /// What not to do
+pub struct Rule {
+    /// The rule itself — either "do X" or "don't do X"
     #[serde(default)]
-    pub avoid: String,
+    pub content: String,
 
-    /// Why (the harm it causes)
+    /// What to do instead (for negative rules) or additional context
+    #[serde(default)]
+    pub instead: Option<String>,
+
+    /// Why this rule matters — enables judgment in edge cases
     #[serde(default)]
     pub why: Option<String>,
 
-    /// What to do instead
+    /// Whether this is a negative rule ("don't do X") vs positive ("do X")
     #[serde(default)]
-    pub instead: Option<String>,
+    pub negative: bool,
 }
 
-impl Antipattern {
-    pub fn new(avoid: impl Into<String>) -> Self {
+impl Rule {
+    pub fn new(content: impl Into<String>) -> Self {
         Self {
-            avoid: avoid.into(),
-            why: None,
+            content: content.into(),
             instead: None,
+            why: None,
+            negative: false,
         }
     }
 
-    pub fn because(mut self, why: impl Into<String>) -> Self {
+    pub fn negative(mut self) -> Self {
+        self.negative = true;
+        self
+    }
+
+    pub fn with_instead(mut self, instead: impl Into<String>) -> Self {
+        self.instead = Some(instead.into());
+        self
+    }
+
+    pub fn with_why(mut self, why: impl Into<String>) -> Self {
         self.why = Some(why.into());
         self
     }
-
-    pub fn instead(mut self, alternative: impl Into<String>) -> Self {
-        self.instead = Some(alternative.into());
-        self
-    }
-}
-
-/// Communication style preferences
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CommunicationStyle {
-    /// General tone descriptors
-    #[serde(default)]
-    pub tone: Vec<String>,
-
-    /// Specific directives
-    #[serde(default)]
-    pub directives: Vec<String>,
 }
 
 /// Results from searching identity
@@ -210,9 +196,7 @@ pub struct IdentitySearchResults<'a> {
     pub values: Vec<&'a Value>,
     pub preferences: Vec<&'a Preference>,
     pub relationships: Vec<&'a Relationship>,
-    pub antipatterns: Vec<&'a Antipattern>,
-    pub expertise: Vec<&'a String>,
-    pub traits: Vec<&'a String>,
+    pub rules: Vec<&'a Rule>,
 }
 
 impl<'a> IdentitySearchResults<'a> {
@@ -221,9 +205,7 @@ impl<'a> IdentitySearchResults<'a> {
         self.values.is_empty()
             && self.preferences.is_empty()
             && self.relationships.is_empty()
-            && self.antipatterns.is_empty()
-            && self.expertise.is_empty()
-            && self.traits.is_empty()
+            && self.rules.is_empty()
     }
 
     /// Total count of all matches
@@ -231,9 +213,7 @@ impl<'a> IdentitySearchResults<'a> {
         self.values.len()
             + self.preferences.len()
             + self.relationships.len()
-            + self.antipatterns.len()
-            + self.expertise.len()
-            + self.traits.len()
+            + self.rules.len()
     }
 }
 
@@ -247,12 +227,6 @@ impl Identity {
     pub fn with_persona(mut self, name: impl Into<String>, description: impl Into<String>) -> Self {
         self.persona.name = name.into();
         self.persona.description = description.into();
-        self
-    }
-
-    /// Add a trait to the persona
-    pub fn with_trait(mut self, t: impl Into<String>) -> Self {
-        self.persona.traits.push(t.into());
         self
     }
 
@@ -274,27 +248,9 @@ impl Identity {
         self
     }
 
-    /// Add an anti-pattern
-    pub fn with_antipattern(mut self, ap: Antipattern) -> Self {
-        self.antipatterns.push(ap);
-        self
-    }
-
-    /// Add expertise area
-    pub fn with_expertise(mut self, area: impl Into<String>) -> Self {
-        self.expertise.push(area.into());
-        self
-    }
-
-    /// Add communication tone
-    pub fn with_tone(mut self, tone: impl Into<String>) -> Self {
-        self.communication.tone.push(tone.into());
-        self
-    }
-
-    /// Add communication directive
-    pub fn with_directive(mut self, directive: impl Into<String>) -> Self {
-        self.communication.directives.push(directive.into());
+    /// Add a rule
+    pub fn with_rule(mut self, rule: Rule) -> Self {
+        self.rules.push(rule);
         self
     }
 
@@ -347,16 +303,6 @@ impl Identity {
             .collect()
     }
 
-    /// List all expertise areas
-    pub fn list_expertise(&self) -> Vec<String> {
-        self.expertise.clone()
-    }
-
-    /// List all traits
-    pub fn list_traits(&self) -> Vec<String> {
-        self.persona.traits.clone()
-    }
-
     // ==================
     // LOOKUP METHODS
     // ==================
@@ -382,19 +328,6 @@ impl Identity {
         self.relationships
             .iter()
             .find(|r| r.entity.eq_ignore_ascii_case(entity))
-    }
-
-    /// Check if a trait exists
-    pub fn has_trait(&self, t: &str) -> bool {
-        self.persona
-            .traits
-            .iter()
-            .any(|trait_| trait_.eq_ignore_ascii_case(t))
-    }
-
-    /// Check if expertise exists
-    pub fn has_expertise(&self, area: &str) -> bool {
-        self.expertise.iter().any(|e| e.eq_ignore_ascii_case(area))
     }
 
     // ==================
@@ -443,42 +376,27 @@ impl Identity {
             })
             .collect();
 
-        let antipatterns: Vec<&Antipattern> = self
-            .antipatterns
+        let rules: Vec<&Rule> = self
+            .rules
             .iter()
-            .filter(|a| {
-                a.avoid.to_lowercase().contains(&q)
-                    || a.why
+            .filter(|r| {
+                r.content.to_lowercase().contains(&q)
+                    || r.why
                         .as_ref()
                         .map(|w| w.to_lowercase().contains(&q))
                         .unwrap_or(false)
-                    || a.instead
+                    || r.instead
                         .as_ref()
                         .map(|i| i.to_lowercase().contains(&q))
                         .unwrap_or(false)
             })
             .collect();
 
-        let expertise: Vec<&String> = self
-            .expertise
-            .iter()
-            .filter(|e| e.to_lowercase().contains(&q))
-            .collect();
-
-        let traits: Vec<&String> = self
-            .persona
-            .traits
-            .iter()
-            .filter(|t| t.to_lowercase().contains(&q))
-            .collect();
-
         IdentitySearchResults {
             values,
             preferences,
             relationships,
-            antipatterns,
-            expertise,
-            traits,
+            rules,
         }
     }
 
@@ -495,40 +413,52 @@ impl Identity {
     }
 
     /// Render identity as a string (for context injection)
+    ///
+    /// Uses XML-tagged output with clean separation of concerns.
+    /// Rules are split into Do/Don't sections per prompt optimization Technique 1
+    /// (boundaries as precise as goals).
     pub fn render(&self) -> String {
         let mut out = String::new();
 
         // Persona
-        if !self.persona.name.is_empty() {
-            out.push_str(&format!(
-                "I am {}. {}\n",
-                self.persona.name, self.persona.description
-            ));
-            if !self.persona.traits.is_empty() {
-                out.push_str(&format!(
-                    "Core traits: {}\n",
-                    self.persona.traits.join(", ")
-                ));
+        if !self.persona.name.is_empty() || !self.persona.description.is_empty() {
+            out.push_str("<persona>\n");
+            let has_name = !self.persona.name.is_empty();
+            let has_desc = !self.persona.description.is_empty();
+            match (has_name, has_desc) {
+                (true, true) => {
+                    out.push_str(&format!(
+                        "I am {}. {}\n",
+                        self.persona.name, self.persona.description
+                    ));
+                }
+                (true, false) => {
+                    out.push_str(&format!("I am {}.\n", self.persona.name));
+                }
+                (false, true) => {
+                    out.push_str(&format!("{}\n", self.persona.description));
+                }
+                _ => {}
             }
-            out.push('\n');
+            out.push_str("</persona>\n\n");
         }
 
         // Values
         if !self.values.is_empty() {
-            out.push_str("Values:\n");
+            out.push_str("<values>\n");
             for v in &self.values {
                 out.push_str(&format!("  • {}", v.principle));
                 if let Some(why) = &v.why {
-                    out.push_str(&format!(" ({})", why));
+                    out.push_str(&format!("\n    ({})", why));
                 }
                 out.push('\n');
             }
-            out.push('\n');
+            out.push_str("</values>\n\n");
         }
 
         // Preferences
         if !self.preferences.is_empty() {
-            out.push_str("Preferences:\n");
+            out.push_str("<preferences>\n");
             for p in &self.preferences {
                 if let Some(over) = &p.over {
                     out.push_str(&format!("  • {} > {}\n", p.prefer, over));
@@ -536,51 +466,62 @@ impl Identity {
                     out.push_str(&format!("  • {}\n", p.prefer));
                 }
             }
-            out.push('\n');
+            out.push_str("</preferences>\n\n");
         }
 
         // Relationships
         if !self.relationships.is_empty() {
-            out.push_str("Key relationships:\n");
+            out.push_str("<relationships>\n");
             for r in &self.relationships {
                 out.push_str(&format!("  • {}: {}", r.entity, r.relation));
                 if let Some(ctx) = &r.context {
-                    out.push_str(&format!(" ({})", ctx));
+                    out.push_str(&format!("\n    ({})", ctx));
                 }
                 out.push('\n');
             }
-            out.push('\n');
+            out.push_str("</relationships>\n\n");
         }
 
-        // Anti-patterns
-        if !self.antipatterns.is_empty() {
-            out.push_str("Avoid:\n");
-            for ap in &self.antipatterns {
-                out.push_str(&format!("  ✗ {}", ap.avoid));
-                if let Some(instead) = &ap.instead {
-                    out.push_str(&format!(" → instead: {}", instead));
+        // Rules — split into Do/Don't
+        if !self.rules.is_empty() {
+            out.push_str("<rules>\n");
+
+            let (dont_rules, do_rules): (Vec<&Rule>, Vec<&Rule>) =
+                self.rules.iter().partition(|r| r.negative);
+
+            if !do_rules.is_empty() {
+                out.push_str("Do:\n");
+                for r in &do_rules {
+                    out.push_str(&format!("  • {}", r.content));
+                    if let Some(instead) = &r.instead {
+                        out.push_str(&format!(" — {}", instead));
+                    }
+                    if let Some(why) = &r.why {
+                        out.push_str(&format!("\n    ({})", why));
+                    }
+                    out.push('\n');
                 }
+            }
+
+            if !do_rules.is_empty() && !dont_rules.is_empty() {
                 out.push('\n');
             }
-            out.push('\n');
-        }
 
-        // Communication
-        if !self.communication.tone.is_empty() || !self.communication.directives.is_empty() {
-            out.push_str("Communication style:\n");
-            if !self.communication.tone.is_empty() {
-                out.push_str(&format!("  Tone: {}\n", self.communication.tone.join(", ")));
+            if !dont_rules.is_empty() {
+                out.push_str("Don't:\n");
+                for r in &dont_rules {
+                    out.push_str(&format!("  \u{2717} {}", r.content));
+                    if let Some(instead) = &r.instead {
+                        out.push_str(&format!(" \u{2192} {}", instead));
+                    }
+                    if let Some(why) = &r.why {
+                        out.push_str(&format!("\n    ({})", why));
+                    }
+                    out.push('\n');
+                }
             }
-            for d in &self.communication.directives {
-                out.push_str(&format!("  • {}\n", d));
-            }
-            out.push('\n');
-        }
 
-        // Expertise
-        if !self.expertise.is_empty() {
-            out.push_str(&format!("Expertise: {}\n", self.expertise.join(", ")));
-            out.push('\n');
+            out.push_str("</rules>\n\n");
         }
 
         out
@@ -594,9 +535,6 @@ mod tests {
     fn build_test_identity() -> Identity {
         Identity::new()
             .with_persona("Porter", "A pragmatic developer assistant")
-            .with_trait("pragmatic")
-            .with_trait("direct")
-            .with_trait("snarky but not a douchebag")
             .with_value(Value::new("Write exhaustive tests").with_category("engineering"))
             .with_value(Value::new("KISS/DRY principles").with_category("engineering"))
             .with_value(Value::new("Be honest").with_category("ethics"))
@@ -617,18 +555,14 @@ mod tests {
             .with_relationship(
                 Relationship::new("Ingrid", "Brandon's fiancée").with_context("MSW student"),
             )
-            .with_antipattern(
-                Antipattern::new("Asking 'why do you want to do that?'")
-                    .because("Forces context dumps")
-                    .instead("Just answer, then ask clarifying questions"),
+            .with_rule(
+                Rule::new("Don't ask 'why do you want to do that?'")
+                    .negative()
+                    .with_instead("Just answer, then ask clarifying questions")
+                    .with_why("Forces context dumps"),
             )
-            .with_antipattern(Antipattern::new("Writing code unless asked"))
-            .with_tone("direct")
-            .with_tone("warm")
-            .with_directive("Ask questions over making assumptions")
-            .with_expertise("Rust")
-            .with_expertise("Swift")
-            .with_expertise("SDK architecture")
+            .with_rule(Rule::new("Don't write code unless asked").negative())
+            .with_rule(Rule::new("Use full cargo path for builds"))
     }
 
     #[test]
@@ -636,12 +570,10 @@ mod tests {
         let identity = build_test_identity();
 
         assert_eq!(identity.persona.name, "Porter");
-        assert_eq!(identity.persona.traits.len(), 3);
         assert_eq!(identity.values.len(), 3);
         assert_eq!(identity.preferences.len(), 2);
         assert_eq!(identity.relationships.len(), 2);
-        assert_eq!(identity.antipatterns.len(), 2);
-        assert_eq!(identity.expertise.len(), 3);
+        assert_eq!(identity.rules.len(), 3);
     }
 
     // =================
@@ -690,24 +622,6 @@ mod tests {
         assert!(entities.contains(&"Ingrid".to_string()));
     }
 
-    #[test]
-    fn list_expertise() {
-        let identity = build_test_identity();
-        let exp = identity.list_expertise();
-
-        assert_eq!(exp.len(), 3);
-        assert!(exp.contains(&"Rust".to_string()));
-    }
-
-    #[test]
-    fn list_traits() {
-        let identity = build_test_identity();
-        let traits = identity.list_traits();
-
-        assert_eq!(traits.len(), 3);
-        assert!(traits.contains(&"pragmatic".to_string()));
-    }
-
     // =================
     // LOOKUP TESTS
     // =================
@@ -740,24 +654,6 @@ mod tests {
         assert!(rel3.is_none());
     }
 
-    #[test]
-    fn has_trait_check() {
-        let identity = build_test_identity();
-
-        assert!(identity.has_trait("pragmatic"));
-        assert!(identity.has_trait("PRAGMATIC")); // case insensitive
-        assert!(!identity.has_trait("lazy"));
-    }
-
-    #[test]
-    fn has_expertise_check() {
-        let identity = build_test_identity();
-
-        assert!(identity.has_expertise("Rust"));
-        assert!(identity.has_expertise("rust")); // case insensitive
-        assert!(!identity.has_expertise("COBOL"));
-    }
-
     // =================
     // SEARCH TESTS
     // =================
@@ -781,11 +677,12 @@ mod tests {
     }
 
     #[test]
-    fn search_finds_expertise() {
+    fn search_finds_rules() {
         let identity = build_test_identity();
-        let results = identity.search("SDK");
+        let results = identity.search("cargo");
 
-        assert_eq!(results.expertise.len(), 1);
+        assert_eq!(results.rules.len(), 1);
+        assert!(results.rules[0].content.contains("cargo"));
     }
 
     #[test]
@@ -813,7 +710,7 @@ mod tests {
     // =================
 
     #[test]
-    fn render_produces_output() {
+    fn render_produces_xml_output() {
         let identity = Identity::new()
             .with_persona("TestBot", "A test persona")
             .with_value(Value::new("Testing is good"))
@@ -821,16 +718,41 @@ mod tests {
 
         let rendered = identity.render();
 
+        assert!(rendered.contains("<persona>"));
+        assert!(rendered.contains("</persona>"));
         assert!(rendered.contains("TestBot"));
+        assert!(rendered.contains("<values>"));
         assert!(rendered.contains("Testing is good"));
+        assert!(rendered.contains("<preferences>"));
         assert!(rendered.contains("Green > Red"));
+    }
+
+    #[test]
+    fn render_rules_split_do_dont() {
+        let identity = Identity::new()
+            .with_persona("TestBot", "A test persona")
+            .with_rule(Rule::new("Always run tests"))
+            .with_rule(
+                Rule::new("Don't use global state")
+                    .negative()
+                    .with_instead("Use dependency injection"),
+            );
+
+        let rendered = identity.render();
+
+        assert!(rendered.contains("<rules>"));
+        assert!(rendered.contains("Do:"));
+        assert!(rendered.contains("Don't:"));
+        assert!(rendered.contains("Always run tests"));
+        assert!(rendered.contains("\u{2717} Don't use global state"));
+        assert!(rendered.contains("\u{2192} Use dependency injection"));
+        assert!(rendered.contains("</rules>"));
     }
 
     #[test]
     fn render_persona_includes_content() {
         let identity = Identity::new()
-            .with_persona("Porter", "A pragmatic assistant")
-            .with_trait("direct");
+            .with_persona("Porter", "A pragmatic assistant");
 
         let rendered = identity.render_persona();
 
@@ -839,8 +761,8 @@ mod tests {
             "render_persona should include persona name"
         );
         assert!(
-            rendered.contains("direct"),
-            "render_persona should include traits"
+            rendered.contains("pragmatic"),
+            "render_persona should include description"
         );
     }
 
@@ -853,5 +775,53 @@ mod tests {
             rendered, "No identity currently configured",
             "Empty identity should render as not configured"
         );
+    }
+
+    #[test]
+    fn render_persona_description_only() {
+        let mut identity = Identity::new();
+        identity.persona.description = "A pragmatic assistant with deep Rust expertise".to_string();
+
+        let rendered = identity.render();
+
+        assert!(
+            rendered.contains("<persona>"),
+            "Description-only persona should render persona block"
+        );
+        assert!(
+            rendered.contains("pragmatic assistant"),
+            "Should include description text"
+        );
+        assert!(
+            !rendered.contains("I am ."),
+            "Should not render 'I am .' when name is empty"
+        );
+
+        let persona = identity.render_persona();
+        assert_ne!(
+            persona, "No identity currently configured",
+            "Description-only should not say 'no identity configured'"
+        );
+    }
+
+    #[test]
+    fn render_persona_name_only() {
+        let mut identity = Identity::new();
+        identity.persona.name = "Porter".to_string();
+
+        let rendered = identity.render();
+
+        assert!(rendered.contains("<persona>"));
+        assert!(rendered.contains("I am Porter."));
+        assert!(!rendered.contains("I am Porter. \n"));
+    }
+
+    #[test]
+    fn negative_rule_flag() {
+        let positive = Rule::new("Always run tests");
+        assert!(!positive.negative);
+
+        let neg = Rule::new("Don't use tokio").negative();
+        assert!(neg.negative);
     }
 }

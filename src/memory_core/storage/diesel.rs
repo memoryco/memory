@@ -1603,7 +1603,6 @@ mod tests {
 
         let identity = Identity::new()
             .with_persona("Porter", "A test assistant")
-            .with_trait("pragmatic")
             .with_value(Value::new("Test value"))
             .with_preference(Preference::new("Rust").over("JavaScript"));
 
@@ -1613,7 +1612,6 @@ mod tests {
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.persona.name, "Porter");
-        assert_eq!(loaded.persona.traits, vec!["pragmatic"]);
     }
 
     #[test]

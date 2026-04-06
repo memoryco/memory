@@ -646,6 +646,110 @@ impl MemoryStorage {
         Ok(())
     }
 
+    /// Migrate orphaned `engram_enrichments` left behind by the engrams→memories rename.
+    ///
+    /// Earlier versions renamed `engrams` → `memories` but the enrichment
+    /// migration only ran inside `run_engram_migration_body()` which required
+    /// the `engrams` table to still exist. If the rename happened before that
+    /// code was added, `engram_enrichments` was stranded — its embeddings are
+    /// invisible to search because vec0 backfill only reads `memory_enrichments`.
+    ///
+    /// This migration runs independently: if `engram_enrichments` exists, copy
+    /// its rows into `memory_enrichments` (skipping duplicates), then drop it.
+    /// The subsequent `migrate_vec0_backfill` will index the newly-merged data.
+    #[cfg(feature = "sqlite")]
+    fn migrate_orphaned_engram_enrichments(&mut self) -> StorageResult<()> {
+        #[derive(QueryableByName)]
+        struct CountResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            cnt: i32,
+        }
+
+        let has_old_table = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM sqlite_master \
+             WHERE type='table' AND name='engram_enrichments'",
+        )
+        .get_result::<CountResult>(&mut self.conn)
+        .map(|r| r.cnt > 0)
+        .unwrap_or(false);
+
+        if !has_old_table {
+            return Ok(());
+        }
+
+        let old_count = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM engram_enrichments",
+        )
+        .get_result::<CountResult>(&mut self.conn)
+        .map(|r| r.cnt)
+        .unwrap_or(0);
+
+        if old_count == 0 {
+            self.conn
+                .batch_execute("DROP TABLE engram_enrichments")
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            eprintln!("[migration] Dropped empty engram_enrichments ghost table");
+            return Ok(());
+        }
+
+        // The old table may use `engram_id` or `memory_id` depending on how
+        // far a previous partial migration got.
+        let uses_engram_id = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('engram_enrichments') \
+             WHERE name = 'engram_id'",
+        )
+        .get_result::<CountResult>(&mut self.conn)
+        .map(|r| r.cnt > 0)
+        .unwrap_or(false);
+
+        let id_col = if uses_engram_id { "engram_id" } else { "memory_id" };
+
+        let before_count = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM memory_enrichments",
+        )
+        .get_result::<CountResult>(&mut self.conn)
+        .map(|r| r.cnt)
+        .unwrap_or(0);
+
+        // Copy rows into memory_enrichments, skipping duplicates (by PK:
+        // memory_id + seq). Only copy rows whose parent memory still exists
+        // to satisfy the FK constraint.
+        // Safety: id_col is a hardcoded string literal, not user input.
+        self.conn
+            .batch_execute(&format!(
+                "INSERT OR IGNORE INTO memory_enrichments \
+                 (memory_id, seq, embedding, source, created_at) \
+                 SELECT {id_col}, seq, embedding, source, created_at \
+                 FROM engram_enrichments \
+                 WHERE {id_col} IN (SELECT id FROM memories)"
+            ))
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        let after_count = diesel::sql_query(
+            "SELECT COUNT(*) as cnt FROM memory_enrichments",
+        )
+        .get_result::<CountResult>(&mut self.conn)
+        .map(|r| r.cnt)
+        .unwrap_or(0);
+
+        let migrated = after_count - before_count;
+
+        eprintln!(
+            "[migration] Migrated {} enrichment vectors from orphaned engram_enrichments \
+             ({} in old table, {} already existed or orphaned)",
+            migrated, old_count, old_count - migrated
+        );
+
+        // Drop the old table (its indexes are removed automatically by SQLite)
+        self.conn
+            .batch_execute("DROP TABLE engram_enrichments")
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        eprintln!("[migration] Dropped engram_enrichments table");
+
+        Ok(())
+    }
+
     /// Backfill vec0 virtual tables from existing embeddings.
     ///
     /// Runs once: if memory_vec is empty but memories has embeddings, we
@@ -730,6 +834,7 @@ impl Storage for MemoryStorage {
         self.migrate_association_ordinal()?;
         self.migrate_enrichments_table()?;
         self.migrate_sessions_table()?;
+        self.migrate_orphaned_engram_enrichments()?;
         self.migrate_vec0_backfill()?;
         Ok(())
     }
@@ -3193,5 +3298,253 @@ mod tests {
                 .map(|r| r.cnt)
                 .unwrap_or(0);
         assert_eq!(primary_count, 3, "primary enrichments should have the 3 new rows");
+    }
+
+    // ==================
+    // ORPHANED ENGRAM_ENRICHMENTS MIGRATION TESTS
+    // ==================
+
+    /// Helper: create an orphaned engram_enrichments table with `engram_id` column.
+    /// Memories must already exist in the `memories` table for FK satisfaction.
+    fn create_orphaned_engram_enrichments(
+        storage: &mut MemoryStorage,
+        memory_ids: &[&str],
+        vecs_per_memory: usize,
+    ) {
+        storage
+            .conn
+            .batch_execute(
+                r#"
+                CREATE TABLE IF NOT EXISTS engram_enrichments (
+                    engram_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    embedding BLOB NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'llm',
+                    created_at INTEGER NOT NULL,
+                    PRIMARY KEY (engram_id, seq)
+                );
+            "#,
+            )
+            .unwrap();
+
+        for mid in memory_ids {
+            for seq in 0..vecs_per_memory {
+                let emb_bytes = embedding_to_bytes(&make_embedding(seq as f32 + 0.1));
+                diesel::sql_query(
+                    "INSERT INTO engram_enrichments (engram_id, seq, embedding, source, created_at) \
+                     VALUES (?, ?, ?, 'llm', 1000000)",
+                )
+                .bind::<diesel::sql_types::Text, _>(*mid)
+                .bind::<diesel::sql_types::BigInt, _>(seq as i64)
+                .bind::<diesel::sql_types::Binary, _>(&emb_bytes[..])
+                .execute(&mut storage.conn)
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn migration_orphaned_enrichments_copied_and_table_dropped() {
+        // Scenario: engrams table already gone (renamed in prior version),
+        // but engram_enrichments was left behind with valid data.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+
+        // First init to create all tables
+        storage.initialize().unwrap();
+
+        // Insert some memories
+        let m1 = Memory::new("Memory alpha");
+        let m2 = Memory::new("Memory beta");
+        storage.save_memory(&m1).unwrap();
+        storage.save_memory(&m2).unwrap();
+        let m1_str = m1.id.to_string();
+        let m2_str = m2.id.to_string();
+
+        // Simulate orphaned table (as if left behind from old version)
+        create_orphaned_engram_enrichments(
+            &mut storage,
+            &[&m1_str, &m2_str],
+            5, // 5 enrichment vectors each
+        );
+
+        assert!(table_exists(&mut storage, "engram_enrichments"));
+        assert_eq!(row_count(&mut storage, "engram_enrichments"), 10);
+        // memory_enrichments should be empty (no enrichments set yet)
+        assert_eq!(row_count(&mut storage, "memory_enrichments"), 0);
+
+        // Run initialize again — should trigger the orphan migration
+        storage.initialize().unwrap();
+
+        // engram_enrichments should be gone
+        assert!(
+            !table_exists(&mut storage, "engram_enrichments"),
+            "engram_enrichments should be dropped after migration"
+        );
+
+        // memory_enrichments should have all 10 rows
+        assert_eq!(
+            row_count(&mut storage, "memory_enrichments"),
+            10,
+            "All enrichment vectors should be migrated"
+        );
+    }
+
+    #[test]
+    fn migration_orphaned_enrichments_skips_orphaned_memory_ids() {
+        // Rows in engram_enrichments whose memory_id doesn't exist in
+        // memories should be silently dropped (FK constraint).
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let m1 = Memory::new("Real memory");
+        storage.save_memory(&m1).unwrap();
+        let m1_str = m1.id.to_string();
+        let ghost_id = uuid::Uuid::new_v4().to_string();
+
+        create_orphaned_engram_enrichments(
+            &mut storage,
+            &[&m1_str, &ghost_id],
+            3,
+        );
+
+        assert_eq!(row_count(&mut storage, "engram_enrichments"), 6);
+
+        storage.initialize().unwrap();
+
+        assert!(!table_exists(&mut storage, "engram_enrichments"));
+        // Only m1's 3 enrichments should have been copied (ghost_id has no parent)
+        assert_eq!(
+            row_count(&mut storage, "memory_enrichments"),
+            3,
+            "Only enrichments with valid parent memories should be migrated"
+        );
+    }
+
+    #[test]
+    fn migration_orphaned_enrichments_deduplicates() {
+        // If memory_enrichments already has some rows for a memory,
+        // INSERT OR IGNORE should skip duplicates (same PK).
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let m1 = Memory::new("Has existing enrichments");
+        storage.save_memory(&m1).unwrap();
+        let m1_str = m1.id.to_string();
+
+        // Write 2 enrichments the normal way
+        {
+            let mut vs = VectorSearch::new(storage.connection());
+            vs.set_enrichment_embeddings(
+                &m1.id,
+                &[make_embedding(1.0), make_embedding(2.0)],
+                "llm",
+            )
+            .unwrap();
+        }
+        assert_eq!(row_count(&mut storage, "memory_enrichments"), 2);
+
+        // Create orphaned table with overlapping seq values
+        create_orphaned_engram_enrichments(&mut storage, &[&m1_str], 3);
+        assert_eq!(row_count(&mut storage, "engram_enrichments"), 3);
+
+        storage.initialize().unwrap();
+
+        assert!(!table_exists(&mut storage, "engram_enrichments"));
+        // seq 0 and 1 already existed → skipped. seq 2 is new → inserted.
+        assert_eq!(
+            row_count(&mut storage, "memory_enrichments"),
+            3,
+            "Should have 2 existing + 1 new (2 duplicates skipped)"
+        );
+    }
+
+    #[test]
+    fn migration_orphaned_enrichments_empty_table_just_drops() {
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        // Create empty orphaned table
+        storage
+            .conn
+            .batch_execute(
+                r#"
+                CREATE TABLE IF NOT EXISTS engram_enrichments (
+                    engram_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    embedding BLOB NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'llm',
+                    created_at INTEGER NOT NULL,
+                    PRIMARY KEY (engram_id, seq)
+                );
+            "#,
+            )
+            .unwrap();
+
+        assert!(table_exists(&mut storage, "engram_enrichments"));
+
+        storage.initialize().unwrap();
+
+        assert!(
+            !table_exists(&mut storage, "engram_enrichments"),
+            "Empty orphaned table should just be dropped"
+        );
+    }
+
+    #[test]
+    fn migration_orphaned_enrichments_idempotent() {
+        // Running initialize() twice after migration should be fine.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let m1 = Memory::new("Idempotent test");
+        storage.save_memory(&m1).unwrap();
+        let m1_str = m1.id.to_string();
+
+        create_orphaned_engram_enrichments(&mut storage, &[&m1_str], 4);
+
+        storage.initialize().unwrap();
+        assert!(!table_exists(&mut storage, "engram_enrichments"));
+        assert_eq!(row_count(&mut storage, "memory_enrichments"), 4);
+
+        // Second init — table is already gone, should be a no-op
+        storage.initialize().unwrap();
+        assert_eq!(
+            row_count(&mut storage, "memory_enrichments"),
+            4,
+            "Data should be unchanged after second initialize"
+        );
+    }
+
+    #[test]
+    fn migration_orphaned_enrichments_triggers_vec0_backfill() {
+        // After orphan migration, the subsequent vec0 backfill should index
+        // the newly-merged enrichments into enrichment_vec.
+        let mut storage = MemoryStorage::in_memory().unwrap();
+        storage.initialize().unwrap();
+
+        let m1 = Memory::new("Should be searchable after migration");
+        storage.save_memory(&m1).unwrap();
+        let m1_str = m1.id.to_string();
+
+        // Clear any existing enrichment_vec rows
+        storage
+            .conn
+            .batch_execute("DELETE FROM enrichment_vec")
+            .unwrap();
+
+        create_orphaned_engram_enrichments(&mut storage, &[&m1_str], 3);
+
+        // Re-initialize: orphan migration → vec0 backfill
+        storage.initialize().unwrap();
+
+        assert!(!table_exists(&mut storage, "engram_enrichments"));
+        assert_eq!(row_count(&mut storage, "memory_enrichments"), 3);
+
+        // The key assertion: enrichment_vec should now be populated
+        assert_eq!(
+            enrichment_vec_count(&mut storage, &m1_str),
+            3,
+            "vec0 backfill should index the migrated enrichments"
+        );
     }
 }

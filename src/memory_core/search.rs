@@ -307,6 +307,9 @@ pub struct SearchPipelineParams {
     pub session_context_weight: f32,
     /// When true, collect pipeline diagnostics into the result.
     pub debug: bool,
+    /// Unfiltered mode: skip state filtering, energy blending, and diversity shaping.
+    /// Returns all candidates ranked by pure semantic similarity.
+    pub unfiltered: bool,
 }
 
 /// Run vector + BM25 for a single query variant and merge into all_results.
@@ -588,7 +591,7 @@ pub fn run_search_pipeline(
             let mem = brain.get(&r.id)?;
 
             // State filter
-            let state_ok = if params.include_archived {
+            let state_ok = if params.unfiltered || params.include_archived {
                 true
             } else if params.include_deep {
                 !mem.is_archived()
@@ -611,7 +614,11 @@ pub fn run_search_pipeline(
                 }
             }
 
-            let blended = r.score * (0.5 + (mem.energy as f32) * 0.5);
+            let blended = if params.unfiltered {
+                r.score
+            } else {
+                r.score * (0.5 + (mem.energy as f32) * 0.5)
+            };
 
             Some(ScoredResult {
                 id: r.id,
@@ -827,7 +834,8 @@ pub fn run_search_pipeline(
 
     // Diversity shaping: pick a diverse, coverage-rich, source-balanced subset.
     // Redundancy is a property of results, not the query — always filter near-duplicates.
-    if scored.len() > 1 {
+    // Skipped in unfiltered mode — caller wants everything.
+    if scored.len() > 1 && !params.unfiltered {
         let original_count = scored.len();
         let target = params.effective_limit.min(scored.len());
 

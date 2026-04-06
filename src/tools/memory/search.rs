@@ -286,6 +286,7 @@ impl MemorySearchTool {
             session_centroid,
             session_context_weight,
             debug,
+            unfiltered: false,
         };
 
         let pipeline_result =

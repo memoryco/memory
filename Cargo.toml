@@ -1,6 +1,6 @@
 [package]
 name = "memoryco"
-version = "0.9.9"
+version = "0.10.0"
 edition = "2024"
 description = "MemoryCo — local-first AI memory system"
 license = "MIT"

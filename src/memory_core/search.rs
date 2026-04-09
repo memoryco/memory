@@ -582,9 +582,8 @@ pub fn run_search_pipeline(
     // Use the ORIGINAL query embedding for association discovery and reranking
     let query_embedding = original_query_embedding.expect("at least one variant always exists");
 
-    // Score blending: multiplicative — energy boosts relevance but can't replace it.
-    // sim * (0.5 + energy * 0.5) means: zero similarity = zero score regardless of energy.
-    // A fully-energized memory gets up to 1.0x boost; a decayed memory gets 0.5x floor.
+    // Pure similarity scoring — energy is applied post-rerank as a tiebreaker.
+    // This ensures energy can never hide a relevant memory from the reranker.
     let mut scored: Vec<ScoredResult> = merged_results
         .iter()
         .filter_map(|r| {
@@ -614,11 +613,7 @@ pub fn run_search_pipeline(
                 }
             }
 
-            let blended = if params.unfiltered {
-                r.score
-            } else {
-                r.score * (0.5 + (mem.energy as f32) * 0.5)
-            };
+            let blended = r.score;
 
             Some(ScoredResult {
                 id: r.id,
@@ -695,6 +690,18 @@ pub fn run_search_pipeline(
         _ => {
             dbg_push!("rerank: skipped (mode={})", params.rerank_mode);
         }
+    }
+    // Post-rerank energy nudge: energy acts as a tiebreaker within
+    // already-relevance-sorted results, not a gating signal.
+    // 0.03 max nudge means energy can swap adjacent rerank positions
+    // (0.05 spacing) but can't jump more than one rank.
+    if !params.unfiltered {
+        for result in &mut scored {
+            result.blended += (result.energy as f32) * 0.03;
+        }
+        scored.sort_by(|a, b| {
+            b.blended.partial_cmp(&a.blended).unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
     dbg_snapshot!("rerank", scored);
 

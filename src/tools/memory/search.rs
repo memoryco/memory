@@ -104,6 +104,9 @@ struct Args {
     /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
     #[serde(default)]
     created_before: Option<String>,
+    /// Unfiltered mode: return all results ranked by pure similarity (default: false)
+    #[serde(default)]
+    unfiltered: Option<bool>,
     /// Session ID for context-aware retrieval
     session_id: String,
 }
@@ -130,6 +133,9 @@ struct BatchArgs {
     /// Only include memories created before this time (ISO 8601 or unix epoch seconds)
     #[serde(default)]
     created_before: Option<String>,
+    /// Unfiltered mode: return all results ranked by pure similarity (default: false)
+    #[serde(default)]
+    unfiltered: Option<bool>,
     /// Session ID for context-aware retrieval
     session_id: String,
 }
@@ -208,7 +214,8 @@ impl MemorySearchTool {
             )
         }; // write lock released here
 
-        let min_score = args.min_score.unwrap_or(search_min_score_config as f32);
+        let unfiltered = args.unfiltered.unwrap_or(false);
+        let min_score = if unfiltered { 0.0 } else { args.min_score.unwrap_or(search_min_score_config as f32) };
 
         // List/composite questions often need more context than the nominal limit.
         let effective_limit = if composite_query {
@@ -286,7 +293,7 @@ impl MemorySearchTool {
             session_centroid,
             session_context_weight,
             debug,
-            unfiltered: false,
+            unfiltered,
         };
 
         let pipeline_result =
@@ -441,18 +448,6 @@ impl Tool<Context> for MemorySearchTool {
                     "type": "integer",
                     "description": "Maximum results per query. Default: 10"
                 },
-                "min_score": {
-                    "type": "number",
-                    "description": "Minimum similarity score (0.0-1.0). Default: 0.4"
-                },
-                "include_deep": {
-                    "type": "boolean",
-                    "description": "Include deep storage memories. Default: false"
-                },
-                "include_archived": {
-                    "type": "boolean",
-                    "description": "Include archived memories. Default: false"
-                },
                 "created_after": {
                     "type": "string",
                     "description": "Only include memories created after this time. \
@@ -499,6 +494,7 @@ impl Tool<Context> for MemorySearchTool {
                 "created_after": batch.created_after,
                 "created_before": batch.created_before,
                 "session_id": batch.session_id,
+                "unfiltered": batch.unfiltered,
             });
 
             match self.search_for_query(single_args, context, env) {

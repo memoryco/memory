@@ -37,10 +37,6 @@ impl Tool<Context> for MemoryGraphTool {
                     "type": "string",
                     "enum": ["json", "summary", "html"],
                     "description": "Output format. 'html' for interactive visualization (recommended), 'json' for raw data, 'summary' for text overview. Default: summary"
-                },
-                "min_weight": {
-                    "type": "number",
-                    "description": "Minimum association weight to include (0.0-1.0). Default: 0.0 (all)"
                 }
             }
         })

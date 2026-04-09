@@ -6,7 +6,7 @@ use serde_json::{Value as JsonValue, json};
 use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 
 use crate::Context;
-use crate::tools::{format_memory, text_response};
+use crate::tools::text_response;
 
 pub struct MemoryRecallTool;
 
@@ -37,10 +37,6 @@ impl Tool<Context> for MemoryRecallTool {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Array of UUIDs to recall. All memories will be linked via Hebbian learning."
-                },
-                "strength": {
-                    "type": "number",
-                    "description": "Stimulation strength (0.0-1.0). Default uses config value."
                 },
                 "session_id": {
                     "type": "string",
@@ -94,16 +90,12 @@ impl Tool<Context> for MemoryRecallTool {
                 recalled_count += 1;
                 total_affected += result.affected_count();
 
-                let mem = result.memory_entry.as_ref().unwrap();
-                output.push_str(&format_memory(mem));
-
                 if result.resurrected {
                     output.push_str(&format!(
-                        "\n🔄 RESURRECTED from {:?}!",
-                        result.previous_state.unwrap()
+                        "\n🔄 RESURRECTED {}: {:?} → active",
+                        id, result.previous_state.unwrap()
                     ));
                 }
-                output.push_str("\n\n");
             }
 
             // Log the search→recall cycle for membed training data extraction
@@ -179,7 +171,10 @@ impl Tool<Context> for MemoryRecallTool {
         // Requires write lock (separate phase from read-lock session accumulation above).
         super::wire_session_associations(context, &args.session_id);
 
-        let final_output = format!("session_id: {}\n\n{}\n{}", args.session_id, header, output.trim());
+        let mut final_output = format!("session_id: {}\n\n{}", args.session_id, header.trim());
+        if !output.is_empty() {
+            final_output.push_str(&output);
+        }
 
         Ok(text_response(final_output))
     }

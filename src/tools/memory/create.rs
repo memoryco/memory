@@ -10,6 +10,20 @@ use sml_mcps::{CallToolResult, McpError, Tool, ToolEnv};
 use crate::Context;
 use crate::tools::text_response;
 
+/// Strip redundant date anchors from memory content.
+/// The AI habitually inserts " (YYYY-MM-DD)" as temporal markers,
+/// but created_at already captures this. Stripping avoids embedding pollution.
+fn strip_date_anchors(content: &str) -> String {
+    // Match " (YYYY-MM-DD)" — just the parenthesized date, preserving any trailing colon
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r" \(\d{4}-\d{2}-\d{2}\)").unwrap()
+    });
+    let result = RE.replace_all(content, "");
+    // Clean up any resulting double spaces
+    let cleaned = result.replace("  ", " ");
+    cleaned.trim().to_string()
+}
+
 pub struct MemoryCreateTool;
 
 #[derive(Deserialize, Clone)]
@@ -48,11 +62,7 @@ impl Tool<Context> for MemoryCreateTool {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "content": { "type": "string" },
-                            "created_at": {
-                                "type": "string",
-                                "description": "Optional creation timestamp (ISO 8601 datetime or unix epoch seconds). Defaults to now. Use for importing historical data."
-                            }
+                            "content": { "type": "string" }
                         },
                         "required": ["content"]
                     }
@@ -82,19 +92,20 @@ impl Tool<Context> for MemoryCreateTool {
         {
             let mut brain = context.brain.write().unwrap();
             for memory in &args.memories {
+                let content = strip_date_anchors(&memory.content);
                 let id: MemoryId = if let Some(ref ts) = memory.created_at {
                     let epoch = parse_timestamp(ts).map_err(|e| {
                         McpError::InvalidParams(format!("Invalid created_at '{}': {}", ts, e))
                     })?;
-                    brain.create_with_timestamp(&memory.content, epoch)
+                    brain.create_with_timestamp(&content, epoch)
                 } else {
-                    brain.create(&memory.content)
+                    brain.create(&content)
                 }
                 .map_err(|e| McpError::ToolError(e.to_string()))?;
 
-                output.push_str(&format!("ID: {}\nContent: {}\n\n", id, memory.content));
+                output.push_str(&format!("{}, ", id));
 
-                created.push((id, memory.content.clone()));
+                created.push((id, content));
             }
         } // Lock released here
 
@@ -211,11 +222,12 @@ impl Tool<Context> for MemoryCreateTool {
 
         // Phase 3: Return immediately
         let header = format!(
-            "session_id: {}\n\n{} memories created (embeddings generating in background).\n\n",
+            "session_id: {}\n\n{} memories created.\n\nIDs: {}",
             args.session_id,
-            created.len()
+            created.len(),
+            output.trim_end_matches(", ")
         );
-        Ok(text_response(format!("{}{}", header, output.trim())))
+        Ok(text_response(header))
     }
 }
 
@@ -263,4 +275,66 @@ fn parse_timestamp(s: &str) -> Result<i64, String> {
     Err(format!(
         "Unrecognized timestamp format. Expected unix epoch, ISO 8601 date (YYYY-MM-DD), or ISO 8601 datetime."
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_date_anchor_with_colon() {
+        assert_eq!(
+            strip_date_anchors("SEARCH PIPELINE CHANGE (2026-04-08): Removed energy blending"),
+            "SEARCH PIPELINE CHANGE: Removed energy blending"
+        );
+    }
+
+    #[test]
+    fn strip_date_anchor_without_colon() {
+        assert_eq!(
+            strip_date_anchors("Tool output slimming (2026-04-08) summary"),
+            "Tool output slimming summary"
+        );
+    }
+
+    #[test]
+    fn strip_date_anchor_mid_sentence() {
+        assert_eq!(
+            strip_date_anchors("cosmos.gl confirmed working (2026-04-03): renders 3362 nodes"),
+            "cosmos.gl confirmed working: renders 3362 nodes"
+        );
+    }
+
+    #[test]
+    fn preserve_date_as_fact() {
+        // Date IS the fact — no parens, no anchor pattern
+        assert_eq!(
+            strip_date_anchors("Brandon's birthday is 2026-03-15"),
+            "Brandon's birthday is 2026-03-15"
+        );
+    }
+
+    #[test]
+    fn preserve_date_reference_in_prose() {
+        assert_eq!(
+            strip_date_anchors("The API changed on 2026-01-15 to use v2 endpoints"),
+            "The API changed on 2026-01-15 to use v2 endpoints"
+        );
+    }
+
+    #[test]
+    fn strip_multiple_date_anchors() {
+        assert_eq!(
+            strip_date_anchors("First (2026-01-01): then second (2026-02-02): done"),
+            "First: then second: done"
+        );
+    }
+
+    #[test]
+    fn no_op_on_clean_content() {
+        assert_eq!(
+            strip_date_anchors("Memory with no date anchors at all"),
+            "Memory with no date anchors at all"
+        );
+    }
 }
